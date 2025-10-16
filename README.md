@@ -1,7 +1,7 @@
 # SBE.jl
 
-[![CI](https://github.com/OWNER/SBE.jl/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/SBE.jl/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/OWNER/SBE.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/OWNER/SBE.jl)
+[![CI](https://github.com/DarrylGamroth/SBE.jl/actions/workflows/ci.yml/badge.svg)](https://github.com/DarrylGamroth/SBE.jl/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/DarrylGamroth/SBE.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/DarrylGamroth/SBE.jl)
 
 A high-performance Julia implementation of the [Simple Binary Encoding (SBE)](https://github.com/aeron-io/simple-binary-encoding) protocol for low-latency financial messaging.
 
