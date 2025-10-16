@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sbe:messageSchema xmlns:sbe="http://fixprotocol.io/2016/sbe"
+                   xmlns:xi="http://www.w3.org/2001/XInclude"
+                   package="versioned"
+                   id="2"
+                   version="2"
+                   semanticVersion="1.0"
+                   description="Schema demonstrating version handling for all field types."
+                   byteOrder="littleEndian">
+    <types>
+        <composite name="messageHeader" description="Message identifiers and length of message root.">
+            <type name="blockLength" primitiveType="uint16"/>
+            <type name="templateId" primitiveType="uint16"/>
+            <type name="schemaId" primitiveType="uint16"/>
+            <type name="version" primitiveType="uint16"/>
+        </composite>
+        <composite name="groupSizeEncoding" description="Repeating group dimensions.">
+            <type name="blockLength" primitiveType="uint16"/>
+            <type name="numInGroup" primitiveType="uint16"/>
+        </composite>
+        <composite name="varStringEncoding" description="Variable length UTF-8 String.">
+            <type name="length" primitiveType="uint32" maxValue="1073741824"/>
+            <type name="varData" primitiveType="uint8" length="0" characterEncoding="UTF-8"/>
+        </composite>
+        
+        <!-- Base types (version 0) -->
+        <type name="baseNumber" primitiveType="uint32"/>
+        
+        <!-- Versioned enum (added in version 1) -->
+        <enum name="Status" encodingType="uint8" sinceVersion="1">
+            <validValue name="PENDING">0</validValue>
+            <validValue name="ACTIVE">1</validValue>
+            <validValue name="COMPLETED">2</validValue>
+        </enum>
+        
+        <!-- Versioned set (added in version 2) -->
+        <set name="Features" encodingType="uint16" sinceVersion="2">
+            <choice name="wifi">0</choice>
+            <choice name="bluetooth">1</choice>
+            <choice name="gps">2</choice>
+        </set>
+    </types>
+    
+    <sbe:message name="Product" id="1" description="Test message with versioned fields">
+        <!-- Version 0 fields -->
+        <field name="id" id="1" type="uint64"/>
+        <field name="quantity" id="2" type="uint32"/>
+        
+        <!-- Version 1 fields -->
+        <field name="status" id="3" type="Status" sinceVersion="1"/>
+        <field name="priority" id="4" type="uint8" sinceVersion="1"/>
+        
+        <!-- Version 2 fields -->
+        <field name="features" id="5" type="Features" sinceVersion="2"/>
+        
+        <!-- Version 1 group (added in version 1) -->
+        <group name="tags" id="10" dimensionType="groupSizeEncoding" sinceVersion="1">
+            <field name="key" id="11" type="uint16"/>
+            <field name="value" id="12" type="uint32"/>
+        </group>
+        
+        <!-- Version 0 vardata -->
+        <data name="name" id="20" type="varStringEncoding"/>
+        
+        <!-- Version 2 vardata (added in version 2) -->
+        <data name="description" id="21" type="varStringEncoding" sinceVersion="2"/>
+    </sbe:message>
+</sbe:messageSchema>

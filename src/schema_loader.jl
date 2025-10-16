@@ -1,8 +1,3 @@
-# Schema Loading and Module Generation
-#
-# This file contains the functionality for loading SBE schemas and generating
-# schema-specific modules with all the message and field types.
-
 """
 Load an SBE schema and generate a module containing all the types and methods.
 
@@ -18,7 +13,7 @@ For example, a schema with package="baseline" will create a module named `Baseli
 # Example
 ```julia
 # Load the baseline schema
-Baseline = SBE.load_schema("example-schema.xml")
+Baseline = SBE.load_schema("test/example-schema.xml")
 
 # Use the generated types
 buffer = zeros(UInt8, 1024)
@@ -52,30 +47,65 @@ function load_schema(xml_file::String)
     # Import necessary types and functions into the module
     Core.eval(generated_module, :(using SBE: AbstractSbeMessage, AbstractSbeField, AbstractSbeEncodedType, AbstractSbeCompositeType))
     Core.eval(generated_module, :(import SBE: id, since_version, encoding_offset, encoding_length, null_value, min_value, max_value))
-    Core.eval(generated_module, :(import SBE: value, value!, meta_attribute, ltoh, htol))
+    Core.eval(generated_module, :(import SBE: meta_attribute, ltoh, htol))
+    # Import the common SBE API functions (defined in metaprogramming.jl)
+    Core.eval(generated_module, :(import SBE: sbe_buffer, sbe_offset, sbe_position_ptr, sbe_position, sbe_position!))
+    Core.eval(generated_module, :(import SBE: sbe_rewind!, sbe_encoded_length, sbe_acting_block_length))
+    # Note: value and value! are generic interface functions defined locally per type
     Core.eval(generated_module, :(import Base: length, eltype))
     Core.eval(generated_module, :(using MappedArrays: mappedarray))
+    
+    # Add utility functions for encoding/decoding (schema-specific)
+    Core.eval(generated_module, quote
+        @inline function encode_le(::Type{T}, buffer, offset, value) where {T}
+            @inbounds reinterpret(T, view(buffer, offset+1:offset+sizeof(T)))[] = htol(value)
+        end
+        
+        @inline function decode_le(::Type{T}, buffer, offset) where {T}
+            @inbounds ltoh(reinterpret(T, view(buffer, offset+1:offset+sizeof(T)))[])
+        end
+    end)
     
     # Store the schema for reference
     Core.eval(generated_module, :(const SCHEMA = $schema))
     
-    # Generate all message types
-    for message in schema.messages
-        generate_message_type(generated_module, message)
+    # Generate all composite types first (needed for MessageHeader)
+    for type_def in schema.types
+        if type_def isa Schema.CompositeType
+            generateComposite!(generated_module, type_def, schema)
+        end
     end
     
-    # Generate all field types for each message
-    for message in schema.messages
-        for field in message.fields
-            # Skip non-encoded types for now
-            type_def = find_type_by_name(schema, field.type_ref)
-            if type_def !== nothing && type_def isa Schema.EncodedType
-                generate_field_type(generated_module, field, message.name, schema)
-            end
+    # Generate all enum types
+    for type_def in schema.types
+        if type_def isa Schema.EnumType
+            generateEnum!(generated_module, type_def, schema)
         end
-        
-        # Generate meta_attribute function once per message
-        generate_message_meta_attribute_function!(generated_module, message, schema)
+    end
+    
+    # Generate all set types
+    for type_def in schema.types
+        if type_def isa Schema.SetType
+            generateChoiceSet!(generated_module, type_def, schema)
+        end
+    end
+    
+    # Ensure the header type exists before generating messages
+    header_type_name = SBE.to_pascal_case(schema.header_type)
+    
+    if !isdefined(generated_module, Symbol(header_type_name))
+        error("Header type '$(schema.header_type)' ($(header_type_name) module) not found in schema types")
+    end
+    
+    # Verify the header module has Decoder type
+    header_module = getfield(generated_module, Symbol(header_type_name))
+    if !isdefined(header_module, :Decoder)
+        error("Header module '$(header_type_name)' does not have Decoder type")
+    end
+    
+    # Generate all message types with complete interface
+    for message in schema.messages
+        generateMessageFlyweightStruct!(generated_module, message, schema)
     end
     
     # Export all generated types
@@ -144,11 +174,46 @@ end
 Generate meta_attribute function for a message that handles all its fields.
 """
 function generate_message_meta_attribute_function!(target_module::Module, message::Schema.MessageDefinition, schema::Schema.MessageSchema)
-    message_symbol = Symbol(message.name)
+    message_name = Symbol(SBE.to_pascal_case(message.name))
+    decoder_name = Symbol(string(message_name, "Decoder"))
+    encoder_name = Symbol(string(message_name, "Encoder"))
     
-    # Create a comprehensive meta_attribute function that returns general message attributes
+    # Create a comprehensive meta_attribute function for all message types
     Core.eval(target_module, quote
-        function meta_attribute(::$message_symbol, attribute)
+        # For abstract base type
+        function meta_attribute(::$message_name, attribute)
+            # For now, return basic defaults
+            if attribute === :presence
+                return Symbol("required")
+            elseif attribute === :epoch
+                return Symbol("unix")  # Default epoch for time-related fields
+            elseif attribute === :time_unit
+                return Symbol("")  # Most fields don't have time units
+            elseif attribute === :semantic_type
+                return Symbol("")  # Most fields don't have semantic types
+            else
+                return Symbol("")  # Unknown attributes return empty
+            end
+        end
+        
+        # For decoder type
+        function meta_attribute(::$decoder_name, attribute)
+            # For now, return basic defaults
+            if attribute === :presence
+                return Symbol("required")
+            elseif attribute === :epoch
+                return Symbol("unix")  # Default epoch for time-related fields
+            elseif attribute === :time_unit
+                return Symbol("")  # Most fields don't have time units
+            elseif attribute === :semantic_type
+                return Symbol("")  # Most fields don't have semantic types
+            else
+                return Symbol("")  # Unknown attributes return empty
+            end
+        end
+        
+        # For encoder type
+        function meta_attribute(::$encoder_name, attribute)
             # For now, return basic defaults
             if attribute === :presence
                 return Symbol("required")

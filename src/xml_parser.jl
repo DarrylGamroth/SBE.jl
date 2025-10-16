@@ -34,7 +34,8 @@ function parse_sbe_schema(xml_content::String)
     types = parse_types(root)
     messages = parse_messages(root)
     
-    return Schema.MessageSchema(
+    # Create preliminary schema to enable field size lookups
+    schema = Schema.MessageSchema(
         schema_id,
         version,
         semantic_version,
@@ -45,6 +46,11 @@ function parse_sbe_schema(xml_content::String)
         types,
         messages
     )
+    
+    # Auto-calculate field offsets for any fields without explicit offsets
+    calculate_field_offsets!(schema)
+    
+    return schema
 end
 
 function parse_types(root::EzXML.Node)
@@ -70,13 +76,31 @@ end
 function parse_encoded_type(node::EzXML.Node)
     name = node["name"]
     primitive_type = node["primitiveType"]
-    length = parse(Int, haskey(node, "length") ? node["length"] : "1")
+    presence = haskey(node, "presence") ? node["presence"] : "required"
+    
+    # Extract constant value if presence="constant"
+    constant_value = nothing
+    if presence == "constant"
+        text = EzXML.nodecontent(node)
+        if !isempty(strip(text))
+            constant_value = strip(text)
+        end
+    end
+    
+    # For constant char arrays, infer length from constant value if not specified
+    if haskey(node, "length")
+        length = parse(Int, node["length"])
+    elseif presence == "constant" && primitive_type == "char" && constant_value !== nothing
+        length = Base.length(constant_value)
+    else
+        length = 1
+    end
+    
     null_value = haskey(node, "nullValue") ? node["nullValue"] : nothing
     min_value = haskey(node, "minValue") ? node["minValue"] : nothing
     max_value = haskey(node, "maxValue") ? node["maxValue"] : nothing
     character_encoding = haskey(node, "characterEncoding") ? node["characterEncoding"] : nothing
     offset = haskey(node, "offset") ? parse(Int, node["offset"]) : nothing
-    presence = haskey(node, "presence") ? node["presence"] : "required"
     semantic_type = haskey(node, "semanticType") ? node["semanticType"] : nothing
     description = haskey(node, "description") ? node["description"] : ""
     since_version = parse(Int, haskey(node, "sinceVersion") ? node["sinceVersion"] : "0")
@@ -84,7 +108,7 @@ function parse_encoded_type(node::EzXML.Node)
     
     return Schema.EncodedType(
         name, primitive_type, length, null_value, min_value, max_value,
-        character_encoding, offset, presence, semantic_type, description,
+        character_encoding, offset, presence, constant_value, semantic_type, description,
         since_version, deprecated
     )
 end
@@ -210,6 +234,7 @@ function parse_fields(node::EzXML.Node)
         name = field_node["name"]
         id = parse(UInt16, field_node["id"])
         type_ref = field_node["type"]
+        # Default to 0 if not specified - will be auto-calculated later
         offset = parse(Int, haskey(field_node, "offset") ? field_node["offset"] : "0")
         description = haskey(field_node, "description") ? field_node["description"] : ""
         since_version = parse(Int, haskey(field_node, "sinceVersion") ? field_node["sinceVersion"] : "0")
@@ -243,12 +268,12 @@ function parse_groups(node::EzXML.Node)
         deprecated = haskey(group_node, "deprecated") ? group_node["deprecated"] : nothing
         
         fields = parse_fields(group_node)
-        groups = parse_groups(group_node)
+        nested_groups = parse_groups(group_node)  # Fixed: use nested_groups to avoid shadowing
         var_data = parse_var_data(group_node)
         
         push!(groups, Schema.GroupDefinition(
             name, id, block_length, dimension_type, description, since_version, semantic_type, deprecated,
-            fields, groups, var_data
+            fields, nested_groups, var_data  # Fixed: pass nested_groups instead of groups
         ))
     end
     
@@ -274,4 +299,67 @@ function parse_var_data(node::EzXML.Node)
     end
     
     return var_data
+end
+
+"""
+    calculate_field_offsets!(schema::Schema.MessageSchema)
+
+Auto-calculate field offsets for any fields that don't have explicit offsets.
+According to SBE spec, fields are laid out sequentially if offsets are not specified.
+If the first field has offset 0 and no explicit offsets are in the XML, we auto-calculate.
+"""
+function calculate_field_offsets!(schema::Schema.MessageSchema)
+    for (msg_idx, message) in enumerate(schema.messages)
+        # Check if we need to auto-calculate (first field offset is 0 means no explicit offsets in XML)
+        if !isempty(message.fields) && message.fields[1].offset == 0
+            new_fields = Schema.FieldDefinition[]
+            current_offset = 0
+            for field in message.fields
+                # Create new field with calculated offset
+                field_def = Schema.FieldDefinition(
+                    field.name, field.id, field.type_ref, current_offset,
+                    field.description, field.since_version, field.presence,
+                    field.value_ref, field.epoch, field.time_unit,
+                    field.semantic_type, field.deprecated
+                )
+                push!(new_fields, field_def)
+                # Update offset for next field
+                current_offset += get_field_size(schema, field_def)
+            end
+            
+            # Replace message with updated fields
+            schema.messages[msg_idx] = Schema.MessageDefinition(
+                message.name, message.id, message.block_length, message.description,
+                message.since_version, message.semantic_type, message.deprecated,
+                new_fields, message.groups, message.var_data
+            )
+        end
+    end
+    
+    # Also calculate offsets for group fields
+    for message in schema.messages
+        for (grp_idx, group) in enumerate(message.groups)
+            if !isempty(group.fields) && group.fields[1].offset == 0
+                new_fields = Schema.FieldDefinition[]
+                current_offset = 0
+                for field in group.fields
+                    field_def = Schema.FieldDefinition(
+                        field.name, field.id, field.type_ref, current_offset,
+                        field.description, field.since_version, field.presence,
+                        field.value_ref, field.epoch, field.time_unit,
+                        field.semantic_type, field.deprecated
+                    )
+                    push!(new_fields, field_def)
+                    current_offset += get_field_size(schema, field_def)
+                end
+                
+                # Replace group with updated fields
+                message.groups[grp_idx] = Schema.GroupDefinition(
+                    group.name, group.id, group.block_length, group.dimension_type,
+                    group.description, group.since_version, group.semantic_type,
+                    group.deprecated, new_fields, group.groups, group.var_data
+                )
+            end
+        end
+    end
 end

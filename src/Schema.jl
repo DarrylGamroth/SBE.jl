@@ -45,6 +45,7 @@ struct EncodedType <: AbstractTypeDefinition
     character_encoding::Union{String, Nothing}
     offset::Union{Int, Nothing}
     presence::String
+    constant_value::Union{String, Nothing}  # For presence="constant", the constant value
     semantic_type::Union{String, Nothing}
     description::String
     since_version::Int

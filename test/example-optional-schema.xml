@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sbe:messageSchema xmlns:sbe="http://fixprotocol.io/2016/sbe"
+                   package="optional"
+                   id="3"
+                   version="0"
+                   semanticVersion="5.2"
+                   description="Schema for testing optional field handling"
+                   byteOrder="littleEndian">
+    <types>
+        <!-- Standard types -->
+        <type name="optionalUInt32" primitiveType="uint32" presence="optional"/>
+        <type name="optionalInt64" primitiveType="int64" presence="optional"/>
+        <type name="optionalFloat" primitiveType="float" presence="optional"/>
+        
+        <!-- Enum for testing optional enums -->
+        <enum name="Status" encodingType="uint8">
+            <validValue name="PENDING">0</validValue>
+            <validValue name="ACTIVE">1</validValue>
+            <validValue name="COMPLETED">2</validValue>
+            <validValue name="CANCELLED">3</validValue>
+        </enum>
+        
+        <!-- Composite for testing optional composites -->
+        <composite name="Price">
+            <type name="mantissa" primitiveType="int64"/>
+            <type name="exponent" primitiveType="int8"/>
+        </composite>
+        
+        <!-- Message header -->
+        <composite name="messageHeader" description="Message identifiers and length of message root">
+            <type name="blockLength" primitiveType="uint16"/>
+            <type name="templateId" primitiveType="uint16"/>
+            <type name="schemaId" primitiveType="uint16"/>
+            <type name="version" primitiveType="uint16"/>
+        </composite>
+    </types>
+    
+    <sbe:message name="Order" id="1" description="Order message with optional fields">
+        <!-- Required fields -->
+        <field name="orderId" id="1" type="uint64"/>
+        <field name="quantity" id="2" type="uint32"/>
+        
+        <!-- Optional primitive fields -->
+        <field name="optionalPrice" id="3" type="optionalUInt32"/>
+        <field name="optionalVolume" id="4" type="optionalInt64"/>
+        <field name="optionalDiscount" id="5" type="optionalFloat"/>
+        
+        <!-- Optional enum -->
+        <field name="status" id="6" type="Status" presence="optional"/>
+        
+        <!-- Optional composite -->
+        <field name="limitPrice" id="7" type="Price" presence="optional"/>
+        
+        <!-- Required field after optional ones -->
+        <field name="timestamp" id="8" type="uint64"/>
+    </sbe:message>
+</sbe:messageSchema>
