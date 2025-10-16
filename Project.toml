@@ -15,8 +15,8 @@ UnsafeArrays = "c4a57d5a-5b31-53a6-b365-19f8c011fbd6"
 EnumX = "1"
 EzXML = "1.2"
 MappedArrays = "0.4"
-StringViews = "1.3.5"
-UnsafeArrays = "1.0.8"
+StringViews = "1"
+UnsafeArrays = "1"
 
 [extras]
 AllocCheck = "9b6a8646-10ed-4001-bbdc-1d2f46dfbb1a"
