@@ -195,6 +195,7 @@ include("schema_loader.jl")
 export Schema  # Users can access Schema.MessageDefinition, etc.
 export SBECodec, SBEFlyweight, SBEMessage
 export load_schema, create_codec_from_schema, create_message, parse_sbe_schema
+export generate  # Main code generation API
 
 # Export position pointer type
 export PositionPointer
