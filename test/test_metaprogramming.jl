@@ -143,17 +143,16 @@ using SBE
     end
 
     @testset "Meta Attribute Functions" begin
-        # Test meta_attribute function with real schema
-        schema_path = joinpath(@__DIR__, "example-schema.xml")
-        Baseline = load_schema(schema_path)
+        # Test meta attribute function with pre-generated schema
+        # The Baseline module is loaded in runtests.jl
         
         # Meta attributes in the new API are accessed through metadata constants
         # For field presence, all fields are "required" by default in the schema
-        # Individual metadata is accessed via the field-specific constants
+        # Individual metadata is accessed via the field-specific constants (functions)
         @test isdefined(Baseline.Car, :modelYear_id)
         @test isdefined(Baseline.Car, :modelYear_since_version)
-        @test Baseline.Car.modelYear_id isa UInt16
-        @test Baseline.Car.modelYear_since_version isa UInt16
+        @test Baseline.Car.modelYear_id() isa UInt16
+        @test Baseline.Car.modelYear_since_version() isa UInt16
         
         # Test meta_attribute utility function behavior with schema field definitions
         schema_path = joinpath(@__DIR__, "example-schema.xml")

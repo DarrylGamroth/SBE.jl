@@ -188,13 +188,82 @@ include("xml_parser.jl")
 # Code generation utilities (includes abstract types and runtime support)
 include("codegen_utils.jl")
 
-# Schema loading and module generation
-include("schema_loader.jl")
+# ============================================================================
+# @load_schema Macro - Primary User API
+# ============================================================================
+
+"""
+    @load_schema xml_path
+
+Macro to load an SBE schema at parse time, avoiding world age issues.
+
+This macro generates code at parse time, then uses `include_string()` to load
+it into the calling module. Because the `include_string()` happens at parse time,
+there are no world age issues when accessing the generated module.
+
+# Arguments
+- `xml_path`: Path to the SBE XML schema file (can be a string or expression)
+
+# Returns
+The macro expands to code that loads the schema and returns the module name as a Symbol.
+
+# Example
+```julia
+using SBE
+
+# Load schema at parse time - no world age issues!
+module_name = SBE.@load_schema "test/example-schema.xml"
+# => :Baseline
+
+# Access the module immediately
+Baseline = getfield(Main, module_name)
+
+# Or use directly
+buffer = zeros(UInt8, 1024)
+car = Main.Baseline.Car.Encoder(buffer, 0)
+```
+
+# Advantages
+- No world age warnings
+- Code is evaluated at parse time
+- Clean, simple syntax
+- No temporary files
+- Idempotent: calling multiple times with the same schema is safe (uses existing module)
+
+# Notes
+Modules are loaded into the `Main` namespace and cannot be redefined without restarting
+Julia. If you call `@load_schema` multiple times with the same schema file, the macro
+will detect that the module already exists and return its name without regenerating.
+
+# See Also
+- `generate(xml_path)` - Generate code as string
+"""
+macro load_schema(xml_path)
+    return quote
+        let xml_file = $(esc(xml_path))
+            # Parse to get module name
+            xml_content = read(xml_file, String)
+            schema = SBE.parse_sbe_schema(xml_content)
+            module_name = Symbol(uppercasefirst(schema.package))
+            
+            # Check if already exists
+            if !isdefined(Main, module_name)
+                # Generate and load
+                code = SBE.generate(xml_file)
+                Base.include_string(Main, code)
+            end
+            # If already exists, silently return the existing module name
+            # (modules cannot be redefined without restarting Julia)
+            
+            module_name
+        end
+    end
+end
 
 # Re-export important types and functions that users need
 export Schema  # Users can access Schema.MessageDefinition, etc.
 export SBECodec, SBEFlyweight, SBEMessage
-export load_schema, create_codec_from_schema, create_message, parse_sbe_schema
+export @load_schema, create_codec_from_schema, create_message, parse_sbe_schema
 export generate  # Main code generation API
 
 # Export position pointer type

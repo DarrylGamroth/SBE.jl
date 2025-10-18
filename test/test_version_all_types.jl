@@ -2,8 +2,7 @@ using Test
 using SBE
 
 @testset "Version Handling for All Field Types" begin
-    # Load the versioned schema
-    Versioned = SBE.load_schema(joinpath(@__DIR__, "example-versioned-schema.xml"))
+    # Use pre-generated Versioned module (loaded by runtests.jl)
     
     buffer = zeros(UInt8, 4096)
     
@@ -74,8 +73,8 @@ using SBE
     
     @testset "Metadata Constants" begin
         # Verify since_version constants exist
-        @test Versioned.Product.status_since_version == UInt16(1)
-        @test Versioned.Product.features_since_version == UInt16(2)
-        @test Versioned.Product.priority_since_version == UInt16(1)
+        @test Versioned.Product.status_since_version() == UInt16(1)
+        @test Versioned.Product.features_since_version() == UInt16(2)
+        @test Versioned.Product.priority_since_version() == UInt16(1)
     end
 end

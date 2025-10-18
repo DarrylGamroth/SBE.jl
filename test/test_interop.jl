@@ -1,11 +1,23 @@
 using Test
 using SBE
 
-# Load baseline (sbe-tool generated) code
-include(joinpath(@__DIR__, "baseline", "Baseline.jl"))
+# Load baseline (sbe-tool generated) code from Java generator
+# This is the reference implementation to compare against
+module BaselineJava
+    include(joinpath(@__DIR__, "baseline", "Baseline.jl"))
+    using .Baseline
+end
 
-# Load our generated code
-OurSchema = SBE.load_schema(joinpath(@__DIR__, "example-schema.xml"))
+# Load our generated code from file-based generation
+# This is our Julia codec to validate
+module BaselineJulia
+    include(joinpath(@__DIR__, "generated", "Baseline.jl"))
+    using .Baseline
+end
+
+# Aliases for test clarity
+const Baseline = BaselineJava.Baseline  # Java sbe-tool reference
+const OurSchema = BaselineJulia.Baseline  # Our Julia codec
 
 @testset "Interoperability Tests" begin
     @testset "Baseline encodes, our code decodes" begin

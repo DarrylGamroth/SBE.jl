@@ -2,9 +2,10 @@ using Test
 using SBE
 using SBE.Schema
 
+# Load pre-generated Baseline schema
+include("generated/Baseline.jl")
+
 @testset "Consistent Field API Tests" begin
-    # Load the baseline schema for testing
-    Baseline = load_schema(joinpath(@__DIR__, "example-schema.xml"))
     
     @testset "Composite Direct Accessor API" begin
         buffer = zeros(UInt8, 64)
@@ -103,16 +104,15 @@ using SBE.Schema
         # Create decoder instances to test metadata functions
         engine_decoder = Baseline.Engine.Decoder(buffer, 0)
         
-        # Test composite field metadata (functions, not constants)
-        # Metadata functions take the decoder instance
+        # Test composite field metadata (functions in file-based generation)
         @test Baseline.Engine.capacity_encoding_length(engine_decoder) == 2  # sizeof(UInt16)
         @test Baseline.Engine.capacity_encoding_offset(engine_decoder) isa Int
         
-        # Test message field metadata (static constants in new message API)
-        @test Baseline.Car.modelYear_encoding_length == 2  # sizeof(UInt16)
-        @test Baseline.Car.modelYear_encoding_offset isa Int
-        @test Baseline.Car.modelYear_id isa UInt16
-        @test Baseline.Car.modelYear_since_version isa UInt16
+        # Test message field metadata (also functions in file-based generation)
+        @test Baseline.Car.modelYear_encoding_length() == 2  # sizeof(UInt16)
+        @test Baseline.Car.modelYear_encoding_offset() isa Int
+        @test Baseline.Car.modelYear_id() isa UInt16
+        @test Baseline.Car.modelYear_since_version() isa UInt16
     end
     
     @testset "Array Field Direct Accessors" begin
@@ -131,8 +131,8 @@ using SBE.Schema
         @test length(some_numbers_value) == 4
         @test collect(some_numbers_value) == UInt32[10, 20, 30, 40]
         
-        # Test metadata
-        @test Baseline.Car.someNumbers_encoding_length == 16  # 4 * sizeof(UInt32)
-        @test Baseline.Car.someNumbers_encoding_offset isa Int
+        # Test metadata (functions in file-based generation)
+        @test Baseline.Car.someNumbers_encoding_length() == 16  # 4 * sizeof(UInt32)
+        @test Baseline.Car.someNumbers_encoding_offset() isa Int
     end
 end

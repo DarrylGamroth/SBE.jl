@@ -2,8 +2,7 @@ using Test
 using SBE
 
 @testset "Variable-Length Data" begin
-    # Load the schema (use @__DIR__ to get correct path when run from package manager)
-    Baseline = SBE.load_schema(joinpath(@__DIR__, "example-schema.xml"))
+    # Use pre-generated Baseline module (loaded by runtests.jl)
     
     @testset "Basic String Read/Write" begin
         buffer = zeros(UInt8, 1024)

@@ -2,8 +2,8 @@ using Test
 using SBE
 
 @testset "Repeating Groups" begin
-    # Load the test schema with groups
-    Baseline = SBE.load_schema(joinpath(@__DIR__, "example-schema.xml"))
+    # Use pre-generated Baseline module (loaded by runtests.jl)
+    # Baseline should already be defined in Main scope
     
     @testset "Group Types and Module Structure" begin
         # Verify group modules are exported
@@ -41,7 +41,7 @@ using SBE
         
         # Verify dimension header for empty group
         header_size = 8
-        message_block = Baseline.sbe_block_length(car_enc)
+        message_block = SBE.sbe_block_length(car_enc)
         dim_offset = header_size + message_block
         
         block_len = reinterpret(UInt16, view(buffer, dim_offset+1:dim_offset+2))[1]
@@ -153,7 +153,7 @@ using SBE
         car_enc = Baseline.Car.Encoder(buffer)
         
         # Record position before group
-        pos_before = Baseline.sbe_position(car_enc)
+        pos_before = SBE.sbe_position(car_enc)
         
         # Create group with 2 elements
         fuel = Baseline.Car.fuelFigures!(car_enc, 2)
@@ -166,10 +166,10 @@ using SBE
         
         # Position should have advanced by: dimension header (4) + 2 elements (6 bytes each)
         expected_position = pos_before + 4 + 2 * 6
-        @test Baseline.sbe_position(car_enc) == expected_position
+        @test SBE.sbe_position(car_enc) == expected_position
         
         # Group shares position pointer with message
-        @test SBE.sbe_position(fuel) == Baseline.sbe_position(car_enc)
+        @test SBE.sbe_position(fuel) == SBE.sbe_position(car_enc)
     end
     
     @testset "Count Validation" begin
@@ -199,7 +199,7 @@ using SBE
         
         # Verify dimension header was updated in buffer
         header_size = 8
-        message_block_length = Baseline.sbe_block_length(car_enc)
+        message_block_length = SBE.sbe_block_length(car_enc)
         dim_offset = header_size + message_block_length
         num_in_group = reinterpret(UInt16, view(buffer, dim_offset+3:dim_offset+4))[1]
         @test num_in_group == 3
@@ -218,7 +218,7 @@ using SBE
         Baseline.Car.FuelFigures.speed!(fuel, 120)
         Baseline.Car.FuelFigures.mpg!(fuel, 28.3)
         
-        pos_after_fuel = Baseline.sbe_position(car_enc)
+        pos_after_fuel = SBE.sbe_position(car_enc)
         
         # Write second group (performanceFigures)
         perf = Baseline.Car.performanceFigures!(car_enc, 1)
@@ -227,7 +227,7 @@ using SBE
         
         # Verify position advanced correctly
         perf_size = 4 + 1 * 1  # dimension header + 1 element of 1 byte
-        @test Baseline.sbe_position(car_enc) == pos_after_fuel + perf_size
+        @test SBE.sbe_position(car_enc) == pos_after_fuel + perf_size
     end
     
     @testset "Nested Groups - Structure" begin
@@ -280,7 +280,7 @@ using SBE
         # Should have: performanceFigures dimension header + 2 elements,
         # each with octaneRating + acceleration dimension header + acceleration data
         header_size = 8
-        message_block = Baseline.sbe_block_length(car_enc)
+        message_block = SBE.sbe_block_length(car_enc)
         perf_dim_offset = header_size + message_block
         
         # Check performanceFigures dimension header
@@ -291,7 +291,7 @@ using SBE
         # perf dim (4) + perf1 octane (1) + accel1 dim (4) + accel1 data (2*6=12) +
         # perf2 octane (1) + accel2 dim (4) + accel2 data (1*6=6)
         expected_size = 4 + (1 + 4 + 12) + (1 + 4 + 6)
-        @test Baseline.sbe_position(car_enc) == header_size + message_block + expected_size
+        @test SBE.sbe_position(car_enc) == header_size + message_block + expected_size
     end
     
     @testset "Nested Groups - Iterator" begin
@@ -339,14 +339,14 @@ using SBE
         # Verify position accounts for fixed fields + var data
         # 2 elements * 6 bytes fixed + var data (4 + 12) + (4 + 16) = 12 + 16 + 20 = 48
         header_size = 8
-        message_block = Baseline.sbe_block_length(car_enc)
+        message_block = SBE.sbe_block_length(car_enc)
         
         # Each element: speed (2) + mpg (4) + vardata_header (4) + vardata_content
         # Element 1: 6 + 4 + 12 = 22
         # Element 2: 6 + 4 + 16 = 26
         # Total: dimension (4) + 22 + 26 = 52
         expected_pos = header_size + message_block + 52
-        @test Baseline.sbe_position(car_enc) == expected_pos
+        @test SBE.sbe_position(car_enc) == expected_pos
     end
     
     @testset "Variable-Length Data - Empty String" begin
@@ -361,10 +361,10 @@ using SBE
         
         # Empty string should still have 4-byte length header with 0 length
         header_size = 8
-        message_block = Baseline.sbe_block_length(car_enc)
+        message_block = SBE.sbe_block_length(car_enc)
         # dimension (4) + speed (2) + mpg (4) + vardata_header (4) + vardata_content (0)
         expected_pos = header_size + message_block + 4 + 6 + 4
-        @test Baseline.sbe_position(car_enc) == expected_pos
+        @test SBE.sbe_position(car_enc) == expected_pos
     end
     
     @testset "Shared AbstractSbeGroup Interface" begin
@@ -381,7 +381,7 @@ using SBE
         
         # Verify position pointer is shared
         pos_ptr_fuel = SBE.sbe_position_ptr(fuel)
-        pos_ptr_car = Baseline.sbe_position_ptr(car_enc)
+        pos_ptr_car = SBE.sbe_position_ptr(car_enc)
         @test pos_ptr_fuel === pos_ptr_car
         
         # Test on nested group
@@ -455,7 +455,7 @@ using SBE
         @test Base.isdone(accel2)
         
         # Verify position advanced through all data
-        final_pos = Baseline.sbe_position(car_enc)
+        final_pos = SBE.sbe_position(car_enc)
         @test final_pos > 100  # Should have written substantial data
         @test final_pos < 1024  # But within buffer bounds
     end

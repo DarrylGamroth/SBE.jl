@@ -2,9 +2,8 @@ using Test
 using SBE
 using AllocCheck
 
-# Load schema once for all tests (at module level)
-const schema_path = joinpath(@__DIR__, "example-schema.xml")
-const Baseline = SBE.load_schema(schema_path)
+# Use pre-generated Baseline module (loaded by runtests.jl)
+# (No need to load schema at module level)
 
 @testset "Allocation Tests" begin
     @testset "Zero-Allocation Decoding" begin

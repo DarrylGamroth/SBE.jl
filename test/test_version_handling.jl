@@ -2,8 +2,7 @@ using Test
 using SBE
 
 @testset "Version Handling Tests" begin
-    # Load the extension schema (version 1) which has fields with sinceVersion="1"
-    Extension = SBE.load_schema(joinpath(@__DIR__, "example-extension-schema.xml"))
+    # Use pre-generated Extension module (loaded by runtests.jl)
     
     @testset "Schema Version Information" begin
         # Verify schema loaded correctly
@@ -15,9 +14,9 @@ using SBE
         @test isdefined(Extension.Car, :uuid_since_version)
         @test isdefined(Extension.Car, :cupHolderCount_since_version)
         
-        # Verify the since_version values are correct (they are constants, not functions)
-        @test Extension.Car.uuid_since_version == UInt16(1)
-        @test Extension.Car.cupHolderCount_since_version == UInt16(1)
+        # Verify the since_version values are correct (they are functions in file-based generation)
+        @test Extension.Car.uuid_since_version() == UInt16(1)
+        @test Extension.Car.cupHolderCount_since_version() == UInt16(1)
     end
     
     @testset "Version 0 Behavior (Fields Not In Version)" begin
@@ -93,26 +92,24 @@ using SBE
         car = Extension.Car.Decoder(buffer, 0, position_ptr, UInt16(62), UInt16(1))
         
         # since_version should be constants
-        @test Extension.Car.uuid_since_version == UInt16(1)
-        @test Extension.Car.cupHolderCount_since_version == UInt16(1)
-        
-        # Test that fields are accessible with version 1
+        # Verify metadata functions are consistent
+        @test Extension.Car.uuid_since_version() == UInt16(1)
+        @test Extension.Car.cupHolderCount_since_version() == UInt16(1)        # Test that fields are accessible with version 1
         @test car.acting_version == UInt16(1)
     end
     
     @testset "Non-Versioned Fields Unaffected" begin
         # Verify that fields without sinceVersion still work as before
-        Baseline = SBE.load_schema(joinpath(@__DIR__, "example-schema.xml"))
+        # Use pre-generated Baseline module (loaded by runtests.jl)
         
         buffer = zeros(UInt8, 1024)
         position_ptr = SBE.PositionPointer()
         
         # All baseline fields should have since_version = 0
-        @test Baseline.Car.serialNumber_since_version == UInt16(0)
-        @test Baseline.Car.modelYear_since_version == UInt16(0)
-        @test Baseline.Car.available_since_version == UInt16(0)
-        
-        # Fields should work normally
+        # Verify that fields in the baseline schema have since_version=0
+        @test Baseline.Car.serialNumber_since_version() == UInt16(0)
+        @test Baseline.Car.modelYear_since_version() == UInt16(0)
+        @test Baseline.Car.available_since_version() == UInt16(0)        # Fields should work normally
         car_enc = Baseline.Car.Encoder(buffer, 0, position_ptr)
         Baseline.Car.serialNumber!(car_enc, UInt64(12345))
         

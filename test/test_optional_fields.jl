@@ -2,13 +2,14 @@ using Test
 using SBE
 using AllocCheck: check_allocs
 
+# Load pre-generated Optional schema
+include("generated/Optional.jl")
+
 @testset "Optional Fields" begin
-    # Load the optional fields schema
-    # Use @__DIR__ to get the test directory path
-    Optional = load_schema(joinpath(@__DIR__, "example-optional-schema.xml"))
     
     @testset "Null Value Constants" begin
         # Test that null_value functions are generated for optional fields
+        # In file-based generation, these are functions not constants
         @test Optional.Order.optionalPrice_null_value() == typemax(UInt32)
         @test Optional.Order.optionalVolume_null_value() == typemin(Int64)
         @test isnan(Optional.Order.optionalDiscount_null_value())

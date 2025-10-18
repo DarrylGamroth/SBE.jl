@@ -3048,12 +3048,18 @@ function generate_enum_field_expr(field_name::Symbol, field_def::Schema.FieldDef
             # Access enum from parent module
             @inline function $field_name(::$decoder_name, ::Type{Integer})
                 parent_module = parentmodule(@__MODULE__)
+                while !isdefined(parent_module, $(QuoteNode(enum_type_name)))
+                    parent_module = parentmodule(parent_module)
+                end
                 enum_module = getfield(parent_module, $(QuoteNode(enum_type_name)))
                 return $encoding_julia_type(enum_module.$value_name)
             end
             
             @inline function $field_name(::$decoder_name)
                 parent_module = parentmodule(@__MODULE__)
+                while !isdefined(parent_module, $(QuoteNode(enum_type_name)))
+                    parent_module = parentmodule(parent_module)
+                end
                 enum_module = getfield(parent_module, $(QuoteNode(enum_type_name)))
                 return enum_module.$value_name
             end
@@ -3074,10 +3080,16 @@ function generate_enum_field_expr(field_name::Symbol, field_def::Schema.FieldDef
                 @inline function $field_name(m::$decoder_name)
                     if m.acting_version < UInt16($since_version)
                         parent_module = parentmodule(@__MODULE__)
+                        while !isdefined(parent_module, $(QuoteNode(enum_type_name)))
+                            parent_module = parentmodule(parent_module)
+                        end
                         enum_module = getfield(parent_module, $(QuoteNode(enum_type_name)))
                         return enum_module.SbeEnum($null_val)
                     end
                     parent_module = parentmodule(@__MODULE__)
+                    while !isdefined(parent_module, $(QuoteNode(enum_type_name)))
+                        parent_module = parentmodule(parent_module)
+                    end
                     enum_module = getfield(parent_module, $(QuoteNode(enum_type_name)))
                     raw = decode_value($encoding_julia_type, m.buffer, m.offset + $field_offset)
                     return enum_module.SbeEnum(raw)
@@ -3085,6 +3097,9 @@ function generate_enum_field_expr(field_name::Symbol, field_def::Schema.FieldDef
                 
                 @inline function $field_name_setter(m::$encoder_name, value)
                     parent_module = parentmodule(@__MODULE__)
+                    while !isdefined(parent_module, $(QuoteNode(enum_type_name)))
+                        parent_module = parentmodule(parent_module)
+                    end
                     enum_module = getfield(parent_module, $(QuoteNode(enum_type_name)))
                     encode_value($encoding_julia_type, m.buffer, m.offset + $field_offset, 
                                 convert($encoding_julia_type, value isa enum_module.SbeEnum ? $encoding_julia_type(value) : value))
@@ -3101,6 +3116,9 @@ function generate_enum_field_expr(field_name::Symbol, field_def::Schema.FieldDef
                 
                 @inline function $field_name(m::$decoder_name)
                     parent_module = parentmodule(@__MODULE__)
+                    while !isdefined(parent_module, $(QuoteNode(enum_type_name)))
+                        parent_module = parentmodule(parent_module)
+                    end
                     enum_module = getfield(parent_module, $(QuoteNode(enum_type_name)))
                     raw = decode_value($encoding_julia_type, m.buffer, m.offset + $field_offset)
                     return enum_module.SbeEnum(raw)
@@ -3108,6 +3126,9 @@ function generate_enum_field_expr(field_name::Symbol, field_def::Schema.FieldDef
                 
                 @inline function $field_name_setter(m::$encoder_name, value)
                     parent_module = parentmodule(@__MODULE__)
+                    while !isdefined(parent_module, $(QuoteNode(enum_type_name)))
+                        parent_module = parentmodule(parent_module)
+                    end
                     enum_module = getfield(parent_module, $(QuoteNode(enum_type_name)))
                     encode_value($encoding_julia_type, m.buffer, m.offset + $field_offset,
                                 convert($encoding_julia_type, value isa enum_module.SbeEnum ? $encoding_julia_type(value) : value))
@@ -3130,6 +3151,7 @@ function generate_set_field_expr(field_name::Symbol, field_def::Schema.FieldDefi
                                  decoder_name::Symbol, encoder_name::Symbol)
     set_type_name = Symbol(to_pascal_case(type_def.name))
     encoding_julia_type = to_julia_type(type_def.encoding_type)
+    field_name_setter = Symbol(field_name, :!)
     
     exprs = Expr[]
     
@@ -3140,17 +3162,46 @@ function generate_set_field_expr(field_name::Symbol, field_def::Schema.FieldDefi
     push!(exprs, quote
         @inline function $field_name(m::$decoder_name)
             parent_module = parentmodule(@__MODULE__)
+            while !isdefined(parent_module, $(QuoteNode(set_type_name)))
+                parent_module = parentmodule(parent_module)
+            end
             set_module = getfield(parent_module, $(QuoteNode(set_type_name)))
             return set_module.Decoder(m.buffer, m.offset + $field_offset)
         end
         
         @inline function $field_name(m::$encoder_name)
             parent_module = parentmodule(@__MODULE__)
+            while !isdefined(parent_module, $(QuoteNode(set_type_name)))
+                parent_module = parentmodule(parent_module)
+            end
             set_module = getfield(parent_module, $(QuoteNode(set_type_name)))
             return set_module.Encoder(m.buffer, m.offset + $field_offset)
         end
         
-        export $field_name
+        # Generate convenience setter that takes a Set of choice functions
+        @inline function $field_name_setter(m::$encoder_name, choices::Set)
+            parent_module = parentmodule(@__MODULE__)
+            while !isdefined(parent_module, $(QuoteNode(set_type_name)))
+                parent_module = parentmodule(parent_module)
+            end
+            set_module = getfield(parent_module, $(QuoteNode(set_type_name)))
+            set_enc = set_module.Encoder(m.buffer, m.offset + $field_offset)
+            
+            # Clear the bitset first
+            set_module.clear!(set_enc)
+            
+            # Set each bit based on the choice functions in the Set
+            # The choices are getter functions (e.g., guacamole), convert to setters (e.g., guacamole!)
+            for choice in choices
+                setter_name = Symbol(string(nameof(choice)), "!")
+                setter_fn = getfield(set_module, setter_name)
+                setter_fn(set_enc, true)
+            end
+            
+            return m
+        end
+        
+        export $field_name, $field_name_setter
     end)
     
     return exprs
@@ -3169,13 +3220,28 @@ function generate_composite_field_expr(field_name::Symbol, field_def::Schema.Fie
     # Calculate composite size
     composite_size = calculate_composite_size(type_def, schema)
     
-    # Generate metadata (use UInt8 as placeholder for composite)
-    push!(exprs, generate_field_metadata_expr(field_name, field_def, nothing, field_offset, UInt8))
-    
-    # Override encoding_length for composite
+    # Generate metadata for composite field with correct size
+    # We pass a custom metadata expr instead of using generate_field_metadata_expr
+    # to avoid the encoding_length being set to sizeof(UInt8) and then overridden
+    field_id_fn = Symbol(field_name, :_id)
+    field_since_fn = Symbol(field_name, :_since_version)
+    field_offset_fn = Symbol(field_name, :_encoding_offset)
     field_length_fn = Symbol(field_name, :_encoding_length)
+    field_null_fn = Symbol(field_name, :_null_value)
+    field_min_fn = Symbol(field_name, :_min_value)
+    field_max_fn = Symbol(field_name, :_max_value)
+    
     push!(exprs, quote
+        $field_id_fn() = UInt16($(field_def.id))
+        $field_since_fn() = UInt16($(field_def.since_version))
+        $field_offset_fn() = $field_offset
         $field_length_fn() = $composite_size
+        $field_null_fn() = $(typemax(UInt8))
+        $field_min_fn() = $(typemin(UInt8))
+        $field_max_fn() = $(typemax(UInt8))
+        
+        export $field_id_fn, $field_since_fn, $field_offset_fn, $field_length_fn
+        export $field_null_fn, $field_min_fn, $field_max_fn
     end)
     
     # Generate accessor that returns composite type
