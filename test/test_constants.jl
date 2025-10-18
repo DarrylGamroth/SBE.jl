@@ -51,8 +51,8 @@ end
         
         # fuel should return "Petrol" (constant string)
         fuel_value = Baseline.Engine.fuel(engine_dec)
-        @test fuel_value isa AbstractArray{UInt8}
-        @test String(fuel_value) == "Petrol"
+        @test fuel_value isa AbstractString
+        @test fuel_value == "Petrol"
     end
     
     @testset "Constant Field Encoding Behavior" begin

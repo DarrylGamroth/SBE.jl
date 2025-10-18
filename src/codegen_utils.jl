@@ -727,18 +727,18 @@ function generateCompositePropertyElements!(composite_module::Module, base_type_
         $(Symbol(member_name, :_in_acting_version))(m::$base_type_name) = m.acting_version >= UInt16($(member.since_version))
 
         # Encoding information (0 for constants)
-        $(Symbol(member_name, :_encoding_offset))(::$base_type_name) = $offset
-        $(Symbol(member_name, :_encoding_offset))(::Type{<:$base_type_name}) = $offset
-        $(Symbol(member_name, :_encoding_length))(::$base_type_name) = $encoding_length
-        $(Symbol(member_name, :_encoding_length))(::Type{<:$base_type_name}) = $encoding_length
+        $(Symbol(member_name, :_encoding_offset))(::$base_type_name) = Int($offset)
+        $(Symbol(member_name, :_encoding_offset))(::Type{<:$base_type_name}) = Int($offset)
+        $(Symbol(member_name, :_encoding_length))(::$base_type_name) = Int($encoding_length)
+        $(Symbol(member_name, :_encoding_length))(::Type{<:$base_type_name}) = Int($encoding_length)
 
         # Value limits (metadata)
-        $(Symbol(member_name, :_null_value))(::$base_type_name) = $(get_null_value(julia_type, member))
-        $(Symbol(member_name, :_null_value))(::Type{<:$base_type_name}) = $(get_null_value(julia_type, member))
-        $(Symbol(member_name, :_min_value))(::$base_type_name) = $(get_min_value(julia_type, member))
-        $(Symbol(member_name, :_min_value))(::Type{<:$base_type_name}) = $(get_min_value(julia_type, member))
-        $(Symbol(member_name, :_max_value))(::$base_type_name) = $(get_max_value(julia_type, member))
-        $(Symbol(member_name, :_max_value))(::Type{<:$base_type_name}) = $(get_max_value(julia_type, member))
+        $(Symbol(member_name, :_null_value))(::$base_type_name) = $julia_type($(get_null_value(julia_type, member)))
+        $(Symbol(member_name, :_null_value))(::Type{<:$base_type_name}) = $julia_type($(get_null_value(julia_type, member)))
+        $(Symbol(member_name, :_min_value))(::$base_type_name) = $julia_type($(get_min_value(julia_type, member)))
+        $(Symbol(member_name, :_min_value))(::Type{<:$base_type_name}) = $julia_type($(get_min_value(julia_type, member)))
+        $(Symbol(member_name, :_max_value))(::$base_type_name) = $julia_type($(get_max_value(julia_type, member)))
+        $(Symbol(member_name, :_max_value))(::Type{<:$base_type_name}) = $julia_type($(get_max_value(julia_type, member)))
     end)
 
     # Handle constant fields differently
@@ -761,17 +761,16 @@ function generateCompositePropertyElements!(composite_module::Module, base_type_
             end)
         else
             # Array constant value
-            if julia_type == UInt8  # Char array
-                const_val = [UInt8(c) for c in member.constant_value]
+            if julia_type == UInt8  # Char array - return as string
+                Core.eval(composite_module, quote
+                    @inline $member_name(::$base_type_name) = $(member.constant_value)
+                    @inline $member_name(::Type{<:$base_type_name}) = $(member.constant_value)
+
+                    export $member_name
+                end)
             else
                 error("Array constants only supported for char type")
             end
-            Core.eval(composite_module, quote
-                @inline $member_name(::$base_type_name) = $const_val
-                @inline $member_name(::Type{<:$base_type_name}) = $const_val
-
-                export $member_name
-            end)
         end
     else
         # Generate direct accessor functions (following sbetool baseline pattern)
@@ -2051,6 +2050,7 @@ end
 function generateEnum!(target_module::Module, enum_def::Schema.EnumType, schema::Schema.MessageSchema)
     enum_name = Symbol(to_pascal_case(enum_def.name))
     encoding_julia_type = to_julia_type(enum_def.encoding_type)
+    encoding_type_symbol = Symbol(encoding_julia_type)
 
     # Ensure EnumX is available in the target module
     Core.eval(target_module, :(using EnumX))
@@ -2066,26 +2066,26 @@ function generateEnum!(target_module::Module, enum_def::Schema.EnumType, schema:
             # Character values - convert to UInt8
             if length(valid_value.value) == 1
                 char_val = UInt8(valid_value.value[1])
-                push!(enum_values, :($value_name = $encoding_julia_type($char_val)))
+                push!(enum_values, :($value_name = $encoding_type_symbol($char_val)))
             else
                 # Handle special values
                 try
                     parsed_val = parse(encoding_julia_type, valid_value.value)
-                    push!(enum_values, :($value_name = $encoding_julia_type($parsed_val)))
+                    push!(enum_values, :($value_name = $encoding_type_symbol($parsed_val)))
                 catch
                     # Default to the first character
                     char_val = UInt8(valid_value.value[1])
-                    push!(enum_values, :($value_name = $encoding_julia_type($char_val)))
+                    push!(enum_values, :($value_name = $encoding_type_symbol($char_val)))
                 end
             end
         else
             # Numeric values
             try
                 parsed_val = parse(encoding_julia_type, valid_value.value)
-                push!(enum_values, :($value_name = $encoding_julia_type($parsed_val)))
+                push!(enum_values, :($value_name = $encoding_type_symbol($parsed_val)))
             catch
                 # Fallback to 0
-                push!(enum_values, :($value_name = $encoding_julia_type(0)))
+                push!(enum_values, :($value_name = $encoding_type_symbol(0)))
             end
         end
     end
@@ -2097,7 +2097,7 @@ function generateEnum!(target_module::Module, enum_def::Schema.EnumType, schema:
         encoding_julia_type <: Unsigned ? typemax(encoding_julia_type) : typemin(encoding_julia_type)
     end
 
-    push!(enum_values, :(NULL_VALUE = $encoding_julia_type($null_value)))
+    push!(enum_values, :(NULL_VALUE = $encoding_type_symbol($null_value)))
 
     # Generate the simple EnumX enum (matching the baseline pattern)
     Core.eval(target_module, quote
@@ -2150,6 +2150,7 @@ end
 function generateEnum_expr(enum_def::Schema.EnumType, schema::Schema.MessageSchema)
     enum_name = Symbol(to_pascal_case(enum_def.name))
     encoding_julia_type = to_julia_type(enum_def.encoding_type)
+    encoding_type_symbol = Symbol(encoding_julia_type)
 
     # Build enum values
     enum_values = Expr[]
@@ -2162,26 +2163,26 @@ function generateEnum_expr(enum_def::Schema.EnumType, schema::Schema.MessageSche
             # Character values - convert to UInt8
             if length(valid_value.value) == 1
                 char_val = UInt8(valid_value.value[1])
-                push!(enum_values, :($value_name = $encoding_julia_type($char_val)))
+                push!(enum_values, :($value_name = $encoding_type_symbol($char_val)))
             else
                 # Handle special values
                 try
                     parsed_val = parse(encoding_julia_type, valid_value.value)
-                    push!(enum_values, :($value_name = $encoding_julia_type($parsed_val)))
+                    push!(enum_values, :($value_name = $encoding_type_symbol($parsed_val)))
                 catch
                     # Default to the first character
                     char_val = UInt8(valid_value.value[1])
-                    push!(enum_values, :($value_name = $encoding_julia_type($char_val)))
+                    push!(enum_values, :($value_name = $encoding_type_symbol($char_val)))
                 end
             end
         else
             # Numeric values
             try
                 parsed_val = parse(encoding_julia_type, valid_value.value)
-                push!(enum_values, :($value_name = $encoding_julia_type($parsed_val)))
+                push!(enum_values, :($value_name = $encoding_type_symbol($parsed_val)))
             catch
                 # Fallback to 0
-                push!(enum_values, :($value_name = $encoding_julia_type(0)))
+                push!(enum_values, :($value_name = $encoding_type_symbol(0)))
             end
         end
     end
@@ -2193,7 +2194,7 @@ function generateEnum_expr(enum_def::Schema.EnumType, schema::Schema.MessageSche
         encoding_julia_type <: Unsigned ? typemax(encoding_julia_type) : typemin(encoding_julia_type)
     end
 
-    push!(enum_values, :(NULL_VALUE = $encoding_julia_type($null_value)))
+    push!(enum_values, :(NULL_VALUE = $encoding_type_symbol($null_value)))
 
     # Generate the enum expression (matching the baseline pattern)
     # Use quote to construct properly, but then extract the raw expression
@@ -2247,6 +2248,7 @@ function generateSet_expr(set_def::Schema.SetType, schema::Schema.MessageSchema)
     
     # Get the underlying primitive type for the bitset
     encoding_julia_type = to_julia_type(set_def.encoding_type)
+    encoding_type_symbol = Symbol(encoding_julia_type)
     encoding_size = sizeof(encoding_julia_type)
     
     # Build choice accessor functions
@@ -2259,16 +2261,16 @@ function generateSet_expr(set_def::Schema.SetType, schema::Schema.MessageSchema)
         # Getter function
         push!(choice_exprs, quote
             @inline function $choice_func_name(set::$decoder_name)
-                return decode_value($encoding_julia_type, set.buffer, set.offset) & ($encoding_julia_type(0x1) << $bit_position) != 0
+                return decode_value($encoding_type_symbol, set.buffer, set.offset) & ($encoding_type_symbol(0x1) << $bit_position) != 0
             end
         end)
         
         # Setter function
         push!(choice_exprs, quote
             @inline function $choice_func_name_set(set::$encoder_name, value::Bool)
-                bits = decode_value($encoding_julia_type, set.buffer, set.offset)
-                bits = value ? (bits | ($encoding_julia_type(0x1) << $bit_position)) : (bits & ~($encoding_julia_type(0x1) << $bit_position))
-                encode_value($encoding_julia_type, set.buffer, set.offset, bits)
+                bits = decode_value($encoding_type_symbol, set.buffer, set.offset)
+                bits = value ? (bits | ($encoding_type_symbol(0x1) << $bit_position)) : (bits & ~($encoding_type_symbol(0x1) << $bit_position))
+                encode_value($encoding_type_symbol, set.buffer, set.offset, bits)
                 return set
             end
         end)
@@ -2427,8 +2429,11 @@ function generateComposite_expr(composite_def::Schema.CompositeType, schema::Sch
         end
     end
     
-    # Build field accessor expressions
-    field_exprs = Expr[]
+    # Build nested type definitions and field accessor expressions
+    nested_type_exprs = Expr[]  # Module-level enum and set definitions
+    field_exprs = Expr[]  # Field accessor functions
+    export_symbols = Symbol[]  # Additional exports for nested types
+    
     offset = 0
     for member in composite_def.members
         if member isa Schema.EncodedType
@@ -2439,11 +2444,100 @@ function generateComposite_expr(composite_def::Schema.CompositeType, schema::Sch
                 julia_type = to_julia_type(member.primitive_type)
                 offset += sizeof(julia_type) * member.length
             end
+        elseif member isa Schema.RefType
+            # Handle referenced types (e.g., <ref name="efficiency" type="Percentage"/>)
+            ref_member_exprs = generate_composite_ref_member_expr(member, offset, struct_name, decoder_name, encoder_name, schema)
+            append!(field_exprs, ref_member_exprs)
+            # Calculate offset advancement based on referenced type
+            ref_type_def = find_type_by_name(schema, member.type_ref)
+            if ref_type_def !== nothing
+                if ref_type_def isa Schema.EncodedType
+                    if ref_type_def.presence != "constant"
+                        julia_type = to_julia_type(ref_type_def.primitive_type)
+                        offset += sizeof(julia_type) * ref_type_def.length
+                    end
+                elseif ref_type_def isa Schema.CompositeType
+                    # Get composite size
+                    composite_size = get_field_size(schema, Schema.FieldDefinition(
+                        member.name, UInt16(0), member.type_ref, 0, "", 0, "required",
+                        nothing, "", nothing, nothing, nothing
+                    ))
+                    offset += composite_size
+                elseif ref_type_def isa Schema.EnumType
+                    encoding_type = to_julia_type(ref_type_def.encoding_type)
+                    offset += sizeof(encoding_type)
+                elseif ref_type_def isa Schema.SetType
+                    encoding_type = to_julia_type(ref_type_def.encoding_type)
+                    offset += sizeof(encoding_type)
+                end
+            end
+        elseif member isa Schema.EnumType
+            # Handle nested enum definitions (e.g., <enum name="BoostType" encodingType="char">)
+            enum_name = Symbol(to_pascal_case(member.name))
+            
+            # Generate the enum definition at module level
+            enum_expr = generateEnum_expr(member, schema)
+            push!(nested_type_exprs, enum_expr)
+            push!(export_symbols, enum_name)
+            
+            # Generate field accessor for this enum
+            accessor_exprs = generate_composite_nested_enum_accessor(member, offset, struct_name, decoder_name, encoder_name)
+            append!(field_exprs, accessor_exprs)
+            
+            # Update offset
+            encoding_type = to_julia_type(member.encoding_type)
+            offset += sizeof(encoding_type)
+        elseif member isa Schema.SetType
+            # Handle nested set definitions (e.g., <set name="Options" encodingType="uint8">)
+            set_name = Symbol(to_pascal_case(member.name))
+            
+            # Generate the set definition at module level
+            set_expr = generateSet_expr(member, schema)
+            push!(nested_type_exprs, set_expr)
+            push!(export_symbols, set_name)
+            
+            # Generate field accessor for this set
+            accessor_exprs = generate_composite_nested_set_accessor(member, offset, struct_name, decoder_name, encoder_name)
+            append!(field_exprs, accessor_exprs)
+            
+            # Update offset
+            encoding_type = to_julia_type(member.encoding_type)
+            offset += sizeof(encoding_type)
         end
     end
     
     # Get endianness-specific imports
     endian_imports = generateEncodedTypes_expr(schema)
+    
+    # Determine if we need EnumX import (check if any nested types are enums)
+    needs_enumx = any(m -> m isa Schema.EnumType, composite_def.members)
+    
+    # Collect external enum and composite types used by this composite for imports
+    enum_imports = Set{Symbol}()
+    composite_imports = Set{Symbol}()
+    
+    for member in composite_def.members
+        if member isa Schema.RefType && member.type_ref !== nothing
+            # Find the referenced type
+            type_idx = findfirst(t -> t.name == member.type_ref, schema.types)
+            if type_idx !== nothing
+                type_obj = schema.types[type_idx]
+                if type_obj isa Schema.EnumType
+                    # External enum reference - need to import it
+                    enum_type_name = Symbol(to_pascal_case(type_obj.name))
+                    push!(enum_imports, enum_type_name)
+                elseif type_obj isa Schema.SetType
+                    # External set reference - need to import it
+                    set_type_name = Symbol(to_pascal_case(type_obj.name))
+                    push!(enum_imports, set_type_name)  # Sets also go in enum_imports
+                elseif type_obj isa Schema.CompositeType
+                    # External composite reference - need to import it
+                    composite_type_name = Symbol(to_pascal_case(type_obj.name))
+                    push!(composite_imports, composite_type_name)
+                end
+            end
+        end
+    end
     
     # Generate the complete composite module expression
     composite_quoted = quote
@@ -2452,9 +2546,19 @@ function generateComposite_expr(composite_def::Schema.CompositeType, schema::Sch
             import SBE: id, since_version, encoding_offset, encoding_length, null_value, min_value, max_value
             import SBE: value, value!
             using MappedArrays: mappedarray
+            $(needs_enumx ? :(using EnumX) : nothing)
+            
+            # Import external enum/set types referenced by fields
+            $([:($using_stmt) for using_stmt in [:(using ..$enum_name) for enum_name in enum_imports]]...)
+            
+            # Import external composite types referenced by fields
+            $([:($using_stmt) for using_stmt in [:(using ..$composite_name) for composite_name in composite_imports]]...)
             
             # Endianness-specific encode/decode functions
             $endian_imports
+            
+            # Nested type definitions (enums and sets)
+            $(nested_type_exprs...)
             
             # Main composite structure
             struct $struct_name{T<:AbstractArray{UInt8}} <: AbstractSbeCompositeType
@@ -2493,7 +2597,7 @@ function generateComposite_expr(composite_def::Schema.CompositeType, schema::Sch
             # Field accessors
             $(field_exprs...)
             
-            export $decoder_name, $encoder_name
+            export $decoder_name, $encoder_name, $(export_symbols...)
         end
     end
     
@@ -2509,6 +2613,7 @@ function generate_composite_member_expr(member::Schema.EncodedType, offset::Int,
                                        base_type_name::Symbol, decoder_name::Symbol, encoder_name::Symbol)
     member_name = Symbol(toCamelCase(member.name))
     julia_type = to_julia_type(member.primitive_type)
+    julia_type_symbol = Symbol(julia_type)
     is_constant = member.presence == "constant"
     encoding_length = is_constant ? 0 : sizeof(julia_type) * member.length
     
@@ -2522,17 +2627,17 @@ function generate_composite_member_expr(member::Schema.EncodedType, offset::Int,
         $(Symbol(member_name, :_since_version))(::Type{<:$base_type_name}) = UInt16($(member.since_version))
         $(Symbol(member_name, :_in_acting_version))(m::$base_type_name) = m.acting_version >= UInt16($(member.since_version))
         
-        $(Symbol(member_name, :_encoding_offset))(::$base_type_name) = $offset
-        $(Symbol(member_name, :_encoding_offset))(::Type{<:$base_type_name}) = $offset
-        $(Symbol(member_name, :_encoding_length))(::$base_type_name) = $encoding_length
-        $(Symbol(member_name, :_encoding_length))(::Type{<:$base_type_name}) = $encoding_length
+        $(Symbol(member_name, :_encoding_offset))(::$base_type_name) = Int($offset)
+        $(Symbol(member_name, :_encoding_offset))(::Type{<:$base_type_name}) = Int($offset)
+        $(Symbol(member_name, :_encoding_length))(::$base_type_name) = Int($encoding_length)
+        $(Symbol(member_name, :_encoding_length))(::Type{<:$base_type_name}) = Int($encoding_length)
         
-        $(Symbol(member_name, :_null_value))(::$base_type_name) = $(get_null_value(julia_type, member))
-        $(Symbol(member_name, :_null_value))(::Type{<:$base_type_name}) = $(get_null_value(julia_type, member))
-        $(Symbol(member_name, :_min_value))(::$base_type_name) = $(get_min_value(julia_type, member))
-        $(Symbol(member_name, :_min_value))(::Type{<:$base_type_name}) = $(get_min_value(julia_type, member))
-        $(Symbol(member_name, :_max_value))(::$base_type_name) = $(get_max_value(julia_type, member))
-        $(Symbol(member_name, :_max_value))(::Type{<:$base_type_name}) = $(get_max_value(julia_type, member))
+        $(Symbol(member_name, :_null_value))(::$base_type_name) = $julia_type_symbol($(get_null_value(julia_type, member)))
+        $(Symbol(member_name, :_null_value))(::Type{<:$base_type_name}) = $julia_type_symbol($(get_null_value(julia_type, member)))
+        $(Symbol(member_name, :_min_value))(::$base_type_name) = $julia_type_symbol($(get_min_value(julia_type, member)))
+        $(Symbol(member_name, :_min_value))(::Type{<:$base_type_name}) = $julia_type_symbol($(get_min_value(julia_type, member)))
+        $(Symbol(member_name, :_max_value))(::$base_type_name) = $julia_type_symbol($(get_max_value(julia_type, member)))
+        $(Symbol(member_name, :_max_value))(::Type{<:$base_type_name}) = $julia_type_symbol($(get_max_value(julia_type, member)))
     end)
     
     # Generate accessors based on constant/value type
@@ -2543,23 +2648,23 @@ function generate_composite_member_expr(member::Schema.EncodedType, offset::Int,
         
         if member.length == 1
             const_val = parse_constant_value(julia_type, member.constant_value)
+            julia_type_symbol = Symbol(julia_type)
             push!(exprs, quote
-                @inline $member_name(::$base_type_name) = $julia_type($const_val)
-                @inline $member_name(::Type{<:$base_type_name}) = $julia_type($const_val)
+                @inline $member_name(::$base_type_name) = $julia_type_symbol($const_val)
+                @inline $member_name(::Type{<:$base_type_name}) = $julia_type_symbol($const_val)
                 export $member_name
             end)
         else
             # Array constant
-            if julia_type == UInt8
-                const_val = [UInt8(c) for c in member.constant_value]
+            if julia_type == UInt8  # Char array - return as string
+                push!(exprs, quote
+                    @inline $member_name(::$base_type_name) = $(member.constant_value)
+                    @inline $member_name(::Type{<:$base_type_name}) = $(member.constant_value)
+                    export $member_name
+                end)
             else
                 error("Array constants only supported for char type")
             end
-            push!(exprs, quote
-                @inline $member_name(::$base_type_name) = $const_val
-                @inline $member_name(::Type{<:$base_type_name}) = $const_val
-                export $member_name
-            end)
         end
     else
         # Non-constant field
@@ -2652,6 +2757,254 @@ function generate_composite_member_expr(member::Schema.EncodedType, offset::Int,
 end
 
 """
+Helper function to generate expressions for a composite ref member field (e.g., <ref name="efficiency" type="Percentage"/>).
+Returns an array of expressions for all the accessor functions and metadata.
+"""
+function generate_composite_ref_member_expr(member::Schema.RefType, offset::Int,
+                                           base_type_name::Symbol, decoder_name::Symbol, encoder_name::Symbol,
+                                           schema::Schema.MessageSchema)
+    member_name = Symbol(toCamelCase(member.name))
+    exprs = Expr[]
+    
+    # Look up the referenced type
+    ref_type_def = find_type_by_name(schema, member.type_ref)
+    if ref_type_def === nothing
+        error("Referenced type $(member.type_ref) not found for member $(member.name)")
+    end
+    
+    if ref_type_def isa Schema.EncodedType
+        # Handle primitive type references (e.g., <type name="Percentage" primitiveType="int8"/>)
+        julia_type = to_julia_type(ref_type_def.primitive_type)
+        julia_type_symbol = Symbol(julia_type)
+        is_constant = ref_type_def.presence == "constant"
+        encoding_length = is_constant ? 0 : sizeof(julia_type) * ref_type_def.length
+        
+        # Generate metadata functions (RefType doesn't have since_version, use 0)
+        push!(exprs, quote
+            $(Symbol(member_name, :_id))(::$base_type_name) = UInt16(0xffff)
+            $(Symbol(member_name, :_id))(::Type{<:$base_type_name}) = UInt16(0xffff)
+            $(Symbol(member_name, :_since_version))(::$base_type_name) = UInt16(0)
+            $(Symbol(member_name, :_since_version))(::Type{<:$base_type_name}) = UInt16(0)
+            $(Symbol(member_name, :_in_acting_version))(m::$base_type_name) = m.acting_version >= UInt16(0)
+            
+            $(Symbol(member_name, :_encoding_offset))(::$base_type_name) = Int($offset)
+            $(Symbol(member_name, :_encoding_offset))(::Type{<:$base_type_name}) = Int($offset)
+            $(Symbol(member_name, :_encoding_length))(::$base_type_name) = Int($encoding_length)
+            $(Symbol(member_name, :_encoding_length))(::Type{<:$base_type_name}) = Int($encoding_length)
+            
+            $(Symbol(member_name, :_null_value))(::$base_type_name) = $julia_type_symbol($(get_null_value(julia_type, ref_type_def)))
+            $(Symbol(member_name, :_null_value))(::Type{<:$base_type_name}) = $julia_type_symbol($(get_null_value(julia_type, ref_type_def)))
+            $(Symbol(member_name, :_min_value))(::$base_type_name) = $julia_type_symbol($(get_min_value(julia_type, ref_type_def)))
+            $(Symbol(member_name, :_min_value))(::Type{<:$base_type_name}) = $julia_type_symbol($(get_min_value(julia_type, ref_type_def)))
+            $(Symbol(member_name, :_max_value))(::$base_type_name) = $julia_type_symbol($(get_max_value(julia_type, ref_type_def)))
+            $(Symbol(member_name, :_max_value))(::Type{<:$base_type_name}) = $julia_type_symbol($(get_max_value(julia_type, ref_type_def)))
+        end)
+        
+        # Generate value accessors (non-constant only, as ref types shouldn't be constant)
+        if !is_constant
+            if ref_type_def.length == 1
+                # Single value
+                push!(exprs, quote
+                    @inline function $member_name(m::$decoder_name)
+                        return decode_value($julia_type, m.buffer, m.offset + $offset)
+                    end
+                    
+                    @inline function $(Symbol(member_name, :!))(m::$encoder_name, val)
+                        encode_value($julia_type, m.buffer, m.offset + $offset, convert($julia_type, val))
+                    end
+                    
+                    export $member_name, $(Symbol(member_name, :!))
+                end)
+            else
+                # Array value
+                push!(exprs, quote
+                    @inline function $member_name(m::$decoder_name)
+                        return decode_array($julia_type, m.buffer, m.offset + $offset, $(ref_type_def.length))
+                    end
+                    
+                    @inline function $(Symbol(member_name, :!))(m::$encoder_name)
+                        return encode_array($julia_type, m.buffer, m.offset + $offset, $(ref_type_def.length))
+                    end
+                    
+                    @inline function $(Symbol(member_name, :!))(m::$encoder_name, val)
+                        copyto!($(Symbol(member_name, :!))(m), val)
+                    end
+                    
+                    export $member_name, $(Symbol(member_name, :!))
+                end)
+            end
+        end
+    elseif ref_type_def isa Schema.CompositeType
+        # Handle composite type references (e.g., <ref name="booster" type="Booster"/>)
+        composite_module_name = Symbol(to_pascal_case(member.type_ref))
+        
+        push!(exprs, quote
+            @inline function $member_name(m::$decoder_name)
+                return $composite_module_name.Decoder(m.buffer, m.offset + $offset, m.acting_version)
+            end
+            
+            @inline function $member_name(m::$encoder_name)
+                return $composite_module_name.Encoder(m.buffer, m.offset + $offset, m.acting_version)
+            end
+            
+            export $member_name
+        end)
+    elseif ref_type_def isa Schema.EnumType
+        # Handle enum type references (e.g., <ref name="boosterEnabled" type="BooleanType"/>)
+        enum_module_name = Symbol(to_pascal_case(member.type_ref))
+        julia_type = to_julia_type(ref_type_def.encoding_type)
+        julia_type_symbol = Symbol(julia_type)
+        
+        # Generate metadata
+        push!(exprs, quote
+            $(Symbol(member_name, :_id))(::$base_type_name) = UInt16(0xffff)
+            $(Symbol(member_name, :_id))(::Type{<:$base_type_name}) = UInt16(0xffff)
+            $(Symbol(member_name, :_since_version))(::$base_type_name) = UInt16(0)
+            $(Symbol(member_name, :_since_version))(::Type{<:$base_type_name}) = UInt16(0)
+            $(Symbol(member_name, :_in_acting_version))(m::$base_type_name) = m.acting_version >= UInt16(0)
+            
+            $(Symbol(member_name, :_encoding_offset))(::$base_type_name) = Int($offset)
+            $(Symbol(member_name, :_encoding_offset))(::Type{<:$base_type_name}) = Int($offset)
+            $(Symbol(member_name, :_encoding_length))(::$base_type_name) = Int($(sizeof(julia_type)))
+            $(Symbol(member_name, :_encoding_length))(::Type{<:$base_type_name}) = Int($(sizeof(julia_type)))
+        end)
+        
+        # Generate enum accessors using direct reference
+        push!(exprs, quote
+            @inline function $member_name(m::$decoder_name)
+                raw_value = decode_value($julia_type_symbol, m.buffer, m.offset + $offset)
+                return $enum_module_name.SbeEnum(raw_value)
+            end
+            
+            @inline function $(Symbol(member_name, :!))(m::$encoder_name, val)
+                encode_value($julia_type_symbol, m.buffer, m.offset + $offset, $julia_type_symbol(val))
+            end
+            
+            export $member_name, $(Symbol(member_name, :!))
+        end)
+    elseif ref_type_def isa Schema.SetType
+        # Handle set type references (e.g., <ref name="extras" type="OptionalExtras"/>)
+        set_module_name = Symbol(to_pascal_case(member.type_ref))
+        julia_type = to_julia_type(ref_type_def.encoding_type)
+        
+        # Generate metadata
+        push!(exprs, quote
+            $(Symbol(member_name, :_id))(::$base_type_name) = UInt16(0xffff)
+            $(Symbol(member_name, :_id))(::Type{<:$base_type_name}) = UInt16(0xffff)
+            $(Symbol(member_name, :_since_version))(::$base_type_name) = UInt16(0)
+            $(Symbol(member_name, :_since_version))(::Type{<:$base_type_name}) = UInt16(0)
+            $(Symbol(member_name, :_in_acting_version))(m::$base_type_name) = m.acting_version >= UInt16(0)
+            
+            $(Symbol(member_name, :_encoding_offset))(::$base_type_name) = Int($offset)
+            $(Symbol(member_name, :_encoding_offset))(::Type{<:$base_type_name}) = Int($offset)
+            $(Symbol(member_name, :_encoding_length))(::$base_type_name) = Int($(sizeof(julia_type)))
+            $(Symbol(member_name, :_encoding_length))(::Type{<:$base_type_name}) = Int($(sizeof(julia_type)))
+        end)
+        
+        # Generate set accessors using direct reference
+        push!(exprs, quote
+            @inline function $member_name(m::$decoder_name)
+                return $set_module_name.Decoder(m.buffer, m.offset + $offset)
+            end
+            
+            @inline function $member_name(m::$encoder_name)
+                return $set_module_name.Encoder(m.buffer, m.offset + $offset)
+            end
+            
+            export $member_name
+        end)
+    end
+    
+    return exprs
+end
+
+"""
+Helper function to generate field accessor expressions for nested enum members in composites.
+These are enums defined directly inside the composite, not referenced from external types.
+"""
+function generate_composite_nested_enum_accessor(member::Schema.EnumType, offset::Int, 
+                                                   base_type_name::Symbol, decoder_name::Symbol, encoder_name::Symbol)
+    # For nested enums, convert the name to camelCase (lowercase first letter)
+    raw_name = toCamelCase(member.name)
+    member_name = Symbol(lowercase(raw_name[1:1]) * raw_name[2:end])
+    enum_name = Symbol(to_pascal_case(member.name))
+    julia_type = to_julia_type(member.encoding_type)
+    julia_type_symbol = Symbol(julia_type)
+    
+    exprs = Expr[]
+    
+    # Generate metadata functions
+    push!(exprs, quote
+        $(Symbol(member_name, :_id))(::$base_type_name) = UInt16(0xffff)
+        $(Symbol(member_name, :_id))(::Type{<:$base_type_name}) = UInt16(0xffff)
+        $(Symbol(member_name, :_since_version))(::$base_type_name) = UInt16($(member.since_version))
+        $(Symbol(member_name, :_since_version))(::Type{<:$base_type_name}) = UInt16($(member.since_version))
+        $(Symbol(member_name, :_in_acting_version))(m::$base_type_name) = m.acting_version >= UInt16($(member.since_version))
+        
+        $(Symbol(member_name, :_encoding_offset))(::$base_type_name) = Int($offset)
+        $(Symbol(member_name, :_encoding_offset))(::Type{<:$base_type_name}) = Int($offset)
+        $(Symbol(member_name, :_encoding_length))(::$base_type_name) = Int($(sizeof(julia_type)))
+        $(Symbol(member_name, :_encoding_length))(::Type{<:$base_type_name}) = Int($(sizeof(julia_type)))
+    end)
+    
+    # Generate enum field accessors (reads/writes the nested enum defined in this module)
+    push!(exprs, quote
+        @inline function $member_name(m::$decoder_name)
+            raw_value = decode_value($julia_type_symbol, m.buffer, m.offset + $offset)
+            return $enum_name.SbeEnum(raw_value)
+        end
+        
+        @inline function $(Symbol(member_name, :!))(m::$encoder_name, val)
+            encode_value($julia_type_symbol, m.buffer, m.offset + $offset, $julia_type_symbol(val))
+        end
+    end)
+    
+    return exprs
+end
+
+"""
+Helper function to generate field accessor expressions for nested set members in composites.
+These are sets defined directly inside the composite, not referenced from external types.
+"""
+function generate_composite_nested_set_accessor(member::Schema.SetType, offset::Int, 
+                                                  base_type_name::Symbol, decoder_name::Symbol, encoder_name::Symbol)
+    # For nested sets, convert the name to camelCase (lowercase first letter)
+    raw_name = toCamelCase(member.name)
+    member_name = Symbol(lowercase(raw_name[1:1]) * raw_name[2:end])
+    set_name = Symbol(to_pascal_case(member.name))
+    julia_type = to_julia_type(member.encoding_type)
+    
+    exprs = Expr[]
+    
+    # Generate metadata functions
+    push!(exprs, quote
+        $(Symbol(member_name, :_id))(::$base_type_name) = UInt16(0xffff)
+        $(Symbol(member_name, :_id))(::Type{<:$base_type_name}) = UInt16(0xffff)
+        $(Symbol(member_name, :_since_version))(::$base_type_name) = UInt16($(member.since_version))
+        $(Symbol(member_name, :_since_version))(::Type{<:$base_type_name}) = UInt16($(member.since_version))
+        $(Symbol(member_name, :_in_acting_version))(m::$base_type_name) = m.acting_version >= UInt16($(member.since_version))
+        
+        $(Symbol(member_name, :_encoding_offset))(::$base_type_name) = Int($offset)
+        $(Symbol(member_name, :_encoding_offset))(::Type{<:$base_type_name}) = Int($offset)
+        $(Symbol(member_name, :_encoding_length))(::$base_type_name) = Int($(sizeof(julia_type)))
+        $(Symbol(member_name, :_encoding_length))(::Type{<:$base_type_name}) = Int($(sizeof(julia_type)))
+    end)
+    
+    # Generate set field accessors (reads/writes the nested set defined in this module)
+    push!(exprs, quote
+        @inline function $member_name(m::$decoder_name)
+            return $set_name.SetStruct(m.buffer, m.offset + $offset, m.acting_version)
+        end
+        
+        @inline function $member_name(m::$encoder_name)
+            return $set_name.SetStruct(m.buffer, m.offset + $offset, m.acting_version)
+        end
+    end)
+    
+    return exprs
+end
+
+"""
     generateMessage_expr(message_def::Schema.MessageDefinition, schema::Schema.MessageSchema) -> Expr
 
 Generate a message type definition as an expression (for file-based generation).
@@ -2709,6 +3062,45 @@ function generateMessage_expr(message_def::Schema.MessageDefinition, schema::Sch
     # Get header module name
     header_module_name = Symbol(to_pascal_case(schema.header_type))
     
+    # Collect enum types used in constant fields for imports
+    enum_imports = Set{Symbol}()
+    for field in message_def.fields
+        if field.presence == "constant" && field.value_ref !== nothing
+            parts = split(field.value_ref, '.')
+            if length(parts) == 2
+                enum_type_name = Symbol(parts[1])
+                push!(enum_imports, enum_type_name)
+            end
+        end
+        # Also collect enum types from regular field references
+        if field.type_ref !== nothing
+            type_def = findfirst(t -> t.name == field.type_ref, schema.types)
+            if type_def !== nothing
+                type_obj = schema.types[type_def]
+                if isa(type_obj, Schema.EnumType)
+                    enum_type_name = Symbol(to_pascal_case(type_obj.name))
+                    push!(enum_imports, enum_type_name)
+                end
+            end
+        end
+    end
+    
+    # Collect composite types used in fields for imports
+    composite_imports = Set{Symbol}()
+    for field in message_def.fields
+        if field.type_ref !== nothing
+            # Find the type definition
+            type_def = findfirst(t -> t.name == field.type_ref, schema.types)
+            if type_def !== nothing
+                type_obj = schema.types[type_def]
+                if isa(type_obj, Schema.CompositeType)
+                    composite_type_name = Symbol(to_pascal_case(type_obj.name))
+                    push!(composite_imports, composite_type_name)
+                end
+            end
+        end
+    end
+    
     # Generate field accessor expressions
     field_exprs = Expr[]
     for field in message_def.fields
@@ -2752,6 +3144,12 @@ function generateMessage_expr(message_def::Schema.MessageDefinition, schema::Sch
             
             # Import header module from parent
             using ..$header_module_name
+            
+            # Import enum types used in constant fields from parent module
+            $([:($using_stmt) for using_stmt in [:(using ..$enum_name) for enum_name in enum_imports]]...)
+            
+            # Import composite types used in fields from parent module
+            $([:($using_stmt) for using_stmt in [:(using ..$composite_name) for composite_name in composite_imports]]...)
             
             # Import helper functions from SBE
             using SBE: PositionPointer, to_string
@@ -3129,6 +3527,7 @@ function generate_enum_field_expr(field_name::Symbol, field_def::Schema.FieldDef
     field_name_setter = Symbol(string(field_name, "!"))
     enum_type_name = Symbol(to_pascal_case(type_def.name))
     encoding_julia_type = to_julia_type(type_def.encoding_type)
+    encoding_type_symbol = Symbol(encoding_julia_type)
     is_constant = field_def.presence == "constant"
     since_version = field_def.since_version
     
@@ -3150,26 +3549,19 @@ function generate_enum_field_expr(field_name::Symbol, field_def::Schema.FieldDef
         if length(parts) != 2
             error("Invalid valueRef format: $(field_def.value_ref)")
         end
+        enum_type_name = Symbol(parts[1])
         value_name = Symbol(parts[2])
         
+        encoding_julia_type_symbol = Symbol(encoding_julia_type)
+        
         push!(exprs, quote
-            # Access enum from parent module
+            # Constant enum field - enum is imported at module level
             @inline function $field_name(::$decoder_name, ::Type{Integer})
-                parent_module = parentmodule(@__MODULE__)
-                while !isdefined(parent_module, $(QuoteNode(enum_type_name)))
-                    parent_module = parentmodule(parent_module)
-                end
-                enum_module = getfield(parent_module, $(QuoteNode(enum_type_name)))
-                return $encoding_julia_type(enum_module.$value_name)
+                return $encoding_julia_type_symbol($enum_type_name.$value_name)
             end
             
             @inline function $field_name(::$decoder_name)
-                parent_module = parentmodule(@__MODULE__)
-                while !isdefined(parent_module, $(QuoteNode(enum_type_name)))
-                    parent_module = parentmodule(parent_module)
-                end
-                enum_module = getfield(parent_module, $(QuoteNode(enum_type_name)))
-                return enum_module.$value_name
+                return $enum_type_name.$value_name
             end
             
             export $field_name
@@ -3182,35 +3574,19 @@ function generate_enum_field_expr(field_name::Symbol, field_def::Schema.FieldDef
                     if m.acting_version < UInt16($since_version)
                         return $null_val
                     end
-                    return decode_value($encoding_julia_type, m.buffer, m.offset + $field_offset)
+                    return decode_value($encoding_type_symbol, m.buffer, m.offset + $field_offset)
                 end
                 
                 @inline function $field_name(m::$decoder_name)
                     if m.acting_version < UInt16($since_version)
-                        parent_module = parentmodule(@__MODULE__)
-                        while !isdefined(parent_module, $(QuoteNode(enum_type_name)))
-                            parent_module = parentmodule(parent_module)
-                        end
-                        enum_module = getfield(parent_module, $(QuoteNode(enum_type_name)))
-                        return enum_module.SbeEnum($null_val)
+                        return $enum_type_name.SbeEnum($null_val)
                     end
-                    parent_module = parentmodule(@__MODULE__)
-                    while !isdefined(parent_module, $(QuoteNode(enum_type_name)))
-                        parent_module = parentmodule(parent_module)
-                    end
-                    enum_module = getfield(parent_module, $(QuoteNode(enum_type_name)))
-                    raw = decode_value($encoding_julia_type, m.buffer, m.offset + $field_offset)
-                    return enum_module.SbeEnum(raw)
+                    raw = decode_value($encoding_type_symbol, m.buffer, m.offset + $field_offset)
+                    return $enum_type_name.SbeEnum(raw)
                 end
                 
-                @inline function $field_name_setter(m::$encoder_name, value)
-                    parent_module = parentmodule(@__MODULE__)
-                    while !isdefined(parent_module, $(QuoteNode(enum_type_name)))
-                        parent_module = parentmodule(parent_module)
-                    end
-                    enum_module = getfield(parent_module, $(QuoteNode(enum_type_name)))
-                    encode_value($encoding_julia_type, m.buffer, m.offset + $field_offset, 
-                                convert($encoding_julia_type, value isa enum_module.SbeEnum ? $encoding_julia_type(value) : value))
+                @inline function $field_name_setter(m::$encoder_name, value::$enum_type_name.SbeEnum)
+                    encode_value($encoding_type_symbol, m.buffer, m.offset + $field_offset, $encoding_type_symbol(value))
                     return m
                 end
                 
@@ -3219,27 +3595,16 @@ function generate_enum_field_expr(field_name::Symbol, field_def::Schema.FieldDef
         else
             push!(exprs, quote
                 @inline function $field_name(m::$decoder_name, ::Type{Integer})
-                    return decode_value($encoding_julia_type, m.buffer, m.offset + $field_offset)
+                    return decode_value($encoding_type_symbol, m.buffer, m.offset + $field_offset)
                 end
                 
                 @inline function $field_name(m::$decoder_name)
-                    parent_module = parentmodule(@__MODULE__)
-                    while !isdefined(parent_module, $(QuoteNode(enum_type_name)))
-                        parent_module = parentmodule(parent_module)
-                    end
-                    enum_module = getfield(parent_module, $(QuoteNode(enum_type_name)))
-                    raw = decode_value($encoding_julia_type, m.buffer, m.offset + $field_offset)
-                    return enum_module.SbeEnum(raw)
+                    raw = decode_value($encoding_type_symbol, m.buffer, m.offset + $field_offset)
+                    return $enum_type_name.SbeEnum(raw)
                 end
                 
-                @inline function $field_name_setter(m::$encoder_name, value)
-                    parent_module = parentmodule(@__MODULE__)
-                    while !isdefined(parent_module, $(QuoteNode(enum_type_name)))
-                        parent_module = parentmodule(parent_module)
-                    end
-                    enum_module = getfield(parent_module, $(QuoteNode(enum_type_name)))
-                    encode_value($encoding_julia_type, m.buffer, m.offset + $field_offset,
-                                convert($encoding_julia_type, value isa enum_module.SbeEnum ? $encoding_julia_type(value) : value))
+                @inline function $field_name_setter(m::$encoder_name, value::$enum_type_name.SbeEnum)
+                    encode_value($encoding_type_symbol, m.buffer, m.offset + $field_offset, $encoding_type_symbol(value))
                     return m
                 end
                 
@@ -3355,23 +3720,11 @@ function generate_composite_field_expr(field_name::Symbol, field_def::Schema.Fie
     # Generate accessor that returns composite type
     push!(exprs, quote
         @inline function $field_name(m::$decoder_name)
-            # Search up module hierarchy to find the composite type
-            parent_module = parentmodule(@__MODULE__)
-            while !isdefined(parent_module, $(QuoteNode(composite_type_name)))
-                parent_module = parentmodule(parent_module)
-            end
-            composite_module = getfield(parent_module, $(QuoteNode(composite_type_name)))
-            return composite_module.Decoder(m.buffer, m.offset + $field_offset)
+            return $composite_type_name.Decoder(m.buffer, m.offset + $field_offset, m.acting_version)
         end
         
         @inline function $field_name(m::$encoder_name)
-            # Search up module hierarchy to find the composite type
-            parent_module = parentmodule(@__MODULE__)
-            while !isdefined(parent_module, $(QuoteNode(composite_type_name)))
-                parent_module = parentmodule(parent_module)
-            end
-            composite_module = getfield(parent_module, $(QuoteNode(composite_type_name)))
-            return composite_module.Encoder(m.buffer, m.offset + $field_offset)
+            return $composite_type_name.Encoder(m.buffer, m.offset + $field_offset, UInt16($(schema.version)))
         end
         
         export $field_name
@@ -5227,16 +5580,21 @@ Get null value for a type and member.
 - Null value following SBE conventions (max for unsigned, min for signed)
 """
 function get_null_value(julia_type::Type, member::Schema.EncodedType)
-    if member.null_value !== nothing
+    value = if member.null_value !== nothing
         try
-            return parse(julia_type, member.null_value)
+            parse(julia_type, member.null_value)
         catch
-            # Fallback
+            # Fallback to default
+            nothing
         end
+    else
+        nothing
     end
-
-    # Default null values based on SBE spec
-    if julia_type <: AbstractFloat
+    
+    # Return the bare value (will be wrapped at call site)
+    if value !== nothing
+        return value
+    elseif julia_type <: AbstractFloat
         # For floating point types, use NaN as null value
         return julia_type(NaN)
     elseif julia_type <: Unsigned
@@ -5259,14 +5617,23 @@ Get min value for a type and member.
 - Minimum value from schema or type minimum
 """
 function get_min_value(julia_type::Type, member::Schema.EncodedType)
-    if member.min_value !== nothing
+    value = if member.min_value !== nothing
         try
-            return parse(julia_type, member.min_value)
+            parse(julia_type, member.min_value)
         catch
-            # Fallback
+            # Fallback to default
+            nothing
         end
+    else
+        nothing
     end
-    return typemin(julia_type)
+    
+    # Return the bare value (will be wrapped at call site)
+    if value !== nothing
+        return value
+    else
+        return typemin(julia_type)
+    end
 end
 
 """
@@ -5282,14 +5649,23 @@ Get max value for a type and member.
 - Maximum value from schema or type maximum
 """
 function get_max_value(julia_type::Type, member::Schema.EncodedType)
-    if member.max_value !== nothing
+    value = if member.max_value !== nothing
         try
-            return parse(julia_type, member.max_value)
+            parse(julia_type, member.max_value)
         catch
-            # Fallback
+            # Fallback to default
+            nothing
         end
+    else
+        nothing
     end
-    return typemax(julia_type)
+    
+    # Return the bare value (will be wrapped at call site)
+    if value !== nothing
+        return value
+    else
+        return typemax(julia_type)
+    end
 end
 
 """
@@ -5514,6 +5890,7 @@ function generateChoiceSet!(target_module::Module, set_def::Schema.SetType, sche
     end)
 
     # Generate individual choice accessor functions in the set module
+    encoding_type_symbol = Symbol(encoding_julia_type)
     for choice in set_def.choices
         choice_func_name = Symbol(toCamelCase(choice.name))
         choice_func_name_set = Symbol(string(choice_func_name, "!"))
@@ -5522,14 +5899,14 @@ function generateChoiceSet!(target_module::Module, set_def::Schema.SetType, sche
         Core.eval(set_module, quote
             # Check if this choice bit is set
             @inline function $choice_func_name(set::$decoder_name)
-                return decode_value($encoding_julia_type, set.buffer, set.offset) & ($encoding_julia_type(0x1) << $bit_position) != 0
+                return decode_value($encoding_type_symbol, set.buffer, set.offset) & ($encoding_type_symbol(0x1) << $bit_position) != 0
             end
 
             # Set or clear this choice bit
             @inline function $choice_func_name_set(set::$encoder_name, value::Bool)
-                bits = decode_value($encoding_julia_type, set.buffer, set.offset)
-                bits = value ? (bits | ($encoding_julia_type(0x1) << $bit_position)) : (bits & ~($encoding_julia_type(0x1) << $bit_position))
-                encode_value($encoding_julia_type, set.buffer, set.offset, bits)
+                bits = decode_value($encoding_type_symbol, set.buffer, set.offset)
+                bits = value ? (bits | ($encoding_type_symbol(0x1) << $bit_position)) : (bits & ~($encoding_type_symbol(0x1) << $bit_position))
+                encode_value($encoding_type_symbol, set.buffer, set.offset, bits)
                 return set
             end
 
