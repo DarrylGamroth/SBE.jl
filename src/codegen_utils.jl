@@ -794,25 +794,78 @@ function generateCompositePropertyElements!(composite_module::Module, base_type_
             end)
         else
             # Array value: direct array decode/encode functions
-            Core.eval(composite_module, quote
-                # Direct decoder function: returns array view directly (matches baseline)
-                @inline function $member_name(m::$decoder_name)
-                    return decode_array($julia_type, m.buffer, m.offset + $offset, $(member.length))
-                end
+            # Special case: character arrays return String (matches SBE baseline behavior)
+            is_character_array = (julia_type == UInt8 && member.primitive_type == "char")
 
-                # Direct encoder function: returns array view for writing (matches baseline)
-                @inline function $(Symbol(member_name, :!))(m::$encoder_name)
-                    return encode_array($julia_type, m.buffer, m.offset + $offset, $(member.length))
-                end
+            if is_character_array
+                # Character arrays return String by default
+                Core.eval(composite_module, :(using StringViews: StringView))
+                
+                Core.eval(composite_module, quote
+                    # Direct decoder function: returns StringView with null-byte trimming
+                    @inline function $member_name(m::$decoder_name)
+                        bytes = decode_array($julia_type, m.buffer, m.offset + $offset, $(member.length))
+                        # Remove trailing null bytes - use findfirst to avoid allocation
+                        pos = findfirst(iszero, bytes)
+                        len = pos !== nothing ? pos - 1 : Base.length(bytes)
+                        return StringView(view(bytes, 1:len))
+                    end
 
-                # Convenience encoder with value
-                @inline function $(Symbol(member_name, :!))(m::$encoder_name, val)
-                    copyto!($(Symbol(member_name, :!))(m), val)
-                end
+                    # Direct encoder function: returns array view for writing (matches baseline)
+                    @inline function $(Symbol(member_name, :!))(m::$encoder_name)
+                        return encode_array($julia_type, m.buffer, m.offset + $offset, $(member.length))
+                    end
 
-                # Export the accessor functions
-                export $member_name, $(Symbol(member_name, :!))
-            end)
+                    # Convenience encoder with AbstractString (copies with null padding)
+                    @inline function $(Symbol(member_name, :!))(m::$encoder_name, value::AbstractString)
+                        bytes = codeunits(value)
+                        dest = encode_array($julia_type, m.buffer, m.offset + $offset, $(member.length))
+                        len = min(length(bytes), length(dest))
+                        copyto!(dest, 1, bytes, 1, len)
+                        # Zero out the rest
+                        if len < length(dest)
+                            fill!(view(dest, len+1:length(dest)), 0x00)
+                        end
+                        return m
+                    end
+
+                    # Convenience encoder with UInt8 vector (copies as-is)
+                    @inline function $(Symbol(member_name, :!))(m::$encoder_name, value::AbstractVector{UInt8})
+                        dest = encode_array($julia_type, m.buffer, m.offset + $offset, $(member.length))
+                        len = min(length(value), length(dest))
+                        copyto!(dest, 1, value, 1, len)
+                        # Zero out the rest
+                        if len < length(dest)
+                            fill!(view(dest, len+1:length(dest)), 0x00)
+                        end
+                        return m
+                    end
+
+                    # Export the accessor functions
+                    export $member_name, $(Symbol(member_name, :!))
+                end)
+            else
+                # Non-character arrays: return numeric array view
+                Core.eval(composite_module, quote
+                    # Direct decoder function: returns array view directly (matches baseline)
+                    @inline function $member_name(m::$decoder_name)
+                        return decode_array($julia_type, m.buffer, m.offset + $offset, $(member.length))
+                    end
+
+                    # Direct encoder function: returns array view for writing (matches baseline)
+                    @inline function $(Symbol(member_name, :!))(m::$encoder_name)
+                        return encode_array($julia_type, m.buffer, m.offset + $offset, $(member.length))
+                    end
+
+                    # Convenience encoder with value
+                    @inline function $(Symbol(member_name, :!))(m::$encoder_name, val)
+                        copyto!($(Symbol(member_name, :!))(m), val)
+                    end
+
+                    # Export the accessor functions
+                    export $member_name, $(Symbol(member_name, :!))
+                end)
+            end
         end
     end
 end
@@ -2381,8 +2434,11 @@ function generateComposite_expr(composite_def::Schema.CompositeType, schema::Sch
         if member isa Schema.EncodedType
             member_exprs = generate_composite_member_expr(member, offset, struct_name, decoder_name, encoder_name)
             append!(field_exprs, member_exprs)
-            julia_type = to_julia_type(member.primitive_type)
-            offset += sizeof(julia_type) * member.length
+            # Constants don't occupy space in the encoding
+            if member.presence != "constant"
+                julia_type = to_julia_type(member.primitive_type)
+                offset += sizeof(julia_type) * member.length
+            end
         end
     end
     
@@ -2522,21 +2578,73 @@ function generate_composite_member_expr(member::Schema.EncodedType, offset::Int,
             end)
         else
             # Array value
-            push!(exprs, quote
-                @inline function $member_name(m::$decoder_name)
-                    return decode_array($julia_type, m.buffer, m.offset + $offset, $(member.length))
-                end
+            # Special case: character arrays return String (matches SBE baseline behavior)
+            is_character_array = (julia_type == UInt8 && member.primitive_type == "char")
+            
+            if is_character_array
+                # Character arrays return String by default
+                push!(exprs, :(using StringViews: StringView))
                 
-                @inline function $(Symbol(member_name, :!))(m::$encoder_name)
-                    return encode_array($julia_type, m.buffer, m.offset + $offset, $(member.length))
-                end
-                
-                @inline function $(Symbol(member_name, :!))(m::$encoder_name, val)
-                    copyto!($(Symbol(member_name, :!))(m), val)
-                end
-                
-                export $member_name, $(Symbol(member_name, :!))
-            end)
+                push!(exprs, quote
+                    # Direct decoder function: returns StringView with null-byte trimming
+                    @inline function $member_name(m::$decoder_name)
+                        bytes = decode_array($julia_type, m.buffer, m.offset + $offset, $(member.length))
+                        # Remove trailing null bytes - use findfirst to avoid allocation
+                        pos = findfirst(iszero, bytes)
+                        len = pos !== nothing ? pos - 1 : Base.length(bytes)
+                        return StringView(view(bytes, 1:len))
+                    end
+
+                    # Direct encoder function: returns array view for writing (matches baseline)
+                    @inline function $(Symbol(member_name, :!))(m::$encoder_name)
+                        return encode_array($julia_type, m.buffer, m.offset + $offset, $(member.length))
+                    end
+
+                    # Convenience encoder with AbstractString (copies with null padding)
+                    @inline function $(Symbol(member_name, :!))(m::$encoder_name, value::AbstractString)
+                        bytes = codeunits(value)
+                        dest = encode_array($julia_type, m.buffer, m.offset + $offset, $(member.length))
+                        len = min(length(bytes), length(dest))
+                        copyto!(dest, 1, bytes, 1, len)
+                        # Zero out the rest
+                        if len < length(dest)
+                            fill!(view(dest, len+1:length(dest)), 0x00)
+                        end
+                        return m
+                    end
+
+                    # Convenience encoder with UInt8 vector (copies as-is)
+                    @inline function $(Symbol(member_name, :!))(m::$encoder_name, value::AbstractVector{UInt8})
+                        dest = encode_array($julia_type, m.buffer, m.offset + $offset, $(member.length))
+                        len = min(length(value), length(dest))
+                        copyto!(dest, 1, value, 1, len)
+                        # Zero out the rest
+                        if len < length(dest)
+                            fill!(view(dest, len+1:length(dest)), 0x00)
+                        end
+                        return m
+                    end
+
+                    export $member_name, $(Symbol(member_name, :!))
+                end)
+            else
+                # Non-character arrays: return numeric array view
+                push!(exprs, quote
+                    @inline function $member_name(m::$decoder_name)
+                        return decode_array($julia_type, m.buffer, m.offset + $offset, $(member.length))
+                    end
+                    
+                    @inline function $(Symbol(member_name, :!))(m::$encoder_name)
+                        return encode_array($julia_type, m.buffer, m.offset + $offset, $(member.length))
+                    end
+                    
+                    @inline function $(Symbol(member_name, :!))(m::$encoder_name, val)
+                        copyto!($(Symbol(member_name, :!))(m), val)
+                    end
+                    
+                    export $member_name, $(Symbol(member_name, :!))
+                end)
+            end
         end
     end
     

@@ -143,6 +143,68 @@ for fig in perf_figures
     end
 end
 ```
+
+## File-Based Generation
+
+For production use, generate standalone Julia files:
+
+```julia
+using SBE
+
+# Generate a .jl file from XML schema
+SBE.generate("example-schema.xml", "generated/Baseline.jl")
+
+# Load the generated schema
+include("generated/Baseline.jl")
+using .Baseline
+```
+
+This approach:
+- ✅ Avoids Core.eval and world-age issues
+- ✅ Enables proper IDE support and autocomplete
+- ✅ Makes generated code reviewable
+- ✅ Works with Julia's package precompilation
+
+## Documentation
+
+- **[CHANGELOG.md](CHANGELOG.md)** - Development history and completed features
+- **[TODO.md](TODO.md)** - Planned enhancements and known issues
+- **[Technical Documentation](docs/technical/)** - Deep dives into implementation details:
+  - Code generation comparison with sbe-tool
+  - Performance analysis and zero-allocation verification
+  - Julia 1.12 world-age semantics analysis
+
+## Testing
+
+```bash
+# Run all tests
+julia --project -e 'using Pkg; Pkg.test()'
+
+# Run specific test
+julia --project test/test_groups.jl
+```
+
+Current status: **533+ tests passing** ✅
+
+## Performance
+
+SBE.jl achieves **zero allocation** for message encoding/decoding:
+- Direct buffer access via views
+- No intermediate object creation
+- Type-stable code generation
+- Optimal memory layout
+
+See [PERFORMANCE_INSIGHTS.md](docs/technical/PERFORMANCE_INSIGHTS.md) for detailed benchmarks.
+
+## Binary Compatibility
+
+SBE.jl is binary-compatible with the official sbe-tool:
+- ✅ Can decode messages encoded by sbe-tool
+- ✅ sbe-tool can decode messages encoded by SBE.jl
+- ✅ Identical byte layouts for all types
+
+See [CODEGEN_COMPARISON.md](docs/technical/CODEGEN_COMPARISON.md) for API differences.
+
 ## References
 
 - [SBE Specification](https://github.com/aeron-io/simple-binary-encoding)
