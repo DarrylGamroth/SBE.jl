@@ -73,8 +73,8 @@ using SBE
     
     @testset "Metadata Constants" begin
         # Verify since_version constants exist
-        @test Versioned.Product.status_since_version() == UInt16(1)
-        @test Versioned.Product.features_since_version() == UInt16(2)
-        @test Versioned.Product.priority_since_version() == UInt16(1)
+        @test Versioned.Product.status_since_version(Versioned.Product.Decoder) == UInt16(1)
+        @test Versioned.Product.features_since_version(Versioned.Product.Decoder) == UInt16(2)
+        @test Versioned.Product.priority_since_version(Versioned.Product.Decoder) == UInt16(1)
     end
 end

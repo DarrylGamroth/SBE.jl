@@ -336,7 +336,7 @@ function expr_to_code_string(expr::Expr)
     # Remove excessive blank lines (more than 2 consecutive newlines)
     code_str = replace(code_str, r"\n{3,}" => "\n\n")
     
-    return strip(code_str)
+    return String(strip(code_str))
 end
 
 # ============================================================================
@@ -2838,13 +2838,11 @@ function generate_composite_ref_member_expr(member::Schema.RefType, offset::Int,
         # Handle composite type references (e.g., <ref name="booster" type="Booster"/>)
         composite_module_name = Symbol(to_pascal_case(member.type_ref))
         
+        # For composites, Decoder and Encoder are aliases to the same type (e.g., EngineStruct)
+        # Use base_type_name to avoid defining the same method twice
         push!(exprs, quote
-            @inline function $member_name(m::$decoder_name)
+            @inline function $member_name(m::$base_type_name)
                 return $composite_module_name.Decoder(m.buffer, m.offset + $offset, m.acting_version)
-            end
-            
-            @inline function $member_name(m::$encoder_name)
-                return $composite_module_name.Encoder(m.buffer, m.offset + $offset, m.acting_version)
             end
             
             export $member_name
@@ -3316,7 +3314,7 @@ function generate_encoded_field_expr(field_name::Symbol, field_def::Schema.Field
     exprs = Expr[]
     
     # Generate metadata
-    push!(exprs, generate_field_metadata_expr(field_name, field_def, type_def, field_offset, julia_type))
+    push!(exprs, generate_field_metadata_expr(field_name, field_def, type_def, field_offset, julia_type, decoder_name))
     
     # Generate accessors based on length
     if type_def.length == 1
@@ -3487,7 +3485,7 @@ Helper function to generate field metadata expressions.
 """
 function generate_field_metadata_expr(field_name::Symbol, field_def::Schema.FieldDefinition,
                                      type_def::Union{Schema.EncodedType, Nothing}, field_offset::Int,
-                                     julia_type::Type)
+                                     julia_type::Type, parent_type::Symbol)
     total_length = type_def !== nothing ? sizeof(julia_type) * type_def.length : sizeof(julia_type)
     array_length = type_def !== nothing ? type_def.length : 1
     
@@ -3498,23 +3496,48 @@ function generate_field_metadata_expr(field_name::Symbol, field_def::Schema.Fiel
     # Generate metadata function expressions
     field_id_fn = Symbol(field_name, :_id)
     field_since_fn = Symbol(field_name, :_since_version)
+    field_in_acting_fn = Symbol(field_name, :_in_acting_version)
     field_offset_fn = Symbol(field_name, :_encoding_offset)
     field_length_fn = Symbol(field_name, :_encoding_length)
     field_null_fn = Symbol(field_name, :_null_value)
     field_min_fn = Symbol(field_name, :_min_value)
     field_max_fn = Symbol(field_name, :_max_value)
+    field_meta_fn = Symbol(field_name, :_meta_attribute)
+    
+    # Get presence and semantic type for meta_attribute
+    presence = field_def.presence === nothing ? "required" : field_def.presence
+    semantic_type = field_def.semantic_type === nothing ? "" : field_def.semantic_type
     
     return quote
-        $field_id_fn() = UInt16($(field_def.id))
-        $field_since_fn() = UInt16($(field_def.since_version))
-        $field_offset_fn() = $field_offset
-        $field_length_fn() = $total_length
-        $field_null_fn() = $null_val
-        $field_min_fn() = $min_val
-        $field_max_fn() = $max_val
+        # Instance dispatch
+        $field_id_fn(::$parent_type) = UInt16($(field_def.id))
+        $field_since_fn(::$parent_type) = UInt16($(field_def.since_version))
+        $field_in_acting_fn(m::$parent_type) = sbe_acting_version(m) >= UInt16($(field_def.since_version))
+        $field_offset_fn(::$parent_type) = $field_offset
+        $field_length_fn(::$parent_type) = $total_length
+        $field_null_fn(::$parent_type) = $null_val
+        $field_min_fn(::$parent_type) = $min_val
+        $field_max_fn(::$parent_type) = $max_val
         
-        export $field_id_fn, $field_since_fn, $field_offset_fn, $field_length_fn
-        export $field_null_fn, $field_min_fn, $field_max_fn
+        # Type dispatch
+        $field_id_fn(::Type{<:$parent_type}) = UInt16($(field_def.id))
+        $field_since_fn(::Type{<:$parent_type}) = UInt16($(field_def.since_version))
+        $field_offset_fn(::Type{<:$parent_type}) = $field_offset
+        $field_length_fn(::Type{<:$parent_type}) = $total_length
+        $field_null_fn(::Type{<:$parent_type}) = $null_val
+        $field_min_fn(::Type{<:$parent_type}) = $min_val
+        $field_max_fn(::Type{<:$parent_type}) = $max_val
+        
+        # Meta attribute function
+        function $field_meta_fn(::$parent_type, meta_attribute)
+            meta_attribute === :presence && return Symbol($presence)
+            meta_attribute === :semanticType && return Symbol($semantic_type)
+            return Symbol("")
+        end
+        $field_meta_fn(::Type{<:$parent_type}, meta_attribute) = $field_meta_fn($parent_type(), meta_attribute)
+        
+        export $field_id_fn, $field_since_fn, $field_in_acting_fn, $field_offset_fn, $field_length_fn
+        export $field_null_fn, $field_min_fn, $field_max_fn, $field_meta_fn
     end
 end
 
@@ -3534,7 +3557,7 @@ function generate_enum_field_expr(field_name::Symbol, field_def::Schema.FieldDef
     exprs = Expr[]
     
     # Generate metadata
-    push!(exprs, generate_field_metadata_expr(field_name, field_def, nothing, field_offset, encoding_julia_type))
+    push!(exprs, generate_field_metadata_expr(field_name, field_def, nothing, field_offset, encoding_julia_type, decoder_name))
     
     # Get null value
     null_val = encoding_julia_type <: Unsigned ? typemax(encoding_julia_type) : typemin(encoding_julia_type)
@@ -3629,7 +3652,7 @@ function generate_set_field_expr(field_name::Symbol, field_def::Schema.FieldDefi
     exprs = Expr[]
     
     # Generate metadata
-    push!(exprs, generate_field_metadata_expr(field_name, field_def, nothing, field_offset, encoding_julia_type))
+    push!(exprs, generate_field_metadata_expr(field_name, field_def, nothing, field_offset, encoding_julia_type, decoder_name))
     
     # Generate accessor that returns set type
     push!(exprs, quote
@@ -3693,32 +3716,53 @@ function generate_composite_field_expr(field_name::Symbol, field_def::Schema.Fie
     # Calculate composite size
     composite_size = calculate_composite_size(type_def, schema)
     
-    # Generate metadata for composite field with correct size
-    # We pass a custom metadata expr instead of using generate_field_metadata_expr
-    # to avoid the encoding_length being set to sizeof(UInt8) and then overridden
+    # Generate metadata for composite field with type dispatch
     field_id_fn = Symbol(field_name, :_id)
     field_since_fn = Symbol(field_name, :_since_version)
+    field_in_acting_fn = Symbol(field_name, :_in_acting_version)
     field_offset_fn = Symbol(field_name, :_encoding_offset)
     field_length_fn = Symbol(field_name, :_encoding_length)
     field_null_fn = Symbol(field_name, :_null_value)
     field_min_fn = Symbol(field_name, :_min_value)
     field_max_fn = Symbol(field_name, :_max_value)
+    field_meta_fn = Symbol(field_name, :_meta_attribute)
+    
+    # Get presence and semantic type for meta_attribute
+    presence = field_def.presence === nothing ? "required" : field_def.presence
+    semantic_type = field_def.semantic_type === nothing ? "" : field_def.semantic_type
     
     push!(exprs, quote
-        $field_id_fn() = UInt16($(field_def.id))
-        $field_since_fn() = UInt16($(field_def.since_version))
-        $field_offset_fn() = $field_offset
-        $field_length_fn() = $composite_size
-        $field_null_fn() = $(typemax(UInt8))
-        $field_min_fn() = $(typemin(UInt8))
-        $field_max_fn() = $(typemax(UInt8))
+        # Instance dispatch
+        $field_id_fn(::$decoder_name) = UInt16($(field_def.id))
+        $field_since_fn(::$decoder_name) = UInt16($(field_def.since_version))
+        $field_in_acting_fn(m::$decoder_name) = sbe_acting_version(m) >= UInt16($(field_def.since_version))
+        $field_offset_fn(::$decoder_name) = $field_offset
+        $field_length_fn(::$decoder_name) = $composite_size
+        $field_null_fn(::$decoder_name) = $(typemax(UInt8))
+        $field_min_fn(::$decoder_name) = $(typemin(UInt8))
+        $field_max_fn(::$decoder_name) = $(typemax(UInt8))
         
-        export $field_id_fn, $field_since_fn, $field_offset_fn, $field_length_fn
-        export $field_null_fn, $field_min_fn, $field_max_fn
-    end)
-    
-    # Generate accessor that returns composite type
-    push!(exprs, quote
+        # Type dispatch
+        $field_id_fn(::Type{<:$decoder_name}) = UInt16($(field_def.id))
+        $field_since_fn(::Type{<:$decoder_name}) = UInt16($(field_def.since_version))
+        $field_offset_fn(::Type{<:$decoder_name}) = $field_offset
+        $field_length_fn(::Type{<:$decoder_name}) = $composite_size
+        $field_null_fn(::Type{<:$decoder_name}) = $(typemax(UInt8))
+        $field_min_fn(::Type{<:$decoder_name}) = $(typemin(UInt8))
+        $field_max_fn(::Type{<:$decoder_name}) = $(typemax(UInt8))
+        
+        # Meta attribute function
+        function $field_meta_fn(::$decoder_name, meta_attribute)
+            meta_attribute === :presence && return Symbol($presence)
+            meta_attribute === :semanticType && return Symbol($semantic_type)
+            return Symbol("")
+        end
+        $field_meta_fn(::Type{<:$decoder_name}, meta_attribute) = $field_meta_fn($decoder_name(), meta_attribute)
+        
+        export $field_id_fn, $field_since_fn, $field_in_acting_fn, $field_offset_fn, $field_length_fn
+        export $field_null_fn, $field_min_fn, $field_max_fn, $field_meta_fn
+        
+        # Generate accessor that returns composite type (in same block to avoid overwrite warnings)
         @inline function $field_name(m::$decoder_name)
             return $composite_type_name.Decoder(m.buffer, m.offset + $field_offset, m.acting_version)
         end

@@ -151,8 +151,8 @@ using SBE
         # Individual metadata is accessed via the field-specific constants (functions)
         @test isdefined(Baseline.Car, :modelYear_id)
         @test isdefined(Baseline.Car, :modelYear_since_version)
-        @test Baseline.Car.modelYear_id() isa UInt16
-        @test Baseline.Car.modelYear_since_version() isa UInt16
+        @test Baseline.Car.modelYear_id(Baseline.Car.Decoder) isa UInt16
+        @test Baseline.Car.modelYear_since_version(Baseline.Car.Decoder) isa UInt16
         
         # Test meta_attribute utility function behavior with schema field definitions
         schema_path = joinpath(@__DIR__, "example-schema.xml")

@@ -109,10 +109,10 @@ include("generated/Baseline.jl")
         @test Baseline.Engine.capacity_encoding_offset(engine_decoder) isa Int
         
         # Test message field metadata (also functions in file-based generation)
-        @test Baseline.Car.modelYear_encoding_length() == 2  # sizeof(UInt16)
-        @test Baseline.Car.modelYear_encoding_offset() isa Int
-        @test Baseline.Car.modelYear_id() isa UInt16
-        @test Baseline.Car.modelYear_since_version() isa UInt16
+        @test Baseline.Car.modelYear_encoding_length(Baseline.Car.Decoder) == 2  # sizeof(UInt16)
+        @test Baseline.Car.modelYear_encoding_offset(Baseline.Car.Decoder) isa Int
+        @test Baseline.Car.modelYear_id(Baseline.Car.Decoder) isa UInt16
+        @test Baseline.Car.modelYear_since_version(Baseline.Car.Decoder) isa UInt16
     end
     
     @testset "Array Field Direct Accessors" begin
@@ -132,7 +132,7 @@ include("generated/Baseline.jl")
         @test collect(some_numbers_value) == UInt32[10, 20, 30, 40]
         
         # Test metadata (functions in file-based generation)
-        @test Baseline.Car.someNumbers_encoding_length() == 16  # 4 * sizeof(UInt32)
-        @test Baseline.Car.someNumbers_encoding_offset() isa Int
+        @test Baseline.Car.someNumbers_encoding_length(Baseline.Car.Decoder) == 16  # 4 * sizeof(UInt32)
+        @test Baseline.Car.someNumbers_encoding_offset(Baseline.Car.Decoder) isa Int
     end
 end

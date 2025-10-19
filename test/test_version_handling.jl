@@ -15,8 +15,8 @@ using SBE
         @test isdefined(Extension.Car, :cupHolderCount_since_version)
         
         # Verify the since_version values are correct (they are functions in file-based generation)
-        @test Extension.Car.uuid_since_version() == UInt16(1)
-        @test Extension.Car.cupHolderCount_since_version() == UInt16(1)
+        @test Extension.Car.uuid_since_version(Extension.Car.Decoder) == UInt16(1)
+        @test Extension.Car.cupHolderCount_since_version(Extension.Car.Decoder) == UInt16(1)
     end
     
     @testset "Version 0 Behavior (Fields Not In Version)" begin
@@ -93,8 +93,8 @@ using SBE
         
         # since_version should be constants
         # Verify metadata functions are consistent
-        @test Extension.Car.uuid_since_version() == UInt16(1)
-        @test Extension.Car.cupHolderCount_since_version() == UInt16(1)        # Test that fields are accessible with version 1
+        @test Extension.Car.uuid_since_version(Extension.Car.Decoder) == UInt16(1)
+        @test Extension.Car.cupHolderCount_since_version(Extension.Car.Decoder) == UInt16(1)        # Test that fields are accessible with version 1
         @test car.acting_version == UInt16(1)
     end
     
@@ -107,9 +107,9 @@ using SBE
         
         # All baseline fields should have since_version = 0
         # Verify that fields in the baseline schema have since_version=0
-        @test Baseline.Car.serialNumber_since_version() == UInt16(0)
-        @test Baseline.Car.modelYear_since_version() == UInt16(0)
-        @test Baseline.Car.available_since_version() == UInt16(0)        # Fields should work normally
+        @test Baseline.Car.serialNumber_since_version(Baseline.Car.Decoder) == UInt16(0)
+        @test Baseline.Car.modelYear_since_version(Baseline.Car.Decoder) == UInt16(0)
+        @test Baseline.Car.available_since_version(Baseline.Car.Decoder) == UInt16(0)        # Fields should work normally
         car_enc = Baseline.Car.Encoder(buffer, 0, position_ptr)
         Baseline.Car.serialNumber!(car_enc, UInt64(12345))
         
