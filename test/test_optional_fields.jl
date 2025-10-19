@@ -9,13 +9,13 @@ include("generated/Optional.jl")
     
     @testset "Null Value Constants" begin
         # Test that null_value functions are generated for optional fields
-        # In file-based generation, these are functions not constants
-        @test Optional.Order.optionalPrice_null_value() == typemax(UInt32)
-        @test Optional.Order.optionalVolume_null_value() == typemin(Int64)
-        @test isnan(Optional.Order.optionalDiscount_null_value())
+        # In file-based generation, these are functions that take a type argument
+        @test Optional.Order.optionalPrice_null_value(Optional.Order.Decoder) == typemax(UInt32)
+        @test Optional.Order.optionalVolume_null_value(Optional.Order.Decoder) == typemin(Int64)
+        @test isnan(Optional.Order.optionalDiscount_null_value(Optional.Order.Decoder))
         
         # Optional enum should have null value
-        @test Optional.Order.status_null_value() == typemax(UInt8)
+        @test Optional.Order.status_null_value(Optional.Order.Decoder) == typemax(UInt8)
     end
     
     @testset "Type Stability - Primitive Optional Fields" begin
@@ -92,10 +92,10 @@ include("generated/Optional.jl")
         Optional.Order.quantity!(enc, UInt32(50))
         
         # Set optional fields to null values
-        Optional.Order.optionalPrice!(enc, Optional.Order.optionalPrice_null_value())
-        Optional.Order.optionalVolume!(enc, Optional.Order.optionalVolume_null_value())
-        Optional.Order.optionalDiscount!(enc, Optional.Order.optionalDiscount_null_value())
-        Optional.Order.status!(enc, Optional.Status.SbeEnum(Optional.Order.status_null_value()))
+        Optional.Order.optionalPrice!(enc, Optional.Order.optionalPrice_null_value(Optional.Order.Encoder))
+        Optional.Order.optionalVolume!(enc, Optional.Order.optionalVolume_null_value(Optional.Order.Encoder))
+        Optional.Order.optionalDiscount!(enc, Optional.Order.optionalDiscount_null_value(Optional.Order.Encoder))
+        Optional.Order.status!(enc, Optional.Status.SbeEnum(Optional.Order.status_null_value(Optional.Order.Encoder)))
         
         Optional.Order.timestamp!(enc, UInt64(9999))
         
@@ -121,18 +121,18 @@ include("generated/Optional.jl")
         enc = Optional.Order.Encoder(buffer, 0, header=header)
         Optional.Order.orderId!(enc, UInt64(1))
         Optional.Order.quantity!(enc, UInt32(1))
-        Optional.Order.optionalPrice!(enc, Optional.Order.optionalPrice_null_value())
+        Optional.Order.optionalPrice!(enc, Optional.Order.optionalPrice_null_value(Optional.Order.Encoder))
         Optional.Order.optionalVolume!(enc, Int64(500))  # Non-null
-        Optional.Order.optionalDiscount!(enc, Optional.Order.optionalDiscount_null_value())
+        Optional.Order.optionalDiscount!(enc, Optional.Order.optionalDiscount_null_value(Optional.Order.Encoder))
         Optional.Order.timestamp!(enc, UInt64(1))
         
         # Decode and check which fields are null (starts after 8-byte message header)
         dec = Optional.Order.Decoder(buffer, 0)
         
         # User can check for null by comparing to null_value()
-        @test Optional.Order.optionalPrice(dec) == Optional.Order.optionalPrice_null_value()
-        @test Optional.Order.optionalVolume(dec) != Optional.Order.optionalVolume_null_value()
-        @test isnan(Optional.Order.optionalDiscount(dec)) && isnan(Optional.Order.optionalDiscount_null_value())
+        @test Optional.Order.optionalPrice(dec) == Optional.Order.optionalPrice_null_value(Optional.Order.Decoder)
+        @test Optional.Order.optionalVolume(dec) != Optional.Order.optionalVolume_null_value(Optional.Order.Decoder)
+        @test isnan(Optional.Order.optionalDiscount(dec)) && isnan(Optional.Order.optionalDiscount_null_value(Optional.Order.Decoder))
     end
     
     @testset "Round-trip Test with Mixed Null/Non-null" begin
@@ -145,9 +145,9 @@ include("generated/Optional.jl")
         Optional.Order.orderId!(enc, UInt64(777))
         Optional.Order.quantity!(enc, UInt32(25))
         Optional.Order.optionalPrice!(enc, UInt32(1234))  # Non-null
-        Optional.Order.optionalVolume!(enc, Optional.Order.optionalVolume_null_value())  # Null
+        Optional.Order.optionalVolume!(enc, Optional.Order.optionalVolume_null_value(Optional.Order.Encoder))  # Null
         Optional.Order.optionalDiscount!(enc, Float32(0.05))  # Non-null
-        Optional.Order.status!(enc, Optional.Status.SbeEnum(Optional.Order.status_null_value()))  # Null
+        Optional.Order.status!(enc, Optional.Status.SbeEnum(Optional.Order.status_null_value(Optional.Order.Encoder)))  # Null
         Optional.Order.timestamp!(enc, UInt64(555))
         
         # Decode and re-encode (decoder reads header at offset 0)
@@ -170,9 +170,9 @@ include("generated/Optional.jl")
         dec2 = Optional.Order.Decoder(buffer2, 0)
         @test Optional.Order.orderId(dec2) == UInt64(777)
         @test Optional.Order.optionalPrice(dec2) == UInt32(1234)
-        @test Optional.Order.optionalVolume(dec2) == Optional.Order.optionalVolume_null_value()
+        @test Optional.Order.optionalVolume(dec2) == Optional.Order.optionalVolume_null_value(Optional.Order.Decoder)
         @test Optional.Order.optionalDiscount(dec2) == Float32(0.05)
-        @test UInt8(Optional.Order.status(dec2)) == Optional.Order.status_null_value()
+        @test UInt8(Optional.Order.status(dec2)) == Optional.Order.status_null_value(Optional.Order.Decoder)
     end
     
     @testset "Zero-allocation Field Access" begin

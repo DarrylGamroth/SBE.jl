@@ -112,8 +112,8 @@ using SBE
         engine_decoder = Baseline.Car.engine(decoder)
         engine_encoder = Baseline.Car.engine(encoder)
         
-        @test engine_decoder isa Baseline.Engine.EngineStruct
-        @test engine_encoder isa Baseline.Engine.EngineStruct
+        @test engine_decoder isa Baseline.Engine.Decoder
+        @test engine_encoder isa Baseline.Engine.Encoder
         
         # Test composite field accessors
         @test hasmethod(Baseline.Engine.capacity, Tuple{typeof(engine_decoder)})

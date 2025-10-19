@@ -34,8 +34,8 @@ include("generated/Baseline.jl")
         @test Baseline.Booster.sbe_encoded_length(booster) == 2  # 1 byte enum + 1 byte horsePower
         
         # Test 7: Read/write boostType enum
-        buffer = zeros(UInt8, 10)
-        booster_enc = Baseline.Booster.Encoder(buffer, 0, UInt16(0))
+        buffer = zeros(UInt8, 2)
+        booster_enc = Baseline.Booster.Encoder(buffer, 0)
         
         # Write TURBO enum value
         Baseline.Booster.boostType!(booster_enc, Baseline.Booster.BoostType.TURBO)
@@ -63,7 +63,8 @@ include("generated/Baseline.jl")
     @testset "Nested Enum + Primitive Field Offsets" begin
         # Test that horsePower is at the correct offset after the enum
         buffer = zeros(UInt8, 10)
-        booster_enc = Baseline.Booster.Encoder(buffer, 0, UInt16(0))
+        engine_enc = Baseline.Engine.Encoder(buffer, 0)
+        booster_enc = Baseline.Booster.Encoder(buffer, 0)
         booster_dec = Baseline.Booster.Decoder(buffer, 0, UInt16(0))
         
         # Set boostType at offset 0

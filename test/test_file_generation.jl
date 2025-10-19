@@ -33,7 +33,10 @@ using SBE
         @test occursin("@enumx T = SbeEnum BooleanType", code)
         @test occursin("@enumx T = SbeEnum", code)  # At least one enum
         @test occursin("module Engine", code)
-        @test occursin("struct EngineStruct", code)
+        # Check for composite types (e.g., Engine, Booster) - now uses abstract type pattern
+        @test occursin("abstract type AbstractEngine", code)
+        @test occursin(r"struct Decoder.*<: AbstractEngine"s, code)
+        @test occursin(r"struct Encoder.*<: AbstractEngine"s, code)
         @test occursin("module Car", code)
         @test occursin("struct Encoder", code)
         @test occursin("struct Decoder", code)
