@@ -258,17 +258,21 @@ using SBE
         buffer = zeros(UInt8, 512)
         enc = Order_check.BitSetInsideGroup.Encoder(buffer)
         
-        # Set top-level bitset
-        Order_check.BitSetInsideGroup.a!(enc, Set([Order_check.Flags.guacamole]))
+        # Set top-level bitset (correct pattern: get set accessor, then set individual bits)
+        a_set_enc = Order_check.BitSetInsideGroup.a(enc)
+        Order_check.Flags.guacamole!(a_set_enc, true)
         
         # Create group with bitset fields
         b_enc = Order_check.BitSetInsideGroup.b!(enc, 2)
         
         Order_check.BitSetInsideGroup.B.next!(b_enc)
-        Order_check.BitSetInsideGroup.B.c!(b_enc, Set([Order_check.Flags.cheese]))
+        c1_set_enc = Order_check.BitSetInsideGroup.B.c(b_enc)
+        Order_check.Flags.cheese!(c1_set_enc, true)
         
         Order_check.BitSetInsideGroup.B.next!(b_enc)
-        Order_check.BitSetInsideGroup.B.c!(b_enc, Set([Order_check.Flags.guacamole, Order_check.Flags.sourCream]))
+        c2_set_enc = Order_check.BitSetInsideGroup.B.c(b_enc)
+        Order_check.Flags.guacamole!(c2_set_enc, true)
+        Order_check.Flags.sourCream!(c2_set_enc, true)
         
         # Decode and verify
         dec = Order_check.BitSetInsideGroup.Decoder(buffer)

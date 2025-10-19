@@ -372,50 +372,6 @@ end
 # ============================================================================
 
 """
-    generateEncodedTypes!(target_module::Module, schema::Schema.MessageSchema)
-
-Import the encoding/decoding utility functions from the SBE module.
-These functions are now defined once in SBE.jl and imported by each generated module,
-avoiding code duplication.
-
-Creates const aliases with standard names that point to the appropriate
-endianness-specific implementations (_le or _be suffix).
-
-# Arguments
-- `target_module::Module`: The module where the functions will be imported
-- `schema::Schema.MessageSchema`: Schema containing byte order information
-
-# Generated Functions (as const aliases)
-- `encode_value`: Encode a single value
-- `decode_value`: Decode a single value
-- `encode_array`: Create mutable mapped array for encoding
-- `decode_array`: Create read-only mapped array for decoding
-"""
-function generateEncodedTypes!(target_module::Module, schema::Schema.MessageSchema)
-    if schema.byte_order == "bigEndian"
-        # Import big-endian versions and create const aliases
-        Core.eval(target_module, quote
-            import SBE: encode_value_be, decode_value_be, encode_array_be, decode_array_be
-
-            const encode_value = encode_value_be
-            const decode_value = decode_value_be
-            const encode_array = encode_array_be
-            const decode_array = decode_array_be
-        end)
-    else
-        # Import little-endian versions (SBE default) and create const aliases
-        Core.eval(target_module, quote
-            import SBE: encode_value_le, decode_value_le, encode_array_le, decode_array_le
-
-            const encode_value = encode_value_le
-            const decode_value = decode_value_le
-            const encode_array = encode_array_le
-            const decode_array = decode_array_le
-        end)
-    end
-end
-
-"""
     generateEncodedTypes_expr(schema::Schema.MessageSchema) -> Expr
 
 Generate endianness-specific encode/decode imports as an expression (for file-based generation).
@@ -465,828 +421,9 @@ function generateEncodedTypes_expr(schema::Schema.MessageSchema)
     end
 end
 
-"""
-    generatePrimitiveProperty!(target_module::Module, field_name::Symbol, type_def::Schema.EncodedType)
-
-Generate value accessor functions that use the consistent encode/decode pattern.
-
-This replaces both generate_value_accessors! and the duplicated logic in composite generation.
-Creates `value()` and `value!()` methods for both single values and arrays, automatically
-using the appropriate endianness-aware encode/decode functions.
-
-# Arguments
-- `target_module::Module`: The module where the functions will be generated
-- `field_name::Symbol`: Name of the field type
-- `type_def::Schema.EncodedType`: Type definition containing primitive type and length info
-
-# Generated Functions
-- `value(field)`: Get the current value (single or array)
-- `value!(field, val)`: Set a new value (single values only)
-- `value!(field)`: Get mutable array reference (arrays only)
-- `value!(field, val)`: Copy values into array (arrays only)
-"""
-function generatePrimitiveProperty!(target_module::Module, field_name::Symbol, type_def::Schema.EncodedType)
-    julia_type = to_julia_type(type_def.primitive_type)
-
-    if type_def.length == 1
-        # Single value accessor
-        Core.eval(target_module, quote
-            function value(field::$field_name)
-                decode_value($julia_type, field.buffer, field.offset)
-            end
-
-            function value!(field::$field_name, val::$julia_type)
-                encode_value($julia_type, field.buffer, field.offset, val)
-            end
-        end)
-    else
-        # Array value accessor - use the endianness-aware array functions
-        Core.eval(target_module, quote
-            function value(field::$field_name)
-                decode_array($julia_type, field.buffer, field.offset, $(type_def.length))
-            end
-
-            function value!(field::$field_name)
-                encode_array($julia_type, field.buffer, field.offset, $(type_def.length))
-            end
-
-            function value!(field::$field_name, val)
-                # Copy values into the mutable mapped array
-                copyto!(value!(field), val)
-            end
-        end)
-    end
-end
-
 # ============================================================================
 # Shared Type Generation Functions
 # ============================================================================
-
-"""
-    generateComposite!(target_module::Module, composite_def::Schema.CompositeType, schema::Schema.MessageSchema)
-
-Generate a complete composite type in the given module.
-
-This creates a separate module for the composite with clean field dispatch patterns.
-The generated composite includes Decoder/Encoder types, SBE interface methods,
-and field accessors for all members.
-
-# Arguments
-- `target_module::Module`: The parent module where the composite module will be created
-- `composite_def::Schema.CompositeType`: Composite type definition from schema
-- `schema::Schema.MessageSchema`: Complete schema for context
-
-# Returns
-- `Symbol`: The name of the generated composite type
-
-# Generated Structure
-- Separate module named after the composite
-- Abstract base type and concrete Decoder/Encoder types
-- SBE interface methods (sbe_buffer, sbe_offset, etc.)
-- Field accessor methods for each member
-- Proper endianness handling via encode/decode functions
-"""
-function generateComposite!(target_module::Module, composite_def::Schema.CompositeType, schema::Schema.MessageSchema)
-    composite_name = Symbol(to_pascal_case(composite_def.name))
-    # Use <Name>Struct pattern for clarity (MessageHeader.MessageHeaderStruct)
-    struct_name = Symbol(string(composite_name, "Struct"))
-    decoder_name = :Decoder  # Type alias
-    encoder_name = :Encoder  # Type alias
-
-    # Create a separate module for this composite
-    composite_module_name = composite_name  # Use the composite name directly as module name
-    Core.eval(target_module, :(module $composite_module_name end))
-    composite_module = getfield(target_module, composite_module_name)
-
-    # Import necessary types into the composite module (only what exists)
-    Core.eval(composite_module, :(using SBE: AbstractSbeCompositeType, AbstractSbeEncodedType))
-    Core.eval(composite_module, :(import SBE: id, since_version, encoding_offset, encoding_length, null_value, min_value, max_value))
-    # Import value and value! so generated functions extend the main SBE interface
-    Core.eval(composite_module, :(import SBE: value, value!))
-    Core.eval(composite_module, :(using MappedArrays: mappedarray))
-
-    # Generate the consistent encode/decode functions for this module
-    generateEncodedTypes!(composite_module, schema)
-
-    # Calculate the total encoded size
-    total_size = 0
-    for member in composite_def.members
-        if member isa Schema.EncodedType
-            # Skip constant members - they don't occupy space
-            if member.presence == "constant"
-                continue
-            end
-            julia_type = to_julia_type(member.primitive_type)
-            total_size += sizeof(julia_type) * member.length
-        elseif member isa Schema.RefType
-            # Look up the referenced type and calculate its size
-            ref_type_def = find_type_by_name(schema, member.type_ref)
-            if ref_type_def !== nothing
-                if ref_type_def isa Schema.EncodedType
-                    # Skip constant refs
-                    if ref_type_def.presence == "constant"
-                        continue
-                    end
-                    ref_julia_type = to_julia_type(ref_type_def.primitive_type)
-                    total_size += sizeof(ref_julia_type) * ref_type_def.length
-                elseif ref_type_def isa Schema.CompositeType
-                    # Recursively calculate composite size using get_field_size
-                    total_size += get_field_size(schema, Schema.FieldDefinition(
-                        member.name, UInt16(0), member.type_ref, 0, "", 0, "required",
-                        nothing, "", nothing, nothing, nothing
-                    ))
-                elseif ref_type_def isa Schema.EnumType
-                    encoding_type = to_julia_type(ref_type_def.encoding_type)
-                    total_size += sizeof(encoding_type)
-                elseif ref_type_def isa Schema.SetType
-                    encoding_type = to_julia_type(ref_type_def.encoding_type)
-                    total_size += sizeof(encoding_type)
-                end
-            end
-        elseif member isa Schema.EnumType
-            # Inline enum definition
-            encoding_type = to_julia_type(member.encoding_type)
-            total_size += sizeof(encoding_type)
-        elseif member isa Schema.SetType
-            # Inline set definition
-            encoding_type = to_julia_type(member.encoding_type)
-            total_size += sizeof(encoding_type)
-        end
-    end
-
-    # Generate base type and concrete Decoder/Encoder types directly in module
-    # Use unique names to avoid conflicts with module name
-    # Generate composite struct using baseline pattern: single struct with type aliases
-    # This eliminates allocations by having only one type (matches sbetool baseline)
-    Core.eval(composite_module, quote
-        export $decoder_name, $encoder_name
-
-        # Single immutable struct for both encoding and decoding (matches sbetool baseline)
-        struct $struct_name{T<:AbstractArray{UInt8}} <: AbstractSbeCompositeType
-            buffer::T
-            offset::Int64
-            acting_version::UInt16
-        end
-
-        # Type aliases for Decoder and Encoder (matches sbetool baseline pattern)
-        const $decoder_name = $struct_name
-        const $encoder_name = $struct_name
-    end)
-
-    # Generate outer constructors for REPL convenience (provide defaults)
-    # Only handle 1 and 2 argument cases - 3 arguments handled by inner constructor
-    Core.eval(composite_module, quote
-        # 1-argument: buffer only (use default offset and acting_version)
-        @inline function $struct_name(buffer::AbstractArray{UInt8})
-            $struct_name(buffer, Int64(0), UInt16(0))
-        end
-
-        # 2-argument: buffer + offset (use default acting_version)
-        @inline function $struct_name(buffer::AbstractArray{UInt8}, offset::Integer)
-            $struct_name(buffer, Int64(offset), UInt16(0))
-        end
-    end)
-
-    # Generate SBE interface methods (only the ones specific to composites)
-    # Note: sbe_buffer and sbe_offset are defined generically in metaprogramming.jl
-    Core.eval(composite_module, quote
-        # Encoded length - specific to this composite type
-        sbe_encoded_length(::$struct_name) = UInt16($total_size)
-        sbe_encoded_length(::Type{<:$struct_name}) = UInt16($total_size)
-
-        # Base.sizeof compatibility
-        Base.sizeof(m::$struct_name) = sbe_encoded_length(m)
-
-        # Convert to byte array for writing
-        function Base.convert(::Type{<:AbstractArray{UInt8}}, m::$struct_name)
-            return view(m.buffer, m.offset+1:m.offset+sbe_encoded_length(m))
-        end
-
-        # User-friendly display method
-        function Base.show(io::IO, m::$struct_name)
-            print(io, $(string(composite_name)), "(offset=", m.offset, ", size=", sbe_encoded_length(m), ")")
-        end
-    end)
-
-    # Generate field accessors for each member in the composite module
-    offset = 0
-    for member in composite_def.members
-        if member isa Schema.EncodedType
-            generateCompositePropertyElements!(composite_module, struct_name, decoder_name, encoder_name, member, offset)
-            julia_type = to_julia_type(member.primitive_type)
-            offset += sizeof(julia_type) * member.length
-        end
-    end
-
-    # Export the composite module itself so users can access Engine.Encoder and Engine.Decoder
-    Core.eval(target_module, :(export $composite_module_name))
-
-    return composite_name
-end
-
-"""
-    generateCompositePropertyElements!(composite_module::Module, base_type_name::Symbol, decoder_name::Symbol, encoder_name::Symbol, member::Schema.EncodedType, offset::Int)
-
-Generate field accessor methods for a composite member.
-
-This creates clean field types with dispatch methods within the composite module.
-Each member gets its own field type with proper SBE interface methods and
-value accessors.
-
-# Arguments
-- `composite_module::Module`: The composite's module where field types are generated
-- `base_type_name::Symbol`: Name of the composite's base type
-- `decoder_name::Symbol`: Name of the decoder type
-- `encoder_name::Symbol`: Name of the encoder type
-- `member::Schema.EncodedType`: Member definition from the composite
-- `offset::Int`: Byte offset of this member within the composite
-
-# Generated Components
-- Field type struct with buffer and offset
-- SBE interface methods (id, since_version, encoding_*, etc.)
-- Value accessor methods (value, value!)
-- Proper type information (length, eltype)
-"""
-function generateCompositePropertyElements!(composite_module::Module, base_type_name::Symbol, decoder_name::Symbol, encoder_name::Symbol, member::Schema.EncodedType, offset::Int)
-    member_name = Symbol(toCamelCase(member.name))
-    julia_type = to_julia_type(member.primitive_type)
-    is_constant = member.presence == "constant"
-
-    # For constants, encoding_length is 0
-    encoding_length = is_constant ? 0 : sizeof(julia_type) * member.length
-
-    # Generate metadata functions (following sbetool baseline pattern)
-    # These provide SBE field information without creating field objects
-    Core.eval(composite_module, quote
-        # SBE field attributes (metadata functions, matches baseline)
-        $(Symbol(member_name, :_id))(::$base_type_name) = UInt16(0xffff)
-        $(Symbol(member_name, :_id))(::Type{<:$base_type_name}) = UInt16(0xffff)
-        $(Symbol(member_name, :_since_version))(::$base_type_name) = UInt16($(member.since_version))
-        $(Symbol(member_name, :_since_version))(::Type{<:$base_type_name}) = UInt16($(member.since_version))
-        # Use direct field access instead of sbe_acting_version() call
-        $(Symbol(member_name, :_in_acting_version))(m::$base_type_name) = m.acting_version >= UInt16($(member.since_version))
-
-        # Encoding information (0 for constants)
-        $(Symbol(member_name, :_encoding_offset))(::$base_type_name) = Int($offset)
-        $(Symbol(member_name, :_encoding_offset))(::Type{<:$base_type_name}) = Int($offset)
-        $(Symbol(member_name, :_encoding_length))(::$base_type_name) = Int($encoding_length)
-        $(Symbol(member_name, :_encoding_length))(::Type{<:$base_type_name}) = Int($encoding_length)
-
-        # Value limits (metadata)
-        $(Symbol(member_name, :_null_value))(::$base_type_name) = $julia_type($(get_null_value(julia_type, member)))
-        $(Symbol(member_name, :_null_value))(::Type{<:$base_type_name}) = $julia_type($(get_null_value(julia_type, member)))
-        $(Symbol(member_name, :_min_value))(::$base_type_name) = $julia_type($(get_min_value(julia_type, member)))
-        $(Symbol(member_name, :_min_value))(::Type{<:$base_type_name}) = $julia_type($(get_min_value(julia_type, member)))
-        $(Symbol(member_name, :_max_value))(::$base_type_name) = $julia_type($(get_max_value(julia_type, member)))
-        $(Symbol(member_name, :_max_value))(::Type{<:$base_type_name}) = $julia_type($(get_max_value(julia_type, member)))
-    end)
-
-    # Handle constant fields differently
-    if is_constant
-        # Parse constant value
-        if member.constant_value === nothing
-            error("Constant member $(member.name) has no constant value specified")
-        end
-
-        if member.length == 1
-            # Single constant value
-            const_val = parse_constant_value(julia_type, member.constant_value)
-            Core.eval(composite_module, quote
-                # Constant accessor: returns constant value directly (no buffer read)
-                @inline $member_name(::$base_type_name) = $julia_type($const_val)
-                @inline $member_name(::Type{<:$base_type_name}) = $julia_type($const_val)
-
-                # Export the accessor (no setter for constants)
-                export $member_name
-            end)
-        else
-            # Array constant value
-            if julia_type == UInt8  # Char array - return as string
-                Core.eval(composite_module, quote
-                    @inline $member_name(::$base_type_name) = $(member.constant_value)
-                    @inline $member_name(::Type{<:$base_type_name}) = $(member.constant_value)
-
-                    export $member_name
-                end)
-            else
-                error("Array constants only supported for char type")
-            end
-        end
-    else
-        # Generate direct accessor functions (following sbetool baseline pattern)
-        # NO field objects - direct read/write operations
-        if member.length == 1
-            # Single value: direct decode/encode functions
-            Core.eval(composite_module, quote
-                # Direct decoder function: returns the value directly (matches baseline)
-                @inline function $member_name(m::$decoder_name)
-                    return decode_value($julia_type, m.buffer, m.offset + $offset)
-                end
-
-                # Direct encoder function: writes the value directly (matches baseline)
-                @inline $(Symbol(member_name, :!))(m::$encoder_name, val) = encode_value($julia_type, m.buffer, m.offset + $offset, val)
-
-                # Export the accessor functions
-                export $member_name, $(Symbol(member_name, :!))
-            end)
-        else
-            # Array value: direct array decode/encode functions
-            # Special case: character arrays return String (matches SBE baseline behavior)
-            is_character_array = (julia_type == UInt8 && member.primitive_type == "char")
-
-            if is_character_array
-                # Character arrays return String by default
-                Core.eval(composite_module, :(using StringViews: StringView))
-                
-                Core.eval(composite_module, quote
-                    # Direct decoder function: returns StringView with null-byte trimming
-                    @inline function $member_name(m::$decoder_name)
-                        bytes = decode_array($julia_type, m.buffer, m.offset + $offset, $(member.length))
-                        # Remove trailing null bytes - use findfirst to avoid allocation
-                        pos = findfirst(iszero, bytes)
-                        len = pos !== nothing ? pos - 1 : Base.length(bytes)
-                        return StringView(view(bytes, 1:len))
-                    end
-
-                    # Direct encoder function: returns array view for writing (matches baseline)
-                    @inline function $(Symbol(member_name, :!))(m::$encoder_name)
-                        return encode_array($julia_type, m.buffer, m.offset + $offset, $(member.length))
-                    end
-
-                    # Convenience encoder with AbstractString (copies with null padding)
-                    @inline function $(Symbol(member_name, :!))(m::$encoder_name, value::AbstractString)
-                        bytes = codeunits(value)
-                        dest = encode_array($julia_type, m.buffer, m.offset + $offset, $(member.length))
-                        len = min(length(bytes), length(dest))
-                        copyto!(dest, 1, bytes, 1, len)
-                        # Zero out the rest
-                        if len < length(dest)
-                            fill!(view(dest, len+1:length(dest)), 0x00)
-                        end
-                    end
-
-                    # Convenience encoder with UInt8 vector (copies as-is)
-                    @inline function $(Symbol(member_name, :!))(m::$encoder_name, value::AbstractVector{UInt8})
-                        dest = encode_array($julia_type, m.buffer, m.offset + $offset, $(member.length))
-                        len = min(length(value), length(dest))
-                        copyto!(dest, 1, value, 1, len)
-                        # Zero out the rest
-                        if len < length(dest)
-                            fill!(view(dest, len+1:length(dest)), 0x00)
-                        end
-                    end
-
-                    # Export the accessor functions
-                    export $member_name, $(Symbol(member_name, :!))
-                end)
-            else
-                # Non-character arrays: return numeric array view
-                Core.eval(composite_module, quote
-                    # Direct decoder function: returns array view directly (matches baseline)
-                    @inline function $member_name(m::$decoder_name)
-                        return decode_array($julia_type, m.buffer, m.offset + $offset, $(member.length))
-                    end
-
-                    # Direct encoder function: returns array view for writing (matches baseline)
-                    @inline function $(Symbol(member_name, :!))(m::$encoder_name)
-                        return encode_array($julia_type, m.buffer, m.offset + $offset, $(member.length))
-                    end
-
-                    # Convenience encoder with value
-                    @inline function $(Symbol(member_name, :!))(m::$encoder_name, val)
-                        copyto!($(Symbol(member_name, :!))(m), val)
-                    end
-
-                    # Export the accessor functions
-                    export $member_name, $(Symbol(member_name, :!))
-                end)
-            end
-        end
-    end
-end
-
-"""
-    generateMessageFlyweightMethods!(parent_module::Module, message_module::Module, message_module_name::Symbol, message_def::Schema.MessageDefinition, schema::Schema.MessageSchema)
-
-Generate the common SBE interface methods for a message type.
-
-This function generates methods in the PARENT module (e.g., Baseline), not the message module (e.g., Car).
-Message-specific metadata dispatch on concrete types like `Car.Encoder` and `Car.Decoder`.
-
-The approach allows both:
-- `Baseline.sbe_template_id(car)` - calling from parent module
-- `Car.sbe_template_id(car)` - calling from message module (via import)
-
-# Arguments
-- `parent_module::Module`: Parent module (e.g., Baseline) where methods are generated
-- `message_module::Module`: Message-specific module (e.g., Car)
-- `message_module_name::Symbol`: Name of message module for type references (e.g., :Car)
-- `message_def::Schema.MessageDefinition`: Message definition from schema
-- `schema::Schema.MessageSchema`: Complete schema for context
-
-# Generated Methods in Parent Module
-Message-specific metadata that dispatches on concrete types:
-- sbe_template_id, sbe_schema_id, sbe_schema_version
-- sbe_block_length, sbe_acting_block_length, sbe_acting_version
-- sbe_semantic_type, sbe_description
-"""
-function generateMessageFlyweightMethods!(parent_module::Module, message_module::Module, message_module_name::Symbol, message_def::Schema.MessageDefinition, schema::Schema.MessageSchema)
-    # These names match the struct definitions in the message module
-    decoder_name = :Decoder
-    encoder_name = :Encoder
-
-    # Handle potentially missing block_length
-    block_length = if message_def.block_length !== nothing
-        parse(Int, message_def.block_length)
-    else
-        # Calculate block length from fields if not specified
-        max_offset = 0
-        for field in message_def.fields
-            field_end = field.offset + get_field_size(schema, field)
-            max_offset = max(max_offset, field_end)
-        end
-        max_offset
-    end
-
-    # Generate message-specific metadata in PARENT module
-    # These dispatch on the concrete types from the nested message module
-    Core.eval(parent_module, quote
-        # Message-specific metadata - dispatch on concrete types from nested module
-        @inline sbe_template_id(::Type{<:$message_module_name.$decoder_name}) = UInt16($(message_def.id))
-        @inline sbe_template_id(::$message_module_name.$decoder_name) = UInt16($(message_def.id))
-        @inline sbe_template_id(::Type{<:$message_module_name.$encoder_name}) = UInt16($(message_def.id))
-        @inline sbe_template_id(::$message_module_name.$encoder_name) = UInt16($(message_def.id))
-
-        @inline sbe_schema_id(::$message_module_name.$decoder_name) = UInt16($(schema.id))
-        @inline sbe_schema_id(::$message_module_name.$encoder_name) = UInt16($(schema.id))
-
-        @inline sbe_schema_version(::$message_module_name.$decoder_name) = UInt16($(schema.version))
-        @inline sbe_schema_version(::$message_module_name.$encoder_name) = UInt16($(schema.version))
-
-        @inline sbe_block_length(::Type{<:$message_module_name.$decoder_name}) = UInt16($block_length)
-        @inline sbe_block_length(::$message_module_name.$decoder_name) = UInt16($block_length)
-        @inline sbe_block_length(::Type{<:$message_module_name.$encoder_name}) = UInt16($block_length)
-        @inline sbe_block_length(::$message_module_name.$encoder_name) = UInt16($block_length)
-
-        # Acting version and block length differ between decoder/encoder
-        @inline sbe_acting_block_length(m::$message_module_name.$decoder_name) = m.acting_block_length
-        @inline sbe_acting_block_length(::$message_module_name.$encoder_name) = UInt16($block_length)
-        @inline sbe_acting_version(m::$message_module_name.$decoder_name) = m.acting_version
-        @inline sbe_acting_version(::$message_module_name.$encoder_name) = UInt16($(schema.version))
-
-        # Semantic information (constants for zero runtime cost)
-        @inline sbe_semantic_type(::$message_module_name.$decoder_name) = "$(something(message_def.semantic_type, ""))"
-        @inline sbe_semantic_type(::$message_module_name.$encoder_name) = "$(something(message_def.semantic_type, ""))"
-        @inline sbe_description(::$message_module_name.$decoder_name) = "$(something(message_def.description, ""))"
-        @inline sbe_description(::$message_module_name.$encoder_name) = "$(something(message_def.description, ""))"
-
-        # User-friendly display methods
-        function Base.show(io::IO, m::$message_module_name.$decoder_name)
-            print(io, $(string(message_module_name)), ".Decoder(")
-            print(io, "template_id=", sbe_template_id(m), ", ")
-            print(io, "schema_id=", sbe_schema_id(m), ", ")
-            print(io, "version=", sbe_acting_version(m))
-            print(io, ")")
-        end
-
-        function Base.show(io::IO, m::$message_module_name.$encoder_name)
-            print(io, $(string(message_module_name)), ".Encoder(")
-            print(io, "template_id=", sbe_template_id(m), ", ")
-            print(io, "schema_id=", sbe_schema_id(m), ", ")
-            print(io, "version=", sbe_schema_version(m))
-            print(io, ")")
-        end
-    end)
-
-    # Note: The methods are defined in the parent module and will be accessible via:
-    # - Baseline.sbe_template_id(car) - from parent module
-    # - Car instances will dispatch to parent module methods automatically
-    # We don't need to import them into the message module to avoid warnings
-end
-
-"""
-    generatePrimitiveFieldMetaData!(target_module::Module, field_name::Symbol, field_def::Schema.FieldDefinition, type_def::Schema.EncodedType)
-
-Generate attribute functions for a field type in the given module.
-
-This includes id, since_version, encoding_offset, encoding_length, length, and eltype
-methods that provide metadata about the field according to the SBE specification.
-
-# Arguments
-- `target_module::Module`: Module where the methods will be generated
-- `field_name::Symbol`: Name of the field type
-- `field_def::Schema.FieldDefinition`: Field definition from schema
-- `type_def::Schema.EncodedType`: Type definition containing encoding info
-
-# Generated Methods
-- `id(::Type{<:FieldType})`, `id(::FieldType)` - Field ID from schema
-- `since_version(::Type{<:FieldType})`, `since_version(::FieldType)` - Version introduced
-- `encoding_offset(::Type{<:FieldType})`, `encoding_offset(::FieldType)` - Byte offset
-- `encoding_length(::Type{<:FieldType})`, `encoding_length(::FieldType)` - Total byte length
-- `Base.length(::Type{<:FieldType})`, `Base.length(::FieldType)` - Array length
-- `Base.eltype(::Type{<:FieldType})`, `Base.eltype(::FieldType)` - Element type
-"""
-function generatePrimitiveFieldMetaData!(target_module::Module, field_name::Symbol, field_def::Schema.FieldDefinition, type_def::Schema.EncodedType)
-    julia_type = to_julia_type(type_def.primitive_type)
-    total_length = sizeof(julia_type) * type_def.length
-
-    Core.eval(target_module, quote
-        # SBE field attributes
-        id(::Type{<:$field_name}) = UInt16($(field_def.id))
-        id(::$field_name) = UInt16($(field_def.id))
-        since_version(::Type{<:$field_name}) = UInt16($(field_def.since_version))
-        since_version(::$field_name) = UInt16($(field_def.since_version))
-
-        # Encoding information
-        encoding_offset(::Type{<:$field_name}) = $(field_def.offset)
-        encoding_offset(::$field_name) = $(field_def.offset)
-        encoding_length(::Type{<:$field_name}) = $total_length
-        encoding_length(::$field_name) = $total_length
-
-        # Array/type information
-        Base.length(::Type{<:$field_name}) = $(type_def.length)
-        Base.length(::$field_name) = $(type_def.length)
-        Base.eltype(::Type{<:$field_name}) = $julia_type
-        Base.eltype(::$field_name) = $julia_type
-    end)
-end
-
-"""
-    generatePrimitivePropertyMethods!(target_module::Module, field_name::Symbol, type_def::Schema.EncodedType)
-
-Generate value accessor functions for a field type in the given module.
-
-This includes value() and value!() methods for both single values and arrays,
-using the appropriate endianness-aware encode/decode functions generated by
-generateEncodedTypes!.
-
-# Arguments
-- `target_module::Module`: Module where the methods will be generated
-- `field_name::Symbol`: Name of the field type
-- `type_def::Schema.EncodedType`: Type definition containing primitive type and length
-
-# Generated Methods for Single Values (length == 1)
-- `value(field)` - Decode and return the current value
-- `value!(field, val)` - Encode and store a new value
-
-# Generated Methods for Arrays (length > 1)
-- `value(field)` - Return read-only mapped array with proper endianness
-- `value!(field)` - Return mutable mapped array for writing
-- `value!(field, val)` - Copy values from source into the field array
-"""
-function generatePrimitivePropertyMethods!(target_module::Module, field_name::Symbol, type_def::Schema.EncodedType)
-    julia_type = to_julia_type(type_def.primitive_type)
-
-    if type_def.length == 1
-        # Single value accessor
-        Core.eval(target_module, quote
-            @inline function value(field::$field_name)
-                decode_value($julia_type, field.buffer, field.offset)
-            end
-
-            @inline function value!(field::$field_name, val::$julia_type)
-                encode_value($julia_type, field.buffer, field.offset, val)
-            end
-        end)
-    else
-        # Array value accessor - use the endianness-aware array functions
-        Core.eval(target_module, quote
-            @inline function value(field::$field_name)
-                decode_array($julia_type, field.buffer, field.offset, $(type_def.length))
-            end
-
-            @inline function value!(field::$field_name)
-                encode_array($julia_type, field.buffer, field.offset, $(type_def.length))
-            end
-
-            @inline function value!(field::$field_name, val)
-                copyto!(value!(field), val)
-            end
-        end)
-    end
-end
-
-"""
-    generateFieldMetaAttributeMethod!(target_module::Module, field_name::Symbol, field_def)
-
-Generate meta attribute function for a field in the given module.
-
-Creates a `meta_attribute(::FieldType, meta_attribute)` function that returns
-metadata about the field based on the SBE specification. This includes epoch,
-time_unit, semantic_type, and presence information.
-
-# Arguments
-- `target_module::Module`: Module where the function will be generated
-- `field_name::Symbol`: Name of the field type
-- `field_def`: Field definition (either `Schema.FieldDefinition` or `Schema.VarDataDefinition`)
-
-# Generated Function
-- `meta_attribute(::FieldType, meta_attribute::Symbol)` - Returns Symbol with requested metadata
-
-# Supported Meta Attributes
-- `:epoch` - Temporal epoch (defaults to field definition)
-- `:time_unit` - Time unit for temporal fields
-- `:semantic_type` - Semantic type information
-- `:presence` - Field presence (required, optional, etc.)
-"""
-function generateFieldMetaAttributeMethod!(target_module::Module, field_name::Symbol, field_def)
-    # Generate meta_attribute function for the field type itself
-    # e.g., meta_attribute(::SerialNumberField, meta_attribute)
-
-    # Extract metadata based on field type
-    epoch_val = if hasfield(typeof(field_def), :epoch) && field_def.epoch !== nothing
-        field_def.epoch
-    else
-        ""  # Default epoch
-    end
-
-    time_unit_val = if hasfield(typeof(field_def), :time_unit) && field_def.time_unit !== nothing
-        field_def.time_unit
-    else
-        ""
-    end
-
-    semantic_type_val = if hasfield(typeof(field_def), :semantic_type) && field_def.semantic_type !== nothing
-        field_def.semantic_type
-    else
-        ""
-    end
-
-    presence_val = if hasfield(typeof(field_def), :presence) && field_def.presence !== nothing
-        field_def.presence
-    else
-        "required"  # Default for variable data
-    end
-
-    # Build the function body based on the actual field definition values
-    checks = Expr[]
-
-    # Epoch - defaults to "unix" according to SBE spec
-    push!(checks, :(meta_attribute === :epoch && return Symbol($epoch_val)))
-
-    # Time unit - only add if not empty
-    if !isempty(time_unit_val)
-        push!(checks, :(meta_attribute === :time_unit && return Symbol($time_unit_val)))
-    else
-        push!(checks, :(meta_attribute === :time_unit && return Symbol("")))
-    end
-
-    # Semantic type - only add if not empty
-    if !isempty(semantic_type_val)
-        push!(checks, :(meta_attribute === :semantic_type && return Symbol($semantic_type_val)))
-    else
-        push!(checks, :(meta_attribute === :semantic_type && return Symbol("")))
-    end
-
-    # Presence
-    push!(checks, :(meta_attribute === :presence && return Symbol($presence_val)))
-
-    # Default case
-    push!(checks, :(return Symbol("")))
-
-    # Generate meta_attribute function for the field type
-    Core.eval(target_module, quote
-        @inline function meta_attribute(::$field_name, meta_attribute)
-            $(checks...)
-        end
-    end)
-end
-
-"""
-    generateValueLimits!(target_module::Module, field_name::Symbol, type_def::Schema.EncodedType)
-
-Generate value limit functions (null_value, min_value, max_value) for a field type in the given module.
-
-Creates functions that return the valid range and null value for the field type
-based on the schema definition and Julia type constraints.
-
-# Arguments
-- `target_module::Module`: Module where the functions will be generated
-- `field_name::Symbol`: Name of the field type
-- `type_def::Schema.EncodedType`: Type definition containing limit values
-
-# Generated Methods
-- `null_value(::Type{<:FieldType})`, `null_value(::FieldType)` - Null/invalid value
-- `min_value(::Type{<:FieldType})`, `min_value(::FieldType)` - Minimum valid value
-- `max_value(::Type{<:FieldType})`, `max_value(::FieldType)` - Maximum valid value
-
-# Default Behavior
-- Uses schema-defined limits if available
-- Falls back to Julia type limits (typemin/typemax)
-- Null values follow SBE conventions (max for unsigned, min for signed)
-"""
-function generateValueLimits!(target_module::Module, field_name::Symbol, type_def::Schema.EncodedType)
-    julia_type = to_julia_type(type_def.primitive_type)
-
-    # Null value
-    if type_def.null_value !== nothing
-        null_val = parse_typed_value(type_def.null_value, julia_type)
-        Core.eval(target_module, quote
-            null_value(::Type{<:$field_name}) = $null_val
-            null_value(::$field_name) = $null_val
-        end)
-    end
-
-    # Min value
-    if type_def.min_value !== nothing
-        min_val = parse_typed_value(type_def.min_value, julia_type)
-        Core.eval(target_module, quote
-            min_value(::Type{<:$field_name}) = $min_val
-            min_value(::$field_name) = $min_val
-        end)
-    else
-        Core.eval(target_module, quote
-            min_value(::Type{<:$field_name}) = typemin($julia_type)
-            min_value(::$field_name) = typemin($julia_type)
-        end)
-    end
-
-    # Max value
-    if type_def.max_value !== nothing
-        max_val = parse_typed_value(type_def.max_value, julia_type)
-        Core.eval(target_module, quote
-            max_value(::Type{<:$field_name}) = $max_val
-            max_value(::$field_name) = $max_val
-        end)
-    else
-        Core.eval(target_module, quote
-            max_value(::Type{<:$field_name}) = typemax($julia_type)
-            max_value(::$field_name) = typemax($julia_type)
-        end)
-    end
-end
-
-"""
-    generateFields!(target_module::Module, field_def::Schema.FieldDefinition, message_name::String, schema::Schema.MessageSchema)
-
-Generate high-performance direct field accessor functions (baseline-style).
-
-This generates ultra-low-latency field accessors with static dispatch and aggressive inlining,
-matching the baseline sbetool output for maximum performance in financial messaging applications.
-
-# Arguments
-- `target_module::Module`: Module where the field accessors will be generated
-- `field_def::Schema.FieldDefinition`: Field definition from schema
-- `message_name::String`: Name of the containing message (for constructor)
-- `schema::Schema.MessageSchema`: Complete schema for context
-
-# Returns
-- `Symbol`: Name of the generated field accessor, or `nothing` if type not found
-
-# Generated Components
-- Direct @inline accessor functions (zero-allocation field access)
-- Direct @inline mutator functions (zero-allocation field writes)
-- Static metadata constants (compile-time dispatch)
-- No intermediate field objects (matches baseline performance)
-
-# Performance Characteristics
-- Zero allocations for field access
-- Static dispatch at compile time
-- Aggressive inlining for minimum overhead
-- Direct memory access pattern
-"""
-function generateFields!(target_module::Module, decoder_name::Symbol, encoder_name::Symbol, field_def::Schema.FieldDefinition, message_name::String, schema::Schema.MessageSchema)
-    # Use camelCase for field names (matches baseline)
-    field_name = Symbol(toCamelCase(field_def.name))
-    field_name_setter = Symbol(string(field_name, "!"))
-
-    # Get the type definition - check if it's a named type or a primitive type
-    type_def = find_type_by_name(schema, field_def.type_ref)
-
-    # If not found in schema, check if it's a built-in primitive type
-    if type_def === nothing && is_primitive_type(field_def.type_ref)
-        # Create synthetic EncodedType for primitive type
-        type_def = create_primitive_encoded_type(field_def.type_ref, 1)  # Assume scalar for now
-    end
-
-    # Skip if type not found
-    if type_def === nothing
-        @warn "Skipping field $(field_def.name): type $(field_def.type_ref) not found"
-        return nothing
-    end
-
-    field_offset = field_def.offset
-
-    # Handle different type categories
-    if type_def isa Schema.EncodedType
-        # Primitive types (int, float, char arrays, etc.)
-        generate_encoded_field!(target_module, decoder_name, encoder_name, field_name, field_def, type_def, field_offset)
-    elseif type_def isa Schema.EnumType
-        # Enum types
-        generate_enum_field!(target_module, decoder_name, encoder_name, field_name, field_def, type_def, field_offset, schema)
-    elseif type_def isa Schema.SetType
-        # Set/BitSet types
-        generate_set_field!(target_module, decoder_name, encoder_name, field_name, field_def, type_def, field_offset)
-    elseif type_def isa Schema.CompositeType
-        # Composite types
-        generate_composite_field!(target_module, decoder_name, encoder_name, field_name, field_def, type_def, field_offset, schema)
-    else
-        @warn "Skipping field $(field_def.name): unsupported type $(typeof(type_def))"
-        return nothing
-    end
-
-    return field_name
-end
 
 """
     generateFields_expr(abstract_type_name::Symbol, decoder_name::Symbol, encoder_name::Symbol, field_def::Schema.FieldDefinition, parent_name::String, schema::Schema.MessageSchema) -> Vector{Expr}
@@ -1349,581 +486,6 @@ function generateFields_expr(abstract_type_name::Symbol, decoder_name::Symbol, e
         @warn "Skipping field $(field_def.name): unsupported type $(typeof(type_def))"
         return Expr[]
     end
-end
-
-"""
-Generate accessors for encoded (primitive) field types.
-"""
-function generate_encoded_field!(target_module::Module, decoder_name::Symbol, encoder_name::Symbol,
-                                  field_name::Symbol, field_def::Schema.FieldDefinition,
-                                  type_def::Schema.EncodedType, field_offset::Int)
-    field_name_setter = Symbol(string(field_name, "!"))
-    julia_type = to_julia_type(type_def.primitive_type)
-    since_version = field_def.since_version
-    is_optional = field_def.presence == "optional" || type_def.presence == "optional"
-
-    # Generate null_value() function for optional fields
-    # This matches Java SBE pattern: always return T, never Union{T, Nothing}
-    if is_optional && type_def.length == 1
-        null_val = get_null_value(julia_type, type_def)
-        field_null_value = Symbol(string(field_name, "_null_value"))
-
-        # Get parent module name at runtime, not compile time
-        parent_mod_symbol = Symbol(parentmodule(target_module))
-
-        Core.eval(target_module, quote
-            @inline $field_null_value() = $null_val
-        end)
-    end
-
-    # Generate direct accessor functions with concrete type dispatch (matches baseline, zero allocations)
-    if type_def.length == 1
-        # Single value - direct decode/encode
-        if since_version > 0
-            # Version-aware accessor - check acting version before reading (matches Java: parentMessage.actingVersion)
-            null_val = get_null_value(julia_type, type_def)
-            Core.eval(target_module, quote
-                @inline function $field_name(m::$decoder_name)
-                    if m.acting_version < UInt16($since_version)
-                        return $null_val
-                    end
-                    return decode_value($julia_type, m.buffer, m.offset + $field_offset)
-                end
-
-                @inline $field_name_setter(m::$encoder_name, value) = encode_value($julia_type, m.buffer, m.offset + $field_offset, value)
-            end)
-        else
-            # No version check needed (field in version 0)
-            Core.eval(target_module, quote
-                @inline function $field_name(m::$decoder_name)
-                    return decode_value($julia_type, m.buffer, m.offset + $field_offset)
-                end
-
-                @inline $field_name_setter(m::$encoder_name, value) = encode_value($julia_type, m.buffer, m.offset + $field_offset, value)
-            end)
-        end
-    else
-        # Array value - return mapped array view (zero-copy)
-        # Matches baseline: decoder returns array, encoder has two versions:
-        # - someNumbers!(m) returns mutable view
-        # - someNumbers!(m, value) copies value into buffer
-        # Special case: character arrays return String (matches SBE baseline behavior)
-        is_character_array = (type_def.primitive_type == "char")
-
-        if is_character_array
-            # Character arrays return String by default
-            Core.eval(target_module, :(using StringViews: StringView))
-
-            if since_version > 0
-                Core.eval(target_module, quote
-                    @inline function $field_name(m::$decoder_name)
-                        if m.acting_version < UInt16($since_version)
-                            return ""
-                        end
-                        bytes = decode_array($julia_type, m.buffer, m.offset + $field_offset, $(type_def.length))
-                        # Remove trailing null bytes - use findfirst to avoid allocation
-                        pos = findfirst(iszero, bytes)
-                        len = pos !== nothing ? pos - 1 : Base.length(bytes)
-                        return StringView(view(bytes, 1:len))
-                    end
-
-                    @inline function $field_name_setter(m::$encoder_name, value::AbstractString)
-                        bytes = codeunits(value)
-                        dest = encode_array($julia_type, m.buffer, m.offset + $field_offset, $(type_def.length))
-                        len = min(length(bytes), length(dest))
-                        copyto!(dest, 1, bytes, 1, len)
-                        # Zero out the rest
-                        if len < length(dest)
-                            fill!(view(dest, len+1:length(dest)), 0x00)
-                        end
-                    end
-
-                    @inline function $field_name_setter(m::$encoder_name, value::AbstractVector{UInt8})
-                        dest = encode_array($julia_type, m.buffer, m.offset + $field_offset, $(type_def.length))
-                        len = min(length(value), length(dest))
-                        copyto!(dest, 1, value, 1, len)
-                        # Zero out the rest
-                        if len < length(dest)
-                            fill!(view(dest, len+1:length(dest)), 0x00)
-                        end
-                    end
-                end)
-            else
-                Core.eval(target_module, quote
-                    @inline function $field_name(m::$decoder_name)
-                        bytes = decode_array($julia_type, m.buffer, m.offset + $field_offset, $(type_def.length))
-                        # Remove trailing null bytes - use findfirst to avoid allocation
-                        pos = findfirst(iszero, bytes)
-                        len = pos !== nothing ? pos - 1 : Base.length(bytes)
-                        return StringView(view(bytes, 1:len))
-                    end
-
-                    @inline function $field_name_setter(m::$encoder_name, value::AbstractString)
-                        bytes = codeunits(value)
-                        dest = encode_array($julia_type, m.buffer, m.offset + $field_offset, $(type_def.length))
-                        len = min(length(bytes), length(dest))
-                        copyto!(dest, 1, bytes, 1, len)
-                        # Zero out the rest
-                        if len < length(dest)
-                            fill!(view(dest, len+1:length(dest)), 0x00)
-                        end
-                    end
-
-                    @inline function $field_name_setter(m::$encoder_name, value::AbstractVector{UInt8})
-                        dest = encode_array($julia_type, m.buffer, m.offset + $field_offset, $(type_def.length))
-                        len = min(length(value), length(dest))
-                        copyto!(dest, 1, value, 1, len)
-                        # Zero out the rest
-                        if len < length(dest)
-                            fill!(view(dest, len+1:length(dest)), 0x00)
-                        end
-                    end
-                end)
-            end
-        else
-            # Non-character arrays: return numeric array view
-            if since_version > 0
-                # For arrays with version check, return an array filled with null values when not in version.
-                # Note: This allocates, but only on the version-mismatch path (rare). The alternative
-                # would be returning an empty view, but that changes the array length semantically.
-                null_val = get_null_value(julia_type, type_def)
-                Core.eval(target_module, quote
-                    @inline function $field_name(m::$decoder_name)
-                        if m.acting_version < UInt16($since_version)
-                            return fill($null_val, $(type_def.length))
-                        end
-                        return decode_array($julia_type, m.buffer, m.offset + $field_offset, $(type_def.length))
-                    end
-
-                    @inline function $field_name_setter(m::$encoder_name)
-                        return encode_array($julia_type, m.buffer, m.offset + $field_offset, $(type_def.length))
-                    end
-
-                    @inline function $field_name_setter(m::$encoder_name, value)
-                        copyto!($field_name_setter(m), value)
-                    end
-                end)
-            else
-                # No version check needed
-                Core.eval(target_module, quote
-                    @inline function $field_name(m::$decoder_name)
-                        return decode_array($julia_type, m.buffer, m.offset + $field_offset, $(type_def.length))
-                    end
-
-                    @inline function $field_name_setter(m::$encoder_name)
-                        return encode_array($julia_type, m.buffer, m.offset + $field_offset, $(type_def.length))
-                    end
-
-                    @inline function $field_name_setter(m::$encoder_name, value)
-                        copyto!($field_name_setter(m), value)
-                    end
-                end)
-            end
-        end
-    end
-
-    # Generate static metadata constants
-    generate_field_metadata!(target_module, field_name, field_def, type_def, field_offset, julia_type)
-end
-
-"""
-Generate accessors for enum field types.
-"""
-function generate_enum_field!(target_module::Module, decoder_name::Symbol, encoder_name::Symbol,
-                               field_name::Symbol, field_def::Schema.FieldDefinition,
-                               type_def::Schema.EnumType, field_offset::Int, schema::Schema.MessageSchema)
-    field_name_setter = Symbol(string(field_name, "!"))
-    enum_type_name = Symbol(to_pascal_case(type_def.name))
-    encoding_julia_type = to_julia_type(type_def.encoding_type)
-    is_constant = field_def.presence == "constant"
-    is_optional = field_def.presence == "optional"
-    since_version = field_def.since_version
-
-    # Enum types are generated at the schema root level
-    # Navigate up the module hierarchy to find the schema root module
-    schema_root_module = parentmodule(target_module)
-    if !isdefined(schema_root_module, enum_type_name)
-        # We're in a group, go up one more level
-        schema_root_module = parentmodule(schema_root_module)
-    end
-    enum_type = getfield(schema_root_module, enum_type_name)
-
-    # Get null value for versioned or optional fields
-    # For enums, use typemin/typemax of encoding type as null
-    null_val = if since_version > 0 || is_optional
-        # Use typemin of encoding type as null value
-        if encoding_julia_type <: Unsigned
-            encoding_julia_type(typemax(encoding_julia_type))
-        else
-            encoding_julia_type(typemin(encoding_julia_type))
-        end
-    else
-        nothing
-    end
-
-    # Generate null_value() function for optional enum fields
-    if is_optional
-        field_null_value = Symbol(string(field_name, "_null_value"))
-
-        Core.eval(target_module, quote
-            @inline $field_null_value() = $null_val
-        end)
-    end
-
-    if is_constant
-        # Constant enum field - resolve valueRef
-        if field_def.value_ref === nothing
-            error("Constant enum field $(field_def.name) has no valueRef specified")
-        end
-
-        # Parse valueRef (e.g., "Model.C" -> enum_type.C)
-        parts = split(field_def.value_ref, '.')
-        if length(parts) != 2
-            error("Invalid valueRef format: $(field_def.value_ref). Expected EnumType.Value")
-        end
-        value_name = Symbol(parts[2])
-
-        # Generate constant accessor (matches baseline pattern)
-        Core.eval(target_module, quote
-            # Return raw integer value
-            @inline function $field_name(::$decoder_name, ::Type{Integer})
-                return $encoding_julia_type($enum_type.$value_name)
-            end
-
-            # Return enum value (default) - no buffer read, returns constant
-            @inline function $field_name(::$decoder_name)
-                return $enum_type.$value_name
-            end
-
-            # No setter for constant fields
-        end)
-    else
-        # Regular enum field - read from buffer with version check
-        if since_version > 0
-            # Version-aware enum field
-            Core.eval(target_module, quote
-                # Return raw integer value
-                @inline function $field_name(m::$decoder_name, ::Type{Integer})
-                    if m.acting_version < UInt16($since_version)
-                        return $null_val
-                    end
-                    return decode_value($encoding_julia_type, m.buffer, m.offset + $field_offset)
-                end
-
-                # Return enum value (default) - wrapped in SbeEnum
-                @inline function $field_name(m::$decoder_name)
-                    if m.acting_version < UInt16($since_version)
-                        return $enum_type.SbeEnum($null_val)
-                    end
-                    return $enum_type.SbeEnum(decode_value($encoding_julia_type, m.buffer, m.offset + $field_offset))
-                end
-
-                # Setter accepts enum value
-                @inline $field_name_setter(m::$encoder_name, value::$enum_type.SbeEnum) = encode_value($encoding_julia_type, m.buffer, m.offset + $field_offset, $encoding_julia_type(value))
-            end)
-        else
-            # Non-versioned enum field (version 0)
-            Core.eval(target_module, quote
-                # Return raw integer value
-                @inline function $field_name(m::$decoder_name, ::Type{Integer})
-                    return decode_value($encoding_julia_type, m.buffer, m.offset + $field_offset)
-                end
-
-                # Return enum value (default)
-                @inline function $field_name(m::$decoder_name)
-                    return $enum_type.SbeEnum(decode_value($encoding_julia_type, m.buffer, m.offset + $field_offset))
-                end
-
-                # Setter accepts enum value
-                @inline $field_name_setter(m::$encoder_name, value::$enum_type.SbeEnum) = encode_value($encoding_julia_type, m.buffer, m.offset + $field_offset, $encoding_julia_type(value))
-            end)
-        end
-    end
-
-    # Generate metadata (encoding_length=0 for constants)
-    encoding_length = is_constant ? 0 : sizeof(encoding_julia_type)
-    generate_field_metadata!(target_module, field_name, field_def, nothing, field_offset, encoding_julia_type, encoding_length)
-end
-
-"""
-Generate accessors for set/bitset field types.
-"""
-function generate_set_field!(target_module::Module, decoder_name::Symbol, encoder_name::Symbol,
-                              field_name::Symbol, field_def::Schema.FieldDefinition,
-                              type_def::Schema.SetType, field_offset::Int)
-    set_type_name = Symbol(to_pascal_case(type_def.name))
-    encoding_julia_type = to_julia_type(type_def.encoding_type)
-    since_version = field_def.since_version
-
-    # Set types are generated at the schema root level
-    # Navigate up the module hierarchy to find the schema root module
-    schema_root_module = parentmodule(target_module)
-    if !isdefined(schema_root_module, set_type_name)
-        # We're in a group, go up one more level
-        schema_root_module = parentmodule(schema_root_module)
-    end
-    set_module = getfield(schema_root_module, set_type_name)
-    set_struct_name = Symbol(string(set_type_name, "Struct"))
-
-    field_name_setter = Symbol(string(field_name, "!"))
-
-    # Generate set accessors
-    if since_version > 0
-        # Version-aware set field - check acting_version
-        # For null value, we need to allocate a small buffer with zeros
-        Core.eval(target_module, quote
-            @inline function $field_name(m::Union{$decoder_name, $encoder_name})
-                if m.acting_version < UInt16($since_version)
-                    # Return empty set (all bits zero) when field not in version
-                    # Create temporary buffer with zero value for this set
-                    temp_buffer = zeros(UInt8, sizeof($encoding_julia_type))
-                    return getfield($(QuoteNode(schema_root_module)), $(QuoteNode(set_type_name))).$set_struct_name(temp_buffer, 0)
-                end
-                return getfield($(QuoteNode(schema_root_module)), $(QuoteNode(set_type_name))).$set_struct_name(m.buffer, m.offset + $field_offset)
-            end
-
-            @inline function $field_name_setter(m::$encoder_name, choices::Set)
-                if m.acting_version < UInt16($since_version)
-                    return m  # Don't write if field not in version
-                end
-                set_inst = $field_name(m)
-                set_mod = getfield($(QuoteNode(schema_root_module)), $(QuoteNode(set_type_name)))
-                set_mod.clear!(set_inst)
-                for choice in choices
-                    # Extract choice name from the function (e.g., "Flags.guacamole" -> "guacamole")
-                    choice_name = Symbol(split(string(choice), ".")[end])
-                    choice_setter = getfield(set_mod, Symbol(string(choice_name, "!")))
-                    choice_setter(set_inst, true)
-                end
-                return m
-            end
-        end)
-    else
-        # Non-versioned set field (version 0)
-        Core.eval(target_module, quote
-            @inline function $field_name(m::Union{$decoder_name, $encoder_name})
-                return getfield($(QuoteNode(schema_root_module)), $(QuoteNode(set_type_name))).$set_struct_name(m.buffer, m.offset + $field_offset)
-            end
-
-            @inline function $field_name_setter(m::$encoder_name, choices::Set)
-                set_inst = $field_name(m)
-                set_mod = getfield($(QuoteNode(schema_root_module)), $(QuoteNode(set_type_name)))
-                set_mod.clear!(set_inst)
-                for choice in choices
-                    # Extract choice name from the function (e.g., "Flags.guacamole" -> "guacamole")
-                    choice_name = Symbol(split(string(choice), ".")[end])
-                    choice_setter = getfield(set_mod, Symbol(string(choice_name, "!")))
-                    choice_setter(set_inst, true)
-                end
-                return m
-            end
-        end)
-    end
-
-    # Generate metadata
-    generate_field_metadata!(target_module, field_name, field_def, nothing, field_offset, encoding_julia_type)
-end
-
-"""
-Generate accessors for composite field types.
-"""
-function generate_composite_field!(target_module::Module, decoder_name::Symbol, encoder_name::Symbol,
-                                    field_name::Symbol, field_def::Schema.FieldDefinition,
-                                    type_def::Schema.CompositeType, field_offset::Int, schema::Schema.MessageSchema)
-    composite_type_name = Symbol(to_pascal_case(type_def.name))
-
-    # Composite types are generated as modules at the schema root level
-    # Navigate up the module hierarchy to find the schema root module
-    # For groups: target_module -> message module -> schema root
-    # For messages: target_module -> schema root
-    schema_root_module = parentmodule(target_module)
-    if !isdefined(schema_root_module, composite_type_name)
-        # We're in a group, go up one more level
-        schema_root_module = parentmodule(schema_root_module)
-    end
-    composite_module = getfield(schema_root_module, composite_type_name)
-    composite_decoder_type = getfield(composite_module, :Decoder)
-
-    # Generate composite accessors (matches baseline pattern - returns composite instance)
-    # For Car.Decoder, use Engine.Decoder; for Car.Encoder, use Engine.Encoder
-    # Optimize by using direct field access (decoder) and compile-time constant (encoder)
-
-    # Evaluate schema version outside the quote to avoid scope issues
-    schema_version = UInt16(schema.version)
-
-    Core.eval(target_module, quote
-        @inline function $field_name(m::$decoder_name)
-            # Use direct field access for performance - decoder has acting_version field
-            return $composite_decoder_type(m.buffer, m.offset + $field_offset, m.acting_version)
-        end
-
-        @inline function $field_name(m::$encoder_name)
-            # For encoder, acting_version is always the schema version (constant)
-            # Use compile-time constant instead of function call for performance
-            return $composite_decoder_type(m.buffer, m.offset + $field_offset, $schema_version)
-        end
-    end)    # Generate metadata (composite types don't have null/min/max values)
-    metadata_prefix = Symbol(string(field_name, "_"))
-    Core.eval(target_module, quote
-        const $(Symbol(string(metadata_prefix, "encoding_offset"))) = $field_offset
-        const $(Symbol(string(metadata_prefix, "id"))) = UInt16($(field_def.id))
-        const $(Symbol(string(metadata_prefix, "since_version"))) = UInt16($(field_def.since_version))
-    end)
-end
-
-"""
-Generate metadata constants for a field.
-"""
-function generate_field_metadata!(target_module::Module, field_name::Symbol, field_def::Schema.FieldDefinition,
-                                   type_def::Union{Schema.EncodedType, Nothing}, field_offset::Int, julia_type::Type,
-                                   encoding_length::Union{Int, Nothing} = nothing)
-    metadata_prefix = Symbol(string(field_name, "_"))
-    # Use provided encoding_length if given, otherwise calculate from type_def
-    if encoding_length === nothing
-        encoding_length = type_def !== nothing ? (sizeof(julia_type) * type_def.length) : sizeof(julia_type)
-    end
-
-    Core.eval(target_module, quote
-        # Static constants for metadata (zero runtime cost)
-        const $(Symbol(string(metadata_prefix, "encoding_offset"))) = $field_offset
-        const $(Symbol(string(metadata_prefix, "encoding_length"))) = $encoding_length
-        const $(Symbol(string(metadata_prefix, "id"))) = UInt16($(field_def.id))
-        const $(Symbol(string(metadata_prefix, "since_version"))) = UInt16($(field_def.since_version))
-    end)
-
-    # Generate array-specific metadata for array fields
-    if type_def !== nothing && type_def.length > 1
-        Core.eval(target_module, quote
-            const $(Symbol(string(metadata_prefix, "length"))) = $(type_def.length)
-            const $(Symbol(string(metadata_prefix, "eltype"))) = $julia_type
-        end)
-    end
-
-    # Generate value limit constants if specified (only for encoded types)
-    if type_def !== nothing
-        if type_def.null_value !== nothing
-            null_val = parse_typed_value(type_def.null_value, julia_type)
-            null_const_name = Symbol(string(metadata_prefix, "null_value"))
-            if !isdefined(target_module, null_const_name)
-                Core.eval(target_module, quote
-                    const $null_const_name = $null_val
-                end)
-            end
-        end
-
-        if type_def.min_value !== nothing
-            min_val = parse_typed_value(type_def.min_value, julia_type)
-            min_const_name = Symbol(string(metadata_prefix, "min_value"))
-            if !isdefined(target_module, min_const_name)
-                Core.eval(target_module, quote
-                    const $min_const_name = $min_val
-                end)
-            end
-        end
-
-        if type_def.max_value !== nothing
-            max_val = parse_typed_value(type_def.max_value, julia_type)
-            max_const_name = Symbol(string(metadata_prefix, "max_value"))
-            if !isdefined(target_module, max_const_name)
-                Core.eval(target_module, quote
-                    const $max_const_name = $max_val
-                end)
-            end
-        end
-    end
-end
-
-"""
-    generateEnum!(target_module::Module, enum_def::Schema.EnumType, schema::Schema.MessageSchema)
-
-Generate a complete enum type in the given module.
-
-This creates the enum structure with all valid choices and exports it using EnumX.jl
-following the SBE baseline pattern with @enumx and SbeEnum trait.
-
-# Arguments
-- `target_module::Module`: Module where the enum will be generated
-- `enum_def::Schema.EnumType`: Enum definition from schema
-- `schema::Schema.MessageSchema`: Complete schema for context
-
-# Returns
-- `Symbol`: Name of the generated enum type
-
-# Generated Structure
-- EnumX enum with proper underlying type
-- All valid values from schema definition
-- NULL_VALUE following SBE conventions
-- Proper handling of character vs numeric encodings
-
-# Example
-```julia
-@enumx T=SbeEnum BooleanType::UInt8 begin
-    FALSE = 0x0
-    TRUE = 0x1
-    NULL_VALUE = 0xff
-end
-```
-"""
-function generateEnum!(target_module::Module, enum_def::Schema.EnumType, schema::Schema.MessageSchema)
-    enum_name = Symbol(to_pascal_case(enum_def.name))
-    encoding_julia_type = to_julia_type(enum_def.encoding_type)
-    encoding_type_symbol = Symbol(encoding_julia_type)
-
-    # Ensure EnumX is available in the target module
-    Core.eval(target_module, :(using EnumX))
-
-    # Build enum values
-    enum_values = Expr[]
-
-    for valid_value in enum_def.values
-        value_name = Symbol(valid_value.name)
-
-        # Parse the value - could be numeric or character
-        if enum_def.encoding_type == "char"
-            # Character values - convert to UInt8
-            if length(valid_value.value) == 1
-                char_val = UInt8(valid_value.value[1])
-                push!(enum_values, :($value_name = $encoding_type_symbol($char_val)))
-            else
-                # Handle special values
-                try
-                    parsed_val = parse(encoding_julia_type, valid_value.value)
-                    push!(enum_values, :($value_name = $encoding_type_symbol($parsed_val)))
-                catch
-                    # Default to the first character
-                    char_val = UInt8(valid_value.value[1])
-                    push!(enum_values, :($value_name = $encoding_type_symbol($char_val)))
-                end
-            end
-        else
-            # Numeric values
-            try
-                parsed_val = parse(encoding_julia_type, valid_value.value)
-                push!(enum_values, :($value_name = $encoding_type_symbol($parsed_val)))
-            catch
-                # Fallback to 0
-                push!(enum_values, :($value_name = $encoding_type_symbol(0)))
-            end
-        end
-    end
-
-    # Add NULL_VALUE - use the encoding's null value if available, otherwise default
-    null_value = if enum_def.encoding_type == "char"
-        UInt8(0x0)  # Standard SBE char null value
-    else
-        encoding_julia_type <: Unsigned ? typemax(encoding_julia_type) : typemin(encoding_julia_type)
-    end
-
-    push!(enum_values, :(NULL_VALUE = $encoding_type_symbol($null_value)))
-
-    # Generate the simple EnumX enum (matching the baseline pattern)
-    Core.eval(target_module, quote
-        @enumx T = SbeEnum $enum_name::$encoding_julia_type begin
-            $(enum_values...)
-        end
-    end)
-
-    return enum_name
 end
 
 """
@@ -2126,11 +688,11 @@ function generateSet_expr(set_def::Schema.SetType, schema::Schema.MessageSchema)
             
             # Convenience constructors for Decoder
             @inline function $decoder_name(buffer::AbstractVector{UInt8})
-                $decoder_name(buffer, Int64(0), UInt16($(schema.version)))
+                $decoder_name(buffer, Int64(0), $(version_expr(schema, schema.version)))
             end
             
             @inline function $decoder_name(buffer::AbstractVector{UInt8}, offset::Integer)
-                $decoder_name(buffer, Int64(offset), UInt16($(schema.version)))
+                $decoder_name(buffer, Int64(offset), $(version_expr(schema, schema.version)))
             end
             
             # Convenience constructors for Encoder
@@ -2139,10 +701,10 @@ function generateSet_expr(set_def::Schema.SetType, schema::Schema.MessageSchema)
             end
             
             # SBE interface methods (dispatch on abstract type)
-            id(::Type{<:$abstract_type_name}) = UInt16(0xffff)
-            id(::$abstract_type_name) = UInt16(0xffff)
-            since_version(::Type{<:$abstract_type_name}) = UInt16($(set_def.since_version))
-            since_version(::$abstract_type_name) = UInt16($(set_def.since_version))
+            id(::Type{<:$abstract_type_name}) = $(template_id_expr(schema, 0xffff))
+            id(::$abstract_type_name) = $(template_id_expr(schema, 0xffff))
+            since_version(::Type{<:$abstract_type_name}) = $(version_expr(schema, set_def.since_version))
+            since_version(::$abstract_type_name) = $(version_expr(schema, set_def.since_version))
             
             encoding_offset(::Type{<:$abstract_type_name}) = $(something(set_def.offset, 0))
             encoding_offset(::$abstract_type_name) = $(something(set_def.offset, 0))
@@ -2151,7 +713,7 @@ function generateSet_expr(set_def::Schema.SetType, schema::Schema.MessageSchema)
             
             # Acting version accessors
             sbe_acting_version(m::$decoder_name) = m.acting_version
-            sbe_acting_version(::$encoder_name) = UInt16($(schema.version))
+            sbe_acting_version(::$encoder_name) = $(version_expr(schema, schema.version))
             
             Base.eltype(::Type{<:$abstract_type_name}) = $encoding_julia_type
             Base.eltype(::$abstract_type_name) = $encoding_julia_type
@@ -2187,33 +749,6 @@ end
     generateComposite_expr(composite_def::Schema.CompositeType, schema::Schema.MessageSchema) -> Expr
 
 Generate a composite type definition as an expression (for file-based generation).
-
-This is the expression-returning version of `generateComposite!()`. Instead of evaluating
-the code in a module with `Core.eval`, it returns the expression that can be:
-1. Converted to a string with `expr_to_code_string()`
-2. Written to a file  
-3. Loaded with `include()` or `include_string()`
-
-# Arguments
-- `composite_def::Schema.CompositeType`: Composite type definition from schema
-- `schema::Schema.MessageSchema`: Complete schema for context
-
-# Returns
-- `Expr`: A quote block containing the complete composite module definition
-
-# Example
-```julia
-expr = generateComposite_expr(composite_def, schema)
-code = expr_to_code_string(expr)
-write("generated.jl", code)
-```
-
-# Generated Expression Structure
-Creates a nested module with:
-- Decoder/Encoder type (single struct with aliases)
-- SBE interface methods
-- Field accessor functions for each member
-- Proper handling of constants, single values, and arrays
 """
 function generateComposite_expr(composite_def::Schema.CompositeType, schema::Schema.MessageSchema)
     composite_name = Symbol(to_pascal_case(composite_def.name))
@@ -2273,7 +808,7 @@ function generateComposite_expr(composite_def::Schema.CompositeType, schema::Sch
     offset = 0
     for member in composite_def.members
         if member isa Schema.EncodedType
-            member_exprs = generate_composite_member_expr(member, offset, abstract_type_name, decoder_name, encoder_name)
+            member_exprs = generate_composite_member_expr(member, offset, abstract_type_name, decoder_name, encoder_name, schema)
             append!(field_exprs, member_exprs)
             # Constants don't occupy space in the encoding
             if member.presence != "constant"
@@ -2317,7 +852,7 @@ function generateComposite_expr(composite_def::Schema.CompositeType, schema::Sch
             push!(export_symbols, enum_name)
             
             # Generate field accessor for this enum
-            accessor_exprs = generate_composite_nested_enum_accessor(member, offset, abstract_type_name, decoder_name, encoder_name)
+            accessor_exprs = generate_composite_nested_enum_accessor(member, offset, abstract_type_name, decoder_name, encoder_name, schema)
             append!(field_exprs, accessor_exprs)
             
             # Update offset
@@ -2333,7 +868,7 @@ function generateComposite_expr(composite_def::Schema.CompositeType, schema::Sch
             push!(export_symbols, set_name)
             
             # Generate field accessor for this set
-            accessor_exprs = generate_composite_nested_set_accessor(member, offset, abstract_type_name, decoder_name, encoder_name)
+            accessor_exprs = generate_composite_nested_set_accessor(member, offset, abstract_type_name, decoder_name, encoder_name, schema)
             append!(field_exprs, accessor_exprs)
             
             # Update offset
@@ -2414,11 +949,11 @@ function generateComposite_expr(composite_def::Schema.CompositeType, schema::Sch
             
             # Convenience constructors for Decoder
             @inline function $decoder_name(buffer::AbstractArray{UInt8})
-                $decoder_name(buffer, Int64(0), UInt16($(schema.version)))
+                $decoder_name(buffer, Int64(0), $(version_expr(schema, schema.version)))
             end
             
             @inline function $decoder_name(buffer::AbstractArray{UInt8}, offset::Integer)
-                $decoder_name(buffer, Int64(offset), UInt16($(schema.version)))
+                $decoder_name(buffer, Int64(offset), $(version_expr(schema, schema.version)))
             end
             
             # Convenience constructors for Encoder
@@ -2427,12 +962,12 @@ function generateComposite_expr(composite_def::Schema.CompositeType, schema::Sch
             end
             
             # SBE interface methods (common to both Decoder and Encoder)
-            sbe_encoded_length(::$abstract_type_name) = UInt16($total_size)
-            sbe_encoded_length(::Type{<:$abstract_type_name}) = UInt16($total_size)
+            sbe_encoded_length(::$abstract_type_name) = $(block_length_expr(schema, total_size))
+            sbe_encoded_length(::Type{<:$abstract_type_name}) = $(block_length_expr(schema, total_size))
             
             # Acting version accessors
             sbe_acting_version(m::$decoder_name) = m.acting_version
-            sbe_acting_version(::$encoder_name) = UInt16($(schema.version))
+            sbe_acting_version(::$encoder_name) = $(version_expr(schema, schema.version))
             
             Base.sizeof(m::$abstract_type_name) = sbe_encoded_length(m)
             
@@ -2460,7 +995,7 @@ Helper function to generate expressions for a composite member field.
 Returns an array of expressions for all the accessor functions and metadata.
 """
 function generate_composite_member_expr(member::Schema.EncodedType, offset::Int, 
-                                       base_type_name::Symbol, decoder_name::Symbol, encoder_name::Symbol)
+                                       base_type_name::Symbol, decoder_name::Symbol, encoder_name::Symbol, schema::Schema.MessageSchema)
     member_name = Symbol(toCamelCase(member.name))
     julia_type = to_julia_type(member.primitive_type)
     julia_type_symbol = Symbol(julia_type)
@@ -2471,11 +1006,11 @@ function generate_composite_member_expr(member::Schema.EncodedType, offset::Int,
     
     # Generate metadata functions
     push!(exprs, quote
-        $(Symbol(member_name, :_id))(::$base_type_name) = UInt16(0xffff)
-        $(Symbol(member_name, :_id))(::Type{<:$base_type_name}) = UInt16(0xffff)
-        $(Symbol(member_name, :_since_version))(::$base_type_name) = UInt16($(member.since_version))
-        $(Symbol(member_name, :_since_version))(::Type{<:$base_type_name}) = UInt16($(member.since_version))
-        $(Symbol(member_name, :_in_acting_version))(m::$base_type_name) = m.acting_version >= UInt16($(member.since_version))
+        $(Symbol(member_name, :_id))(::$base_type_name) = $(template_id_expr(schema, 0xffff))
+        $(Symbol(member_name, :_id))(::Type{<:$base_type_name}) = $(template_id_expr(schema, 0xffff))
+        $(Symbol(member_name, :_since_version))(::$base_type_name) = $(version_expr(schema, member.since_version))
+        $(Symbol(member_name, :_since_version))(::Type{<:$base_type_name}) = $(version_expr(schema, member.since_version))
+        $(Symbol(member_name, :_in_acting_version))(m::$base_type_name) = m.acting_version >= $(version_expr(schema, member.since_version))
         
         $(Symbol(member_name, :_encoding_offset))(::$base_type_name) = Int($offset)
         $(Symbol(member_name, :_encoding_offset))(::Type{<:$base_type_name}) = Int($offset)
@@ -2769,7 +1304,7 @@ Helper function to generate field accessor expressions for nested enum members i
 These are enums defined directly inside the composite, not referenced from external types.
 """
 function generate_composite_nested_enum_accessor(member::Schema.EnumType, offset::Int, 
-                                                   base_type_name::Symbol, decoder_name::Symbol, encoder_name::Symbol)
+                                                   base_type_name::Symbol, decoder_name::Symbol, encoder_name::Symbol, schema::Schema.MessageSchema)
     # For nested enums, convert the name to camelCase (lowercase first letter)
     raw_name = toCamelCase(member.name)
     member_name = Symbol(lowercase(raw_name[1:1]) * raw_name[2:end])
@@ -2781,11 +1316,11 @@ function generate_composite_nested_enum_accessor(member::Schema.EnumType, offset
     
     # Generate metadata functions
     push!(exprs, quote
-        $(Symbol(member_name, :_id))(::$base_type_name) = UInt16(0xffff)
-        $(Symbol(member_name, :_id))(::Type{<:$base_type_name}) = UInt16(0xffff)
-        $(Symbol(member_name, :_since_version))(::$base_type_name) = UInt16($(member.since_version))
-        $(Symbol(member_name, :_since_version))(::Type{<:$base_type_name}) = UInt16($(member.since_version))
-        $(Symbol(member_name, :_in_acting_version))(m::$base_type_name) = m.acting_version >= UInt16($(member.since_version))
+        $(Symbol(member_name, :_id))(::$base_type_name) = $(template_id_expr(schema, 0xffff))
+        $(Symbol(member_name, :_id))(::Type{<:$base_type_name}) = $(template_id_expr(schema, 0xffff))
+        $(Symbol(member_name, :_since_version))(::$base_type_name) = $(version_expr(schema, member.since_version))
+        $(Symbol(member_name, :_since_version))(::Type{<:$base_type_name}) = $(version_expr(schema, member.since_version))
+        $(Symbol(member_name, :_in_acting_version))(m::$base_type_name) = m.acting_version >= $(version_expr(schema, member.since_version))
         
         $(Symbol(member_name, :_encoding_offset))(::$base_type_name) = Int($offset)
         $(Symbol(member_name, :_encoding_offset))(::Type{<:$base_type_name}) = Int($offset)
@@ -2813,7 +1348,7 @@ Helper function to generate field accessor expressions for nested set members in
 These are sets defined directly inside the composite, not referenced from external types.
 """
 function generate_composite_nested_set_accessor(member::Schema.SetType, offset::Int, 
-                                                  base_type_name::Symbol, decoder_name::Symbol, encoder_name::Symbol)
+                                                  base_type_name::Symbol, decoder_name::Symbol, encoder_name::Symbol, schema::Schema.MessageSchema)
     # For nested sets, convert the name to camelCase (lowercase first letter)
     raw_name = toCamelCase(member.name)
     member_name = Symbol(lowercase(raw_name[1:1]) * raw_name[2:end])
@@ -2824,11 +1359,11 @@ function generate_composite_nested_set_accessor(member::Schema.SetType, offset::
     
     # Generate metadata functions
     push!(exprs, quote
-        $(Symbol(member_name, :_id))(::$base_type_name) = UInt16(0xffff)
-        $(Symbol(member_name, :_id))(::Type{<:$base_type_name}) = UInt16(0xffff)
-        $(Symbol(member_name, :_since_version))(::$base_type_name) = UInt16($(member.since_version))
-        $(Symbol(member_name, :_since_version))(::Type{<:$base_type_name}) = UInt16($(member.since_version))
-        $(Symbol(member_name, :_in_acting_version))(m::$base_type_name) = m.acting_version >= UInt16($(member.since_version))
+        $(Symbol(member_name, :_id))(::$base_type_name) = $(template_id_expr(schema, 0xffff))
+        $(Symbol(member_name, :_id))(::Type{<:$base_type_name}) = $(template_id_expr(schema, 0xffff))
+        $(Symbol(member_name, :_since_version))(::$base_type_name) = $(version_expr(schema, member.since_version))
+        $(Symbol(member_name, :_since_version))(::Type{<:$base_type_name}) = $(version_expr(schema, member.since_version))
+        $(Symbol(member_name, :_in_acting_version))(m::$base_type_name) = m.acting_version >= $(version_expr(schema, member.since_version))
         
         $(Symbol(member_name, :_encoding_offset))(::$base_type_name) = Int($offset)
         $(Symbol(member_name, :_encoding_offset))(::Type{<:$base_type_name}) = Int($offset)
@@ -2989,10 +1524,10 @@ function generateMessage_expr(message_def::Schema.MessageDefinition, schema::Sch
     # Generate SBE interface method expressions (dispatch on abstract type)
     sbe_interface_exprs = [
         :(import SBE),
-        :(SBE.sbe_template_id(::$abstract_type_name) = UInt16($(message_def.id))),
-        :(SBE.sbe_schema_id(::$abstract_type_name) = UInt16($(schema.id))),
-        :(SBE.sbe_schema_version(::$abstract_type_name) = UInt16($(schema.version))),
-        :(SBE.sbe_block_length(::$abstract_type_name) = UInt16($block_length)),
+        :(SBE.sbe_template_id(::$abstract_type_name) = $(template_id_expr(schema, message_def.id))),
+        :(SBE.sbe_schema_id(::$abstract_type_name) = $(schema_id_expr(schema, schema.id))),
+        :(SBE.sbe_schema_version(::$abstract_type_name) = $(version_expr(schema, schema.version))),
+        :(SBE.sbe_block_length(::$abstract_type_name) = $(block_length_expr(schema, block_length))),
         :(SBE.sbe_acting_block_length(m::$decoder_name) = m.acting_block_length),
         :(SBE.sbe_buffer(m::$abstract_type_name) = m.buffer),
         :(SBE.sbe_offset(m::$abstract_type_name) = m.offset),
@@ -3056,8 +1591,8 @@ function generateMessage_expr(message_def::Schema.MessageDefinition, schema::Sch
                 
                 # 3-argument constructor (uses schema defaults)
                 function $decoder_name(buffer::T, offset::Int64, position_ptr::PositionPointer) where {T}
-                    position_ptr[] = offset + UInt16($block_length)
-                    new{T}(buffer, offset, position_ptr, UInt16($block_length), UInt16($(schema.version)))
+                    position_ptr[] = offset + $(block_length_expr(schema, block_length))
+                    new{T}(buffer, offset, position_ptr, $(block_length_expr(schema, block_length)), $(version_expr(schema, schema.version)))
                 end
             end
             
@@ -3078,22 +1613,22 @@ function generateMessage_expr(message_def::Schema.MessageDefinition, schema::Sch
             @inline function $decoder_name(buffer::AbstractArray, offset::Integer=0;
                 position_ptr::PositionPointer=PositionPointer(),
                 header::$header_module_name.Decoder=$header_module_name.Decoder(buffer, Int64(offset)))
-                if $header_module_name.templateId(header) != UInt16($(message_def.id)) ||
-                   $header_module_name.schemaId(header) != UInt16($(schema.id))
+                if $header_module_name.templateId(header) != $(template_id_expr(schema, message_def.id)) ||
+                   $header_module_name.schemaId(header) != $(schema_id_expr(schema, schema.id))
                     error("Template id or schema id mismatch")
                 end
                 $decoder_name(buffer, Int64(offset) + Int64($header_module_name.sbe_encoded_length(header)), position_ptr,
-                    $header_module_name.blockLength(header), convert(UInt16, $header_module_name.version(header)))
+                    $header_module_name.blockLength(header), $header_module_name.version(header))
             end
             
             # Outer constructor for encoder with MessageHeader initialization
             @inline function $encoder_name(buffer::AbstractArray, offset::Integer=0;
                 position_ptr::PositionPointer=PositionPointer(),
                 header::$header_module_name.Encoder=$header_module_name.Encoder(buffer, Int64(offset)))
-                $header_module_name.blockLength!(header, UInt16($block_length))
-                $header_module_name.templateId!(header, UInt16($(message_def.id)))
-                $header_module_name.schemaId!(header, UInt16($(schema.id)))
-                $header_module_name.version!(header, UInt16($(schema.version)))
+                $header_module_name.blockLength!(header, $(block_length_expr(schema, block_length)))
+                $header_module_name.templateId!(header, $(template_id_expr(schema, message_def.id)))
+                $header_module_name.schemaId!(header, $(schema_id_expr(schema, schema.id)))
+                $header_module_name.version!(header, $(version_expr(schema, schema.version)))
                 $encoder_name(buffer, Int64(offset) + Int64($header_module_name.sbe_encoded_length(header)), position_ptr)
             end
             
@@ -3714,6 +2249,21 @@ function generateGroup_expr(group_def::Schema.GroupDefinition, parent_name::Stri
     # Import dimension encoding from parent module
     push!(module_body_exprs, :(using ..$(dimension_module)))
     
+    # Import composites, enums, and sets referenced by group fields
+    imported_types = Set{Symbol}()
+    for field in group_def.fields
+        type_def = find_type_by_name(schema, field.type_ref)
+        if type_def !== nothing
+            if type_def isa Schema.CompositeType || type_def isa Schema.EnumType || type_def isa Schema.SetType
+                type_module_name = Symbol(to_pascal_case(field.type_ref))
+                if type_module_name ∉ imported_types
+                    push!(module_body_exprs, :(using ..$(type_module_name)))
+                    push!(imported_types, type_module_name)
+                end
+            end
+        end
+    end
+    
     # 2. Generate consistent encode/decode function imports and aliases
     push!(module_body_exprs, :(import SBE: encode_value_le, decode_value_le, encode_array_le, decode_array_le))
     push!(module_body_exprs, :(const encode_value = encode_value_le))
@@ -3897,9 +2447,9 @@ function generateGroup_expr(group_def::Schema.GroupDefinition, parent_name::Stri
         accessor_quote = quote
             # Decoder accessor: Returns group decoder instance or empty group if not in version
             @inline function $accessor_name(m::Decoder)
-                if m.acting_version < UInt16($since_version)
+                if m.acting_version < $(version_expr(schema, since_version))
                     # Return empty group (count=0) when group not in version
-                    return $group_module_name.Decoder(m.buffer, sbe_position_ptr(m), m.acting_version, UInt16(0), UInt16(0))
+                    return $group_module_name.Decoder(m.buffer, sbe_position_ptr(m), m.acting_version, $(version_expr(schema, 0)), $(version_expr(schema, 0)))
                 end
                 # Access acting_version field directly from decoder
                 return $group_module_name.Decoder(m.buffer, sbe_position_ptr(m), m.acting_version)
@@ -3911,10 +2461,10 @@ function generateGroup_expr(group_def::Schema.GroupDefinition, parent_name::Stri
             end
 
             # Metadata functions for the group
-            $(Symbol(accessor_name, :_id))(::$parent_abstract_type) = $group_id
-            $(Symbol(accessor_name, :_since_version))(::$parent_abstract_type) = UInt16($since_version)
-            $(Symbol(accessor_name, :_in_acting_version))(m::Decoder) = m.acting_version >= UInt16($since_version)
-            $(Symbol(accessor_name, :_in_acting_version))(m::Encoder) = UInt16($(schema.version)) >= UInt16($since_version)
+            $(Symbol(accessor_name, :_id))(::$parent_abstract_type) = $(template_id_expr(schema, group_id))
+            $(Symbol(accessor_name, :_since_version))(::$parent_abstract_type) = $(version_expr(schema, since_version))
+            $(Symbol(accessor_name, :_in_acting_version))(m::Decoder) = m.acting_version >= $(version_expr(schema, since_version))
+            $(Symbol(accessor_name, :_in_acting_version))(m::Encoder) = $(version_expr(schema, schema.version)) >= $(version_expr(schema, since_version))
 
             # Export the accessor functions
             export $accessor_name, $accessor_name_encoder, $group_module_name
@@ -3940,10 +2490,10 @@ function generateGroup_expr(group_def::Schema.GroupDefinition, parent_name::Stri
             end
 
             # Metadata functions for the group
-            $(Symbol(accessor_name, :_id))(::$parent_abstract_type) = $group_id
-            $(Symbol(accessor_name, :_since_version))(::$parent_abstract_type) = UInt16($(group_def.since_version))
-            $(Symbol(accessor_name, :_in_acting_version))(m::Decoder) = m.acting_version >= UInt16($(group_def.since_version))
-            $(Symbol(accessor_name, :_in_acting_version))(m::Encoder) = UInt16($(schema.version)) >= UInt16($(group_def.since_version))
+            $(Symbol(accessor_name, :_id))(::$parent_abstract_type) = $(template_id_expr(schema, group_id))
+            $(Symbol(accessor_name, :_since_version))(::$parent_abstract_type) = $(version_expr(schema, group_def.since_version))
+            $(Symbol(accessor_name, :_in_acting_version))(m::Decoder) = m.acting_version >= $(version_expr(schema, group_def.since_version))
+            $(Symbol(accessor_name, :_in_acting_version))(m::Encoder) = $(version_expr(schema, schema.version)) >= $(version_expr(schema, group_def.since_version))
 
             # Export the accessor functions
             export $accessor_name, $accessor_name_encoder, $group_module_name
@@ -4544,316 +3094,6 @@ function generate(xml_path::String)
 end
 
 """
-    generateVarData!(target_module::Module, data_def::Schema.VarDataDefinition, message_name::String, schema::Schema.MessageSchema)
-
-Generate direct variable-length data accessor functions (baseline-style).
-
-This creates zero-allocation direct accessors that read/write variable-length data
-with automatic position management, matching the baseline sbetool pattern.
-
-# Arguments
-- `target_module::Module`: Module where the accessors will be generated
-- `data_def::Schema.VarDataDefinition`: Variable data definition from schema
-- `message_name::String`: Name of the containing message
-- `schema::Schema.MessageSchema`: Complete schema for context
-
-# Returns
-- `Symbol`: Name of the generated accessor, or `nothing` if encoding type not found
-
-# Generated Components
-- Direct length accessor (reads UInt8/16/32 header at current position)
-- Direct skip method (advances position past var data)
-- Direct reader (returns view, advances position)
-- Type conversion methods (String, AbstractArray, Symbol, etc.)
-- Direct writer (writes length + data, advances position)
-- Metadata constants (id, since_version, header_length)
-
-# Character Encoding Support
-Character-encoded vardata (primitiveType="char") automatically returns StringView
-with null-byte trimming for zero-allocation string access. Supported encodings:
-- **ASCII** - Standard ASCII encoding (fully supported)
-- **UTF-8** - UTF-8 encoding (fully supported)
-- Other encodings (ISO-8859-1, etc.) - May work but not explicitly tested
-
-# Supported Value Types
-- `AbstractVector{UInt8}` - Raw byte data (default)
-- `AbstractString` - String data (UTF-8 or ASCII)
-- `AbstractArray{T}` - Typed arrays
-- `Symbol` - Symbol data
-- `Real` - Numeric values
-- `NTuple` - Tuples
-"""
-function generateVarData!(target_module::Module, data_def::Schema.VarDataDefinition, message_name::String, schema::Schema.MessageSchema)
-    accessor_name = Symbol(toCamelCase(data_def.name))
-    accessor_name_setter = Symbol(string(accessor_name, "!"))
-    length_name = Symbol(string(accessor_name, "_length"))
-    length_name_setter = Symbol(string(accessor_name, "_length!"))
-    skip_name = Symbol(string("skip_", accessor_name, "!"))
-    since_version = data_def.since_version
-
-    # Get the variable data encoding type (e.g., varStringEncoding, varAsciiEncoding)
-    encoding_type_def = find_type_by_name(schema, data_def.type_ref)
-    if encoding_type_def === nothing || !(encoding_type_def isa Schema.CompositeType)
-        @warn "Skipping var data field $(data_def.name): encoding type $(data_def.type_ref) not found"
-        return nothing
-    end
-
-    # Calculate header length and extract length field type from the composite
-    # VarData encoding composites typically have: <type name="length" primitiveType="uint8/uint16/uint32"/>
-    header_length = calculate_composite_size(encoding_type_def, schema)
-
-    # Find the length field (first member) and get its primitive type
-    length_primitive_type = :UInt32  # Default fallback
-    is_character_encoded = false
-    if !isempty(encoding_type_def.members)
-        first_member = encoding_type_def.members[1]
-        if first_member isa Schema.EncodedType
-            length_primitive_type = to_julia_type(first_member.primitive_type)
-        end
-        # Check if second member (varData field) is character-encoded
-        if length(encoding_type_def.members) >= 2
-            second_member = encoding_type_def.members[2]
-            if second_member isa Schema.EncodedType && second_member.primitive_type == "char"
-                is_character_encoded = true
-            end
-        end
-    end
-
-    # Import necessary types for var data accessors
-    Core.eval(target_module, :(using SBE: AbstractSbeMessage, AbstractSbeGroup, to_string))
-    Core.eval(target_module, :(using StringViews: StringView))
-
-    # Generate length accessor (reads length field at current position)
-    # Works for both messages and groups via shared position_ptr interface
-    if since_version > 0
-        # Version-aware length accessor
-        Core.eval(target_module, quote
-            @inline function $length_name(m::Union{AbstractSbeMessage, AbstractSbeGroup})
-                if m.acting_version < UInt16($since_version)
-                    return UInt32(0)  # Return 0 length when field not in version
-                end
-                return decode_value($length_primitive_type, m.buffer, m.position_ptr[])
-            end
-        end)
-    else
-        # Non-versioned length accessor
-        Core.eval(target_module, quote
-            @inline function $length_name(m::Union{AbstractSbeMessage, AbstractSbeGroup})
-                return decode_value($length_primitive_type, m.buffer, m.position_ptr[])
-            end
-        end)
-    end
-
-    # Generate length setter (for encoder)
-    # Note: Only checks SBE spec limit (1GB), not buffer bounds (matches Java SBE behavior)
-    # This allows scatter-gather patterns where buffer size may not be known at encode time
-    Core.eval(target_module, quote
-        @inline function $length_name_setter(m::Union{AbstractSbeMessage, AbstractSbeGroup}, n::Integer)
-            # SBE spec: varData length is limited to 2^30 (1GB)
-            @boundscheck n > 1073741824 && throw(ArgumentError("length exceeds SBE schema limit (1GB)"))
-            return encode_value($length_primitive_type, m.buffer, m.position_ptr[], convert($length_primitive_type, n))
-        end
-    end)
-
-    # Generate skip method (advances position past var data without reading)
-    if since_version > 0
-        # Version-aware skip
-        Core.eval(target_module, quote
-            @inline function $skip_name(m::Union{AbstractSbeMessage, AbstractSbeGroup})
-                if m.acting_version < UInt16($since_version)
-                    return UInt32(0)  # Don't skip if field not in version
-                end
-                len = $length_name(m)
-                pos = m.position_ptr[] + $header_length
-                m.position_ptr[] = pos + len
-                return len
-            end
-        end)
-    else
-        # Non-versioned skip
-        Core.eval(target_module, quote
-            @inline function $skip_name(m::Union{AbstractSbeMessage, AbstractSbeGroup})
-                len = $length_name(m)
-                pos = m.position_ptr[] + $header_length
-                m.position_ptr[] = pos + len
-                return len
-            end
-        end)
-    end
-
-    # Generate reader (returns view or string, advances position)
-    decoder_name = :Decoder
-    if since_version > 0
-        # Version-aware reader
-        if is_character_encoded
-            # For character-encoded vardata, return String by default
-            Core.eval(target_module, quote
-                @inline function $accessor_name(m::$decoder_name)
-                    if m.acting_version < UInt16($since_version)
-                        # Return empty string when field not in version
-                        return ""
-                    end
-                    len = $length_name(m)
-                    pos = m.position_ptr[] + $header_length
-                    m.position_ptr[] = pos + len
-                    bytes = view(m.buffer, pos+1:pos+len)
-                    # Remove trailing null bytes for C-style strings
-                    last_nonzero = findlast(!iszero, bytes)
-                    return StringView(last_nonzero === nothing ? "" : view(bytes, 1:last_nonzero))
-                end
-            end)
-        else
-            # For binary vardata, return byte view
-            Core.eval(target_module, quote
-                @inline function $accessor_name(m::$decoder_name)
-                    if m.acting_version < UInt16($since_version)
-                        # Return empty view when field not in version
-                        return view(m.buffer, 1:0)
-                    end
-                    len = $length_name(m)
-                    pos = m.position_ptr[] + $header_length
-                    m.position_ptr[] = pos + len
-                    return view(m.buffer, pos+1:pos+len)
-                end
-            end)
-        end
-    else
-        # Non-versioned reader
-        if is_character_encoded
-            # For character-encoded vardata, return String by default
-            Core.eval(target_module, quote
-                @inline function $accessor_name(m::$decoder_name)
-                    len = $length_name(m)
-                    pos = m.position_ptr[] + $header_length
-                    m.position_ptr[] = pos + len
-                    bytes = view(m.buffer, pos+1:pos+len)
-                    # Remove trailing null bytes for C-style strings
-                    last_nonzero = findlast(!iszero, bytes)
-                    return StringView(last_nonzero === nothing ? "" : view(bytes, 1:last_nonzero))
-                end
-            end)
-        else
-            # For binary vardata, return byte view
-            Core.eval(target_module, quote
-                @inline function $accessor_name(m::$decoder_name)
-                    len = $length_name(m)
-                    pos = m.position_ptr[] + $header_length
-                    m.position_ptr[] = pos + len
-                    return view(m.buffer, pos+1:pos+len)
-                end
-            end)
-        end
-    end
-
-    # Generate type conversion methods for reader
-    Core.eval(target_module, quote
-        # Convert to typed array (e.g., AbstractArray{UInt32})
-        @inline function $accessor_name(m::$decoder_name, ::Type{AbstractArray{T}}) where {T<:Real}
-            return reinterpret(T, $accessor_name(m))
-        end
-
-        # Convert to string (handles both String and StringView)
-        @inline function $accessor_name(m::$decoder_name, ::Type{T}) where {T<:AbstractString}
-            bytes = $accessor_name(m)
-            # Remove trailing null bytes for C-style strings
-            last_nonzero = findlast(!iszero, bytes)
-            # Return StringView to avoid allocation
-            return StringView(last_nonzero === nothing ? "" : view(bytes, 1:last_nonzero))
-        end
-
-        # Convert to symbol
-        @inline function $accessor_name(m::$decoder_name, ::Type{Symbol})
-            return Symbol($accessor_name(m, String))
-        end
-
-        # Convert to single numeric value
-        @inline function $accessor_name(m::$decoder_name, ::Type{T}) where {T<:Real}
-            return reinterpret(T, $accessor_name(m))[]
-        end
-
-        # Convert to tuple
-        @inline function $accessor_name(m::$decoder_name, ::Type{NTuple{N,T}}) where {N,T<:Real}
-            arr = reinterpret(T, $accessor_name(m))
-            return ntuple(i -> arr[i], Val(N))
-        end
-    end)
-
-    # Generate writer (writes length + data, advances position)
-    encoder_name = :Encoder
-    Core.eval(target_module, quote
-        # Write raw bytes
-        @inline function $accessor_name_setter(m::$encoder_name, src::AbstractVector{UInt8})
-            len = Base.length(src)
-            $length_name_setter(m, len)
-            pos = m.position_ptr[] + $header_length
-            m.position_ptr[] = pos + len
-            dest = view(m.buffer, pos+1:pos+len)
-            copyto!(dest, src)
-            return m
-        end
-
-        # Write string
-        @inline function $accessor_name_setter(m::$encoder_name, src::AbstractString)
-            bytes = codeunits(src)
-            len = Base.length(bytes)
-            $length_name_setter(m, len)
-            pos = m.position_ptr[] + $header_length
-            m.position_ptr[] = pos + len
-            dest = view(m.buffer, pos+1:pos+len)
-            copyto!(dest, bytes)
-            return m
-        end
-
-        # Write typed array
-        @inline function $accessor_name_setter(m::$encoder_name, src::AbstractArray{T}) where {T<:Real}
-            bytes = reinterpret(UInt8, src)
-            len = Base.length(bytes)
-            $length_name_setter(m, len)
-            pos = m.position_ptr[] + $header_length
-            m.position_ptr[] = pos + len
-            dest = view(m.buffer, pos+1:pos+len)
-            copyto!(dest, bytes)
-            return m
-        end
-
-        # Write symbol
-        @inline function $accessor_name_setter(m::$encoder_name, src::Symbol)
-            return $accessor_name_setter(m, to_string(src))
-        end
-
-        # Write tuple
-        @inline function $accessor_name_setter(m::$encoder_name, src::NTuple{N,T}) where {N,T<:Real}
-            bytes = reinterpret(UInt8, collect(src))
-            return $accessor_name_setter(m, bytes)
-        end
-
-        # Write single numeric value
-        @inline function $accessor_name_setter(m::$encoder_name, src::T) where {T<:Real}
-            bytes = reinterpret(UInt8, [src])
-            return $accessor_name_setter(m, bytes)
-        end
-    end)
-
-    # Generate metadata constants
-    metadata_prefix = Symbol(string(accessor_name, "_"))
-    Core.eval(target_module, quote
-        const $(Symbol(string(metadata_prefix, "id"))) = UInt16($(data_def.id))
-        const $(Symbol(string(metadata_prefix, "since_version"))) = UInt16($(data_def.since_version))
-        const $(Symbol(string(metadata_prefix, "header_length"))) = $header_length
-    end)
-
-    # Export the accessor functions
-    Core.eval(target_module, quote
-        export $accessor_name, $accessor_name_setter, $length_name, $length_name_setter, $skip_name
-    end)
-
-    return accessor_name
-end
-
-# generateGroup! function removed - this was the Core.eval version that was never called.
-# The expression-based generateGroup_expr function is used instead.
-
-"""
     calculate_composite_size(composite_def::Schema.CompositeType, schema::Schema.MessageSchema)
 
 Calculate the size of a composite type (for variable data headers).
@@ -5299,160 +3539,118 @@ function get_field_size(schema::Schema.MessageSchema, field::Schema.FieldDefinit
 end
 
 """
-    generateChoiceSet!(target_module::Module, set_def::Schema.SetType, schema::Schema.MessageSchema)
+    get_header_field_type(schema::Schema.MessageSchema, field_name::String) -> Type
 
-Generate a complete Set type implementation with decoder/encoder and all choice methods.
-
-Set types in SBE are encoded as bitsets where each choice corresponds to a bit position.
-Following the baseline OptionalExtras pattern, this creates decoder/encoder types,
-bit manipulation functions, and individual choice accessor functions.
+Get the Julia type for a field in the messageHeader composite.
 
 # Arguments
-- `target_module::Module`: Module to generate the type in
-- `set_def::Schema.SetType`: Set type definition from schema
-- `schema::Schema.MessageSchema`: Complete schema for context
+- `schema::Schema.MessageSchema`: Schema containing the header definition
+- `field_name::String`: Name of the header field (e.g., "templateId", "version", "schemaId")
 
 # Returns
-- `Symbol`: Name of the generated set type
+- `Type`: Julia type for the field (e.g., UInt16, UInt32)
 
-# Generated Components
-- Main set type with buffer and offset
-- Decoder/Encoder type aliases
-- SBE interface methods (id, since_version, encoding_*, etc.)
-- Bit manipulation functions (clear!, is_empty, raw_value)
-- Individual choice accessor functions
-
-# Example Generated Interface
+# Example
 ```julia
-# For OptionalExtras with choices sunRoof(0), sportsPack(1), cruiseControl(2)
-extras = OptionalExtras(buffer, offset)
-clear!(extras)              # Set all bits to 0
-is_empty(extras)             # Check if no bits are set
-raw_value(extras)            # Get raw underlying value
-sunRoof(extras)              # Check if sunRoof bit is set
-sunRoof!(extras, true)       # Set/clear sunRoof bit
-sportsPack(extras)           # Check if sportsPack bit is set
-sportsPack!(extras, false)   # Set/clear sportsPack bit
+template_id_type = get_header_field_type(schema, "templateId")  # Returns UInt16
 ```
-
-# Bit Position Mapping
-Each choice in the schema maps to a specific bit position in the underlying integer type.
-The bit operations use proper endianness-aware encoding/decoding via the generated
-encode_value/decode_value functions.
 """
-function generateChoiceSet!(target_module::Module, set_def::Schema.SetType, schema::Schema.MessageSchema)
-    set_name = Symbol(to_pascal_case(set_def.name))
-
-    # Create a nested module for the set type (consistent with message/composite pattern)
-    set_module_name = set_name
-    Core.eval(target_module, :(module $set_module_name end))
-    set_module = getfield(target_module, set_module_name)
-
-    # Use <Name>Struct pattern for clarity (OptionalExtras.OptionalExtrasStruct)
-    struct_name = Symbol(string(set_name, "Struct"))
-    decoder_name = :Decoder
-    encoder_name = :Encoder
-
-    # Get the underlying primitive type for the bitset
-    encoding_julia_type = to_julia_type(set_def.encoding_type)
-    encoding_size = sizeof(encoding_julia_type)
-
-    # Import necessary utilities into the set module
-    Core.eval(set_module, :(using SBE: AbstractSbeEncodedType))
-
-    # Generate the consistent encode/decode functions for this module
-    generateEncodedTypes!(set_module, schema)
-
-    # Generate the main Set type structure in the set module
-    Core.eval(set_module, quote
-        struct $struct_name{T<:AbstractVector{UInt8}} <: AbstractSbeEncodedType
-            buffer::T
-            offset::Int
-        end
-
-        # Create decoder and encoder aliases (following SBE patterns)
-        const $decoder_name = $struct_name
-        const $encoder_name = $struct_name
-
-        export $decoder_name, $encoder_name
-    end)
-
-    # Generate outer constructor for convenience (provide default offset)
-    # Only handle 1-argument case - 2 arguments handled by default constructor
-    Core.eval(set_module, quote
-        # 1-argument: buffer only (use default offset of 0)
-        @inline function $struct_name(buffer::AbstractVector{UInt8})
-            $struct_name(buffer, Int64(0))
-        end
-    end)
-
-    # Generate SBE interface methods in the set module
-    Core.eval(set_module, quote
-        # SBE interface - Set types have no specific id/since_version typically
-        id(::Type{<:$struct_name}) = UInt16(0xffff)  # Default for composite elements
-        id(::$struct_name) = UInt16(0xffff)
-        since_version(::Type{<:$struct_name}) = UInt16($(set_def.since_version))
-        since_version(::$struct_name) = UInt16($(set_def.since_version))
-
-        # Encoding information
-        encoding_offset(::Type{<:$struct_name}) = $(something(set_def.offset, 0))
-        encoding_offset(::$struct_name) = $(something(set_def.offset, 0))
-        encoding_length(::Type{<:$struct_name}) = $encoding_size
-        encoding_length(::$struct_name) = $encoding_size
-
-        # Type information
-        Base.eltype(::Type{<:$struct_name}) = $encoding_julia_type
-        Base.eltype(::$struct_name) = $encoding_julia_type
-    end)
-
-    # Generate basic set operations (clear, empty check, raw access) in the set module
-    Core.eval(set_module, quote
-        # Clear all bits (set to zero)
-        @inline function clear!(set::$encoder_name)
-            encode_value($encoding_julia_type, set.buffer, set.offset, zero($encoding_julia_type))
-            return set
-        end
-
-        # Check if the set is empty (no bits set)
-        @inline function is_empty(set::$decoder_name)
-            return decode_value($encoding_julia_type, set.buffer, set.offset) == zero($encoding_julia_type)
-        end
-
-        # Get the raw underlying value
-        @inline function raw_value(set::$decoder_name)
-            return decode_value($encoding_julia_type, set.buffer, set.offset)
-        end
-
-        export clear!, is_empty, raw_value
-    end)
-
-    # Generate individual choice accessor functions in the set module
-    encoding_type_symbol = Symbol(encoding_julia_type)
-    for choice in set_def.choices
-        choice_func_name = Symbol(toCamelCase(choice.name))
-        choice_func_name_set = Symbol(string(choice_func_name, "!"))
-        bit_position = choice.bit_position
-
-        Core.eval(set_module, quote
-            # Check if this choice bit is set
-            @inline function $choice_func_name(set::$decoder_name)
-                return decode_value($encoding_type_symbol, set.buffer, set.offset) & ($encoding_type_symbol(0x1) << $bit_position) != 0
-            end
-
-            # Set or clear this choice bit
-            @inline function $choice_func_name_set(set::$encoder_name, value::Bool)
-                bits = decode_value($encoding_type_symbol, set.buffer, set.offset)
-                bits = value ? (bits | ($encoding_type_symbol(0x1) << $bit_position)) : (bits & ~($encoding_type_symbol(0x1) << $bit_position))
-                encode_value($encoding_type_symbol, set.buffer, set.offset, bits)
-                return set
-            end
-
-            export $choice_func_name, $choice_func_name_set
-        end)
+function get_header_field_type(schema::Schema.MessageSchema, field_name::String)
+    # Find the messageHeader composite
+    header_type = find_type_by_name(schema, schema.header_type)
+    if header_type === nothing || !(header_type isa Schema.CompositeType)
+        @warn "Header type $(schema.header_type) not found, defaulting to UInt16"
+        return UInt16
     end
-
-    # Export the set module itself from the parent module
-    Core.eval(target_module, :(export $set_module_name))
-
-    return set_name
+    
+    # Find the field in the header
+    for member in header_type.members
+        if member isa Schema.EncodedType && member.name == field_name
+            return to_julia_type(member.primitive_type)
+        end
+    end
+    
+    @warn "Field $field_name not found in header $(schema.header_type), defaulting to UInt16"
+    return UInt16
 end
+
+"""
+    get_schema_id_type(schema::Schema.MessageSchema) -> Type
+
+Get the Julia type for schemaId from the messageHeader composite.
+"""
+get_schema_id_type(schema::Schema.MessageSchema) = get_header_field_type(schema, "schemaId")
+
+"""
+    get_template_id_type(schema::Schema.MessageSchema) -> Type
+
+Get the Julia type for templateId from the messageHeader composite.
+"""
+get_template_id_type(schema::Schema.MessageSchema) = get_header_field_type(schema, "templateId")
+
+"""
+    get_version_type(schema::Schema.MessageSchema) -> Type
+
+Get the Julia type for version from the messageHeader composite.
+"""
+get_version_type(schema::Schema.MessageSchema) = get_header_field_type(schema, "version")
+
+"""
+    get_block_length_type(schema::Schema.MessageSchema) -> Type
+
+Get the Julia type for blockLength from the messageHeader composite.
+"""
+get_block_length_type(schema::Schema.MessageSchema) = get_header_field_type(schema, "blockLength")
+
+"""
+    type_expr(schema::Schema.MessageSchema, field_name::String, value) -> Expr
+
+Create a typed expression for a schema field value using the correct type from the schema.
+Returns an Expr like `UInt16(value)` where UInt16 comes from the schema's messageHeader.
+
+# Arguments
+- `schema::Schema.MessageSchema`: Schema containing type definitions
+- `field_name::String`: Header field name ("templateId", "version", "schemaId", "blockLength")  
+- `value`: The value to wrap in the type constructor
+
+# Returns
+- `Expr`: Expression like `:UInt16(value)` with proper type from schema
+
+# Example
+```julia
+# Creates: UInt16(5)
+expr = type_expr(schema, "templateId", 5)
+```
+"""
+function type_expr(schema::Schema.MessageSchema, field_name::String, value)
+    field_type = get_header_field_type(schema, field_name)
+    return Expr(:call, Symbol(field_type), value)
+end
+
+"""
+    template_id_expr(schema::Schema.MessageSchema, value) -> Expr
+
+Create a typed expression for a template ID using the schema's templateId type.
+"""
+template_id_expr(schema::Schema.MessageSchema, value) = type_expr(schema, "templateId", value)
+
+"""
+    schema_id_expr(schema::Schema.MessageSchema, value) -> Expr
+
+Create a typed expression for a schema ID using the schema's schemaId type.
+"""
+schema_id_expr(schema::Schema.MessageSchema, value) = type_expr(schema, "schemaId", value)
+
+"""
+    version_expr(schema::Schema.MessageSchema, value) -> Expr
+
+Create a typed expression for a version using the schema's version type.
+"""
+version_expr(schema::Schema.MessageSchema, value) = type_expr(schema, "version", value)
+
+"""
+    block_length_expr(schema::Schema.MessageSchema, value) -> Expr
+
+Create a typed expression for a block length using the schema's blockLength type.
+"""
+block_length_expr(schema::Schema.MessageSchema, value) = type_expr(schema, "blockLength", value)

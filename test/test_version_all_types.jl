@@ -35,13 +35,13 @@ using SBE
         product_v1 = Versioned.Product.Decoder(buffer, 0, position_ptr_v1, UInt16(17), UInt16(1))
         
         features_v1 = Versioned.Product.features(product_v1)
-        @test features_v1 isa Versioned.Features.FeaturesStruct
+        @test features_v1 isa Versioned.Features.Decoder
         
         # Version 2: features field should be accessible
         position_ptr_v2 = SBE.PositionPointer()
         product_v2 = Versioned.Product.Decoder(buffer, 0, position_ptr_v2, UInt16(19), UInt16(2))
         features_v2 = Versioned.Product.features(product_v2)
-        @test features_v2 isa Versioned.Features.FeaturesStruct
+        @test features_v2 isa Versioned.Features.Decoder
     end
     
     @testset "Group Version Handling" begin

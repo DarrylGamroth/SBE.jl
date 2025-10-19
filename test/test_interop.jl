@@ -79,9 +79,7 @@ const OurSchema = BaselineJulia.Baseline  # Our Julia codec
         
         # our_booster = OurSchema.Engine.booster(our_engine)
         # @test OurSchema.Booster.boostType(our_booster) == OurSchema.BoostType.TURBO
-        # @test OurSchema.Booster.horsePower(our_booster) == UInt8(150)
-        
-        println("  ✓ Baseline encoder → Our decoder: SUCCESS")
+        # @test OurSchema.Booster.horsePower(our_booster) == UInt8(150)        
     end
     
     @testset "Our code encodes, baseline decodes" begin
@@ -139,9 +137,7 @@ const OurSchema = BaselineJulia.Baseline  # Our Julia codec
         @test Baseline.numCylinders(baseline_engine) == UInt8(6)
         # Baseline returns UInt8 vector for manufacturerCode, convert to string
         @test String(Baseline.manufacturerCode(baseline_engine)) == "ABC"
-        # Note: Not testing efficiency, boosterEnabled, booster since our schema doesn't have them
-        
-        println("  ✓ Our encoder → Baseline decoder: SUCCESS")
+        # Note: Not testing efficiency, boosterEnabled, booster since our schema doesn't have them        
     end
     
     @testset "Block length comparison" begin

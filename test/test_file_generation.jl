@@ -28,37 +28,49 @@ using SBE
         @test code isa String
         @test length(code) > 0
         
-        # Verify generated code structure
-        @test occursin("module Baseline", code)
-        @test occursin("@enumx T = SbeEnum BooleanType", code)
-        @test occursin("@enumx T = SbeEnum", code)  # At least one enum
-        @test occursin("module Engine", code)
-        # Check for composite types (e.g., Engine, Booster) - now uses abstract type pattern
-        @test occursin("abstract type AbstractEngine", code)
-        @test occursin(r"struct Decoder.*<: AbstractEngine"s, code)
-        @test occursin(r"struct Encoder.*<: AbstractEngine"s, code)
-        @test occursin("module Car", code)
-        @test occursin("struct Encoder", code)
-        @test occursin("struct Decoder", code)
-        @test occursin("function serialNumber", code)
-        @test occursin("function modelYear!", code)
-        
         # Load the module once
         include(output_file)
         
-        # Verify module exists
+        # Verify module exists and has expected structure
         @test isdefined(Main, :Baseline)
         
-        # Verify we can create instances
-        buffer = zeros(UInt8, 256)
-        encoder = Main.Baseline.Car.Encoder(buffer, 0)
-        @test encoder isa Main.Baseline.Car.Encoder
-        
-        # Verify enum access (enums are at package level now, not wrapped in modules)
+        # Test enum functionality
         @test Main.Baseline.BooleanType.T isa Main.Baseline.BooleanType.SbeEnum
+        @test Main.Baseline.BooleanType.F isa Main.Baseline.BooleanType.SbeEnum
+        @test UInt8(Main.Baseline.BooleanType.T) == 0x01
+        @test UInt8(Main.Baseline.BooleanType.F) == 0x00
         
-        # Verify composite access
+        # Test composite type (Engine) functionality
         @test isdefined(Main.Baseline, :Engine)
+        buffer = zeros(UInt8, 256)
+        engine_enc = Main.Baseline.Engine.Encoder(buffer, 0)
+        @test engine_enc isa Main.Baseline.Engine.Encoder
+        
+        # Test we can set and get values
+        Main.Baseline.Engine.capacity!(engine_enc, UInt16(2000))
+        Main.Baseline.Engine.numCylinders!(engine_enc, UInt8(4))
+        
+        engine_dec = Main.Baseline.Engine.Decoder(buffer, 0, UInt16(0))
+        @test Main.Baseline.Engine.capacity(engine_dec) == UInt16(2000)
+        @test Main.Baseline.Engine.numCylinders(engine_dec) == UInt8(4)
+        
+        # Test message encoding/decoding
+        msg_buffer = zeros(UInt8, 512)
+        car_enc = Main.Baseline.Car.Encoder(msg_buffer, 0)
+        @test car_enc isa Main.Baseline.Car.Encoder
+        
+        # Set field values
+        Main.Baseline.Car.serialNumber!(car_enc, UInt64(12345))
+        Main.Baseline.Car.modelYear!(car_enc, UInt16(2024))
+        Main.Baseline.Car.available!(car_enc, Main.Baseline.BooleanType.T)
+        Main.Baseline.Car.code!(car_enc, Main.Baseline.Model.A)
+        
+        # Decode and verify
+        car_dec = Main.Baseline.Car.Decoder(msg_buffer, 0)
+        @test Main.Baseline.Car.serialNumber(car_dec) == UInt64(12345)
+        @test Main.Baseline.Car.modelYear(car_dec) == UInt16(2024)
+        @test Main.Baseline.Car.available(car_dec) == Main.Baseline.BooleanType.T
+        @test Main.Baseline.Car.code(car_dec) == Main.Baseline.Model.A
         
         # Clean up file
         rm(output_file, force=true)
@@ -70,8 +82,6 @@ using SBE
         
         @test code isa String
         @test length(code) > 0
-        @test occursin("module Extension", code)
-        @test occursin("@enumx T = SbeEnum BooleanType", code)
         
         # Load with include_string
         Base.include_string(Main, code)
@@ -79,10 +89,15 @@ using SBE
         # Verify module exists
         @test isdefined(Main, :Extension)
         
-        # Verify we can create instances
-        buffer = zeros(UInt8, 256)
+        # Test actual functionality - can encode/decode
+        buffer = zeros(UInt8, 512)
         encoder = Main.Extension.Car.Encoder(buffer, 0)
         @test encoder isa Main.Extension.Car.Encoder
+        
+        # Set and verify a value
+        Main.Extension.Car.serialNumber!(encoder, UInt64(54321))
+        decoder = Main.Extension.Car.Decoder(buffer, 0)
+        @test Main.Extension.Car.serialNumber(decoder) == UInt64(54321)
     end
     
     # Test Optional schema
@@ -92,15 +107,22 @@ using SBE
         @test module_name == :Optional
         @test isdefined(Main, module_name)
         
-        # Verify we can create instances (Optional schema has Order message, not Car)
-        buffer = zeros(UInt8, 256)
+        # Test actual functionality - can encode/decode Order message
+        buffer = zeros(UInt8, 512)
         encoder = Main.Optional.Order.Encoder(buffer, 0)
         @test encoder isa Main.Optional.Order.Encoder
+        
+        # Test required and optional field functionality
+        Main.Optional.Order.orderId!(encoder, UInt64(12345))
+        Main.Optional.Order.quantity!(encoder, UInt32(100))
+        decoder = Main.Optional.Order.Decoder(buffer, 0)
+        @test Main.Optional.Order.orderId(decoder) == UInt64(12345)
+        @test Main.Optional.Order.quantity(decoder) == UInt32(100)
     end
     
     # Test Versioned schema
     @testset "Versioned schema generation" begin
-        # Test that generated code compiles without errors
+        # Test that generated code is valid Julia syntax
         code = SBE.generate(joinpath(@__DIR__, "example-versioned-schema.xml"))
         
         # Parse the code (will throw if invalid syntax)
@@ -124,15 +146,21 @@ using SBE
             @test isfile(output_file)
             @test filesize(output_file) > 1000  # Should be substantial
             
-            # Verify file contents
-            file_code = read(output_file, String)
-            @test occursin("module Versioned", file_code)
-            @test occursin("struct Encoder", file_code)
-            @test occursin("struct Decoder", file_code)
-            
             # Module already loaded from include_string above
             @test isdefined(Main, :Versioned)
             @test isdefined(Main.Versioned, :Product)  # Versioned schema has Product message
+            
+            # Test version handling - encode and decode
+            buffer = zeros(UInt8, 512)
+            encoder = Main.Versioned.Product.Encoder(buffer, 0)
+            @test encoder isa Main.Versioned.Product.Encoder
+            
+            # Set base version fields and verify
+            Main.Versioned.Product.id!(encoder, UInt64(99))
+            Main.Versioned.Product.quantity!(encoder, UInt32(42))
+            decoder = Main.Versioned.Product.Decoder(buffer, 0)
+            @test Main.Versioned.Product.id(decoder) == UInt64(99)
+            @test Main.Versioned.Product.quantity(decoder) == UInt32(42)
         finally
             rm(output_file, force=true)
         end
