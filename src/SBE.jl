@@ -244,7 +244,9 @@ macro load_schema(xml_path)
             # Parse to get module name
             xml_content = read(xml_file, String)
             schema = SBE.parse_sbe_schema(xml_content)
-            module_name = Symbol(uppercasefirst(schema.package))
+            # Convert package name to PascalCase (e.g., "composite.elements" -> "CompositeElements")
+            package_parts = split(replace(schema.package, "." => "_"), "_")
+            module_name = Symbol(join([uppercasefirst(part) for part in package_parts]))
             
             # Check if already exists
             if !isdefined(Main, module_name)

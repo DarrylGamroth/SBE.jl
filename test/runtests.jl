@@ -6,6 +6,7 @@ include("generated/Extension.jl")
 include("generated/Optional.jl")
 include("generated/Versioned.jl")
 include("generated/OrderCheck.jl")
+include("generated/CompositeElements.jl")
 
 @testset "SBE.jl Tests" begin
     # Core functionality tests
@@ -20,7 +21,8 @@ include("generated/OrderCheck.jl")
     include("test_display.jl")
     include("test_version_handling.jl")
     include("test_version_all_types.jl")
-    include("test_nested_types_in_composites.jl")  # Nested enums and sets in composites
+    include("test_nested_types_in_composites.jl")  # Nested enums in composites
+    include("test_nested_sets_in_composites.jl")  # Nested sets in composites
     include("test_optional_fields.jl")  # Optional field handling tests
     include("test_consistent_field_api.jl")  # Consistent API tests (Baseline schema)
     

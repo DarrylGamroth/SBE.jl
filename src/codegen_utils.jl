@@ -750,7 +750,7 @@ end
 
 Generate a composite type definition as an expression (for file-based generation).
 """
-function generateComposite_expr(composite_def::Schema.CompositeType, schema::Schema.MessageSchema)
+function generateComposite_expr(composite_def::Schema.CompositeType, schema::Schema.MessageSchema, skip_nested_generation::Bool=false)
     composite_name = Symbol(to_pascal_case(composite_def.name))
     abstract_type_name = Symbol(string("Abstract", composite_name))
     decoder_name = :Decoder
@@ -844,14 +844,11 @@ function generateComposite_expr(composite_def::Schema.CompositeType, schema::Sch
             end
         elseif member isa Schema.EnumType
             # Handle nested enum definitions (e.g., <enum name="BoostType" encodingType="char">)
+            # NOTE: Nested enums are generated at top-level in generate_module_expr, not here
+            # We only generate the accessor for this enum field
             enum_name = Symbol(to_pascal_case(member.name))
             
-            # Generate the enum definition at module level
-            enum_expr = generateEnum_expr(member, schema)
-            push!(nested_type_exprs, enum_expr)
-            push!(export_symbols, enum_name)
-            
-            # Generate field accessor for this enum
+            # Generate field accessor for this enum (references the top-level enum module)
             accessor_exprs = generate_composite_nested_enum_accessor(member, offset, abstract_type_name, decoder_name, encoder_name, schema)
             append!(field_exprs, accessor_exprs)
             
@@ -860,20 +857,52 @@ function generateComposite_expr(composite_def::Schema.CompositeType, schema::Sch
             offset += sizeof(encoding_type)
         elseif member isa Schema.SetType
             # Handle nested set definitions (e.g., <set name="Options" encodingType="uint8">)
+            # NOTE: Nested sets are generated at top-level in generate_module_expr, not here
+            # We only generate the accessor for this set field
             set_name = Symbol(to_pascal_case(member.name))
             
-            # Generate the set definition at module level
-            set_expr = generateSet_expr(member, schema)
-            push!(nested_type_exprs, set_expr)
-            push!(export_symbols, set_name)
-            
-            # Generate field accessor for this set
+            # Generate field accessor for this set (references the top-level set module)
             accessor_exprs = generate_composite_nested_set_accessor(member, offset, abstract_type_name, decoder_name, encoder_name, schema)
             append!(field_exprs, accessor_exprs)
             
             # Update offset
             encoding_type = to_julia_type(member.encoding_type)
             offset += sizeof(encoding_type)
+        elseif member isa Schema.CompositeType
+            # Handle nested composite definitions (e.g., <composite name="inner">)
+            # NOTE: Nested composites are generated at top-level in generate_module_expr, not here
+            # We only generate the accessor for this composite field
+            composite_name = Symbol(to_pascal_case(member.name))
+            
+            # Generate field accessor for this composite (references the top-level composite module)
+            accessor_exprs = generate_composite_nested_composite_accessor(member, offset, abstract_type_name, decoder_name, encoder_name, schema)
+            append!(field_exprs, accessor_exprs)
+            
+            # Update offset - calculate the nested composite's size
+            nested_composite_size = 0
+            for nested_member in member.members
+                if nested_member isa Schema.EncodedType
+                    if nested_member.presence != "constant"
+                        julia_type = to_julia_type(nested_member.primitive_type)
+                        nested_composite_size += sizeof(julia_type) * nested_member.length
+                    end
+                elseif nested_member isa Schema.RefType
+                    ref_type_def = find_type_by_name(schema, nested_member.type_ref)
+                    if ref_type_def !== nothing && ref_type_def isa Schema.EncodedType
+                        if ref_type_def.presence != "constant"
+                            julia_type = to_julia_type(ref_type_def.primitive_type)
+                            nested_composite_size += sizeof(julia_type) * ref_type_def.length
+                        end
+                    end
+                elseif nested_member isa Schema.EnumType
+                    encoding_type = to_julia_type(nested_member.encoding_type)
+                    nested_composite_size += sizeof(encoding_type)
+                elseif nested_member isa Schema.SetType
+                    encoding_type = to_julia_type(nested_member.encoding_type)
+                    nested_composite_size += sizeof(encoding_type)
+                end
+            end
+            offset += nested_composite_size
         end
     end
     
@@ -884,10 +913,24 @@ function generateComposite_expr(composite_def::Schema.CompositeType, schema::Sch
     needs_enumx = any(m -> m isa Schema.EnumType, composite_def.members)
     
     # Collect external enum and composite types used by this composite for imports
+    # This includes both referenced types AND nested types (which are now siblings at top-level)
     enum_imports = Set{Symbol}()
     composite_imports = Set{Symbol}()
     
     for member in composite_def.members
+        # Add nested enums and sets as imports (they're generated as siblings now)
+        if member isa Schema.EnumType
+            enum_type_name = Symbol(to_pascal_case(member.name))
+            push!(enum_imports, enum_type_name)
+        elseif member isa Schema.SetType
+            set_type_name = Symbol(to_pascal_case(member.name))
+            push!(enum_imports, set_type_name)  # Sets go in enum_imports
+        elseif member isa Schema.CompositeType
+            composite_type_name = Symbol(to_pascal_case(member.name))
+            push!(composite_imports, composite_type_name)
+        end
+        
+        # Also add referenced external types
         if member isa Schema.RefType && member.type_ref !== nothing
             # Find the referenced type
             type_idx = findfirst(t -> t.name == member.type_ref, schema.types)
@@ -927,9 +970,6 @@ function generateComposite_expr(composite_def::Schema.CompositeType, schema::Sch
             
             # Endianness-specific encode/decode functions
             $endian_imports
-            
-            # Nested type definitions (enums and sets)
-            $(nested_type_exprs...)
             
             # Abstract type for this composite
             abstract type $abstract_type_name <: AbstractSbeCompositeType end
@@ -982,7 +1022,7 @@ function generateComposite_expr(composite_def::Schema.CompositeType, schema::Sch
             # Field accessors
             $(field_exprs...)
             
-            export $abstract_type_name, $decoder_name, $encoder_name, $(export_symbols...)
+            export $abstract_type_name, $decoder_name, $encoder_name
         end
     end
     
@@ -1374,11 +1414,77 @@ function generate_composite_nested_set_accessor(member::Schema.SetType, offset::
     # Generate set field accessors (reads/writes the nested set defined in this module)
     push!(exprs, quote
         @inline function $member_name(m::$decoder_name)
-            return $set_name.SetStruct(m.buffer, m.offset + $offset, m.acting_version)
+            return $set_name.Decoder(m.buffer, m.offset + $offset, m.acting_version)
         end
         
         @inline function $member_name(m::$encoder_name)
-            return $set_name.SetStruct(m.buffer, m.offset + $offset, m.acting_version)
+            return $set_name.Encoder(m.buffer, m.offset + $offset)
+        end
+    end)
+    
+    return exprs
+end
+
+"""
+Helper function to generate field accessor expressions for nested composite members in composites.
+These are composites defined directly inside the composite, not referenced from external types.
+"""
+function generate_composite_nested_composite_accessor(member::Schema.CompositeType, offset::Int, 
+                                                       base_type_name::Symbol, decoder_name::Symbol, encoder_name::Symbol, schema::Schema.MessageSchema)
+    # For nested composites, convert the name to camelCase (lowercase first letter)
+    raw_name = toCamelCase(member.name)
+    member_name = Symbol(lowercase(raw_name[1:1]) * raw_name[2:end])
+    composite_name = Symbol(to_pascal_case(member.name))
+    
+    # Calculate the nested composite's encoded length
+    nested_size = 0
+    for nested_member in member.members
+        if nested_member isa Schema.EncodedType
+            if nested_member.presence != "constant"
+                julia_type = to_julia_type(nested_member.primitive_type)
+                nested_size += sizeof(julia_type) * nested_member.length
+            end
+        elseif nested_member isa Schema.RefType
+            ref_type_def = find_type_by_name(schema, nested_member.type_ref)
+            if ref_type_def !== nothing && ref_type_def isa Schema.EncodedType
+                if ref_type_def.presence != "constant"
+                    julia_type = to_julia_type(ref_type_def.primitive_type)
+                    nested_size += sizeof(julia_type) * ref_type_def.length
+                end
+            end
+        elseif nested_member isa Schema.EnumType
+            encoding_type = to_julia_type(nested_member.encoding_type)
+            nested_size += sizeof(encoding_type)
+        elseif nested_member isa Schema.SetType
+            encoding_type = to_julia_type(nested_member.encoding_type)
+            nested_size += sizeof(encoding_type)
+        end
+    end
+    
+    exprs = Expr[]
+    
+    # Generate metadata functions
+    push!(exprs, quote
+        $(Symbol(member_name, :_id))(::$base_type_name) = $(template_id_expr(schema, 0xffff))
+        $(Symbol(member_name, :_id))(::Type{<:$base_type_name}) = $(template_id_expr(schema, 0xffff))
+        $(Symbol(member_name, :_since_version))(::$base_type_name) = $(version_expr(schema, member.since_version))
+        $(Symbol(member_name, :_since_version))(::Type{<:$base_type_name}) = $(version_expr(schema, member.since_version))
+        $(Symbol(member_name, :_in_acting_version))(m::$base_type_name) = m.acting_version >= $(version_expr(schema, member.since_version))
+        
+        $(Symbol(member_name, :_encoding_offset))(::$base_type_name) = Int($offset)
+        $(Symbol(member_name, :_encoding_offset))(::Type{<:$base_type_name}) = Int($offset)
+        $(Symbol(member_name, :_encoding_length))(::$base_type_name) = Int($nested_size)
+        $(Symbol(member_name, :_encoding_length))(::Type{<:$base_type_name}) = Int($nested_size)
+    end)
+    
+    # Generate composite field accessors (reads/writes the nested composite defined in this module)
+    push!(exprs, quote
+        @inline function $member_name(m::$decoder_name)
+            return $composite_name.Decoder(m.buffer, m.offset + $offset, m.acting_version)
+        end
+        
+        @inline function $member_name(m::$encoder_name)
+            return $composite_name.Encoder(m.buffer, m.offset + $offset)
         end
     end)
     
@@ -2863,9 +2969,10 @@ added in Phase 2B after core integration is validated.
 """
 function generate_module_expr(schema::Schema.MessageSchema)
     # Create module name from package
-    # Sanitize package name: replace dots with underscores for valid module name
-    sanitized_package = replace(schema.package, "." => "_")
-    module_name = Symbol(uppercasefirst(sanitized_package))
+    # Convert package name to PascalCase (e.g., "composite.elements" -> "CompositeElements")
+    # Split on dots and underscores, then capitalize each part
+    package_parts = split(replace(schema.package, "." => "_"), "_")
+    module_name = Symbol(join([uppercasefirst(part) for part in package_parts]))
     
     # Collect all type expressions in dependency order
     type_exprs = Expr[]
@@ -2875,11 +2982,46 @@ function generate_module_expr(schema::Schema.MessageSchema)
     # Generator functions return quote blocks, but we need the raw expressions
     unwrap_expr(expr::Expr) = (expr.head == :block && length(expr.args) == 1) ? expr.args[1] : expr
     
+    # Helper to recursively extract nested types from composites
+    function extract_nested_types!(composite_def::Schema.CompositeType, extracted_types::Vector)
+        for member in composite_def.members
+            if member isa Schema.EnumType
+                push!(extracted_types, member)
+            elseif member isa Schema.SetType
+                push!(extracted_types, member)
+            elseif member isa Schema.CompositeType
+                # Recursively extract from nested composite
+                extract_nested_types!(member, extracted_types)
+                # Add the nested composite itself
+                push!(extracted_types, member)
+            end
+        end
+    end
+    
     # 1. Generate enum types (no dependencies)
+    #    First pass: extract nested enums from composites and generate them
+    nested_enums = Schema.EnumType[]
+    for type_def in schema.types
+        if type_def isa Schema.CompositeType
+            extract_nested_types!(type_def, nested_enums)
+        end
+    end
+    
+    # Generate top-level enums
     for type_def in schema.types
         if type_def isa Schema.EnumType
             enum_name = Symbol(to_pascal_case(type_def.name))
             enum_expr = generateEnum_expr(type_def, schema)
+            push!(type_exprs, unwrap_expr(enum_expr))
+            push!(export_symbols, enum_name)
+        end
+    end
+    
+    # Generate nested enums that were extracted
+    for enum_def in nested_enums
+        if enum_def isa Schema.EnumType
+            enum_name = Symbol(to_pascal_case(enum_def.name))
+            enum_expr = generateEnum_expr(enum_def, schema)
             push!(type_exprs, unwrap_expr(enum_expr))
             push!(export_symbols, enum_name)
         end
@@ -2895,11 +3037,31 @@ function generate_module_expr(schema::Schema.MessageSchema)
         end
     end
     
-    # 3. Generate composite types (may reference enums/sets)
+    # Generate nested sets that were extracted
+    for set_def in nested_enums  # Reuse the same array since we extracted all types
+        if set_def isa Schema.SetType
+            set_name = Symbol(to_pascal_case(set_def.name))
+            set_expr = generateSet_expr(set_def, schema)
+            push!(type_exprs, unwrap_expr(set_expr))
+            push!(export_symbols, set_name)
+        end
+    end
+    
+    # 3. Generate nested composites that were extracted (before their parents)
+    for nested_def in nested_enums
+        if nested_def isa Schema.CompositeType
+            composite_name = Symbol(to_pascal_case(nested_def.name))
+            composite_expr = generateComposite_expr(nested_def, schema, true)  # true = is_nested, don't recurse
+            push!(type_exprs, unwrap_expr(composite_expr))
+            push!(export_symbols, composite_name)
+        end
+    end
+    
+    # 4. Generate top-level composite types (may reference enums/sets/nested composites)
     for type_def in schema.types
         if type_def isa Schema.CompositeType
             composite_name = Symbol(to_pascal_case(type_def.name))
-            composite_expr = generateComposite_expr(type_def, schema)
+            composite_expr = generateComposite_expr(type_def, schema, false)  # false = top-level, DO recurse but don't nest
             push!(type_exprs, unwrap_expr(composite_expr))
             push!(export_symbols, composite_name)
         end

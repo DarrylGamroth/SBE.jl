@@ -27,6 +27,7 @@ schemas = [
     ("example-optional-schema.xml", "Optional.jl", "Optional"),
     ("example-versioned-schema.xml", "Versioned.jl", "Versioned"),
     (joinpath("resources", "field-order-check-schema.xml"), "OrderCheck.jl", "OrderCheck"),
+    (joinpath("resources", "composite-elements-schema.xml"), "CompositeElements.jl", "CompositeElements"),
 ]
 
 for (schema_file, output_file, module_name) in schemas
