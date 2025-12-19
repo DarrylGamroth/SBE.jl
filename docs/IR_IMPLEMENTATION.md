@@ -40,17 +40,20 @@ Each token represents a structural element with signal types like:
 ### Step 3: IR → Julia Code
 Julia code is generated from the IR. The IR is the **canonical intermediate representation**.
 
-The `generate_from_ir()` function takes IR and produces Julia code. Currently, this is implemented using Schema as an internal bridge:
+The `generate_from_ir()` function takes IR and produces Julia code.
 
-1. **IR → Schema** (internal): IR tokens are parsed to reconstruct a Schema structure
-2. **Schema → Julia AST**: The Schema is used to generate Julia expressions
-3. **Julia AST → Code String**: The expressions are converted to Julia source code
+**Current Implementation Status:**
+The function currently uses Schema as a temporary bridge to the existing code generator:
+1. **IR → Schema** (temporary): IR tokens are parsed to reconstruct Schema
+2. **Schema → Julia AST**: Schema is used to generate Julia expressions  
+3. **Julia AST → Code String**: Expressions are converted to code
 
-This approach:
-- Makes IR the canonical representation in the pipeline
-- Reuses the robust existing code generation infrastructure
-- Keeps Schema reconstruction as an internal implementation detail
-- Enables future direct IR → Julia AST generation without the Schema bridge
+**Correct Implementation (TODO):**
+Direct IR token processing without Schema:
+1. **IR Tokens → Julia AST**: Process tokens directly to generate expressions
+2. **Julia AST → Code String**: Convert to code
+
+The temporary bridge approach was chosen for pragmatism - it reuses the robust existing code generator (~3000 lines) while establishing the correct pipeline. The Schema reconstruction is an internal implementation detail not exposed in the public API.
 
 ## API
 
@@ -194,9 +197,14 @@ Tests verify:
 
 ## Future Enhancements
 
-1. **IR Serialization**: Add functions to serialize IR to binary format using the SBE IR schema
-2. **IR Deserialization**: Add functions to deserialize IR from binary format
-3. **Code Generation from IR**: Optionally generate Julia code directly from IR instead of Schema
+1. **Direct IR → Julia Code Generation** (HIGH PRIORITY)
+   - Implement true token-based code generator
+   - Process IR tokens directly to Julia AST without Schema bridge
+   - This is the correct implementation per reference SBE architecture
+   - Currently using Schema bridge temporarily for pragmatism
+
+2. **IR Serialization**: Add functions to serialize IR to binary format using the SBE IR schema
+3. **IR Deserialization**: Add functions to deserialize IR from binary format
 4. **IR Comparison**: Tools to compare IR with reference implementation output
 5. **IR Optimization**: Detect and optimize IR patterns
 
