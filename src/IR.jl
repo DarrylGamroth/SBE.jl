@@ -136,7 +136,7 @@ function IRToken(;
     token_version::Int32 = Int32(0),
     component_token_count::Int32 = Int32(0),
     signal::Signal = ENCODING,
-    primitive_type::PrimitiveType = NONE,
+    primitive_type::PrimitiveType = PT_NONE,
     byte_order::ByteOrder = SBE_LITTLE_ENDIAN,
     presence::Presence = SBE_REQUIRED,
     deprecated::Union{Int32, Nothing} = nothing,
