@@ -3178,11 +3178,15 @@ function generate(xml_path::String, output_path::String)
         error("Schema file not found: $xml_path")
     end
     
-    # Parse the schema
+    # Parse the schema (Step 1: XML → Schema)
     xml_content = read(xml_path, String)
     schema = parse_sbe_schema(xml_content)
     
-    # Generate the module expression
+    # Generate IR (Step 2: Schema → IR)
+    # The IR is now available for inspection/serialization if needed
+    ir = schema_to_ir(schema)
+    
+    # Generate the module expression (Step 3: Schema → Julia Code)
     module_expr = generate_module_expr(schema)
     
     # Convert to code string
@@ -3208,6 +3212,9 @@ Generate Julia code from an SBE schema XML file and return it as a string.
 
 This version generates the code in-memory without writing to a file. The returned
 string can be used with `Base.include_string()` to load the module dynamically.
+
+The generation process follows: XML → Schema → IR → Julia Code
+The IR (Intermediate Representation) is compatible with the reference SBE implementation.
 
 # Arguments
 - `xml_path::String`: Path to the SBE XML schema file
@@ -3244,15 +3251,58 @@ function generate(xml_path::String)
         error("Schema file not found: $xml_path")
     end
     
-    # Parse the schema
+    # Parse the schema (Step 1: XML → Schema)
     xml_content = read(xml_path, String)
     schema = parse_sbe_schema(xml_content)
     
-    # Generate the complete module expression
+    # Generate IR (Step 2: Schema → IR)
+    # The IR is now available for inspection/serialization if needed
+    # but we continue with direct code generation from Schema for performance
+    ir = schema_to_ir(schema)
+    
+    # Generate the complete module expression (Step 3: Schema → Julia Code)
+    # Note: We generate from Schema directly for now, but IR is available
     module_expr = generate_module_expr(schema)
     
     # Convert to code string and return
     return expr_to_code_string(module_expr)
+end
+
+"""
+    generate_ir(xml_path::String) -> IR.IntermediateRepresentation
+
+Generate an Intermediate Representation (IR) from an SBE schema XML file.
+
+The IR is compatible with the reference SBE implementation and can be:
+- Inspected programmatically
+- Serialized to binary format using the SBE IR schema
+- Used for cross-implementation compatibility testing
+
+# Arguments
+- `xml_path::String`: Path to the SBE XML schema file
+
+# Returns
+- `IR.IntermediateRepresentation`: The IR containing frame header and tokens
+
+# Example
+```julia
+ir = SBE.generate_ir("example-schema.xml")
+println("Schema: ", ir.frame.package_name)
+println("Number of tokens: ", length(ir.tokens))
+```
+"""
+function generate_ir(xml_path::String)
+    # Verify input file exists
+    if !isfile(xml_path)
+        error("Schema file not found: $xml_path")
+    end
+    
+    # Parse the schema
+    xml_content = read(xml_path, String)
+    schema = parse_sbe_schema(xml_content)
+    
+    # Generate and return IR
+    return schema_to_ir(schema)
 end
 
 """

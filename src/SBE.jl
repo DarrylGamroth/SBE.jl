@@ -276,6 +276,7 @@ export IR      # Users can access IR module for intermediate representation
 export SBECodec, SBEFlyweight, SBEMessage
 export @load_schema, create_codec_from_schema, create_message, parse_sbe_schema
 export generate  # Main code generation API
+export generate_ir  # Generate IR from XML schema
 export schema_to_ir  # Schema to IR conversion
 
 # Export position pointer type
