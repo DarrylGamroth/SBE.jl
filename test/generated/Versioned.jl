@@ -761,6 +761,117 @@ begin
 end
 export AbstractVarStringEncoding, Decoder, Encoder
 end
+module BaseNumber
+using SBE: AbstractSbeCompositeType, AbstractSbeEncodedType
+import SBE: id, since_version, encoding_offset, encoding_length, null_value, min_value, max_value
+import SBE: value, value!
+using MappedArrays: mappedarray
+nothing
+begin
+    import SBE: encode_value_le, decode_value_le, encode_array_le, decode_array_le
+    const encode_value = encode_value_le
+    const decode_value = decode_value_le
+    const encode_array = encode_array_le
+    const decode_array = decode_array_le
+end
+abstract type AbstractBaseNumber <: AbstractSbeCompositeType end
+struct Decoder{T <: AbstractArray{UInt8}} <: AbstractBaseNumber
+    buffer::T
+    offset::Int64
+    acting_version::UInt16
+end
+struct Encoder{T <: AbstractArray{UInt8}} <: AbstractBaseNumber
+    buffer::T
+    offset::Int64
+end
+@inline function Decoder(buffer::AbstractArray{UInt8})
+        Decoder(buffer, Int64(0), UInt16(0x0002))
+    end
+@inline function Decoder(buffer::AbstractArray{UInt8}, offset::Integer)
+        Decoder(buffer, Int64(offset), UInt16(0x0002))
+    end
+@inline function Encoder(buffer::AbstractArray{UInt8})
+        Encoder(buffer, Int64(0))
+    end
+sbe_encoded_length(::AbstractBaseNumber) = begin
+        UInt16(4)
+    end
+sbe_encoded_length(::Type{<:AbstractBaseNumber}) = begin
+        UInt16(4)
+    end
+sbe_acting_version(m::Decoder) = begin
+        m.acting_version
+    end
+sbe_acting_version(::Encoder) = begin
+        UInt16(0x0002)
+    end
+Base.sizeof(m::AbstractBaseNumber) = begin
+        sbe_encoded_length(m)
+    end
+function Base.convert(::Type{<:AbstractArray{UInt8}}, m::AbstractBaseNumber)
+    return view(m.buffer, m.offset + 1:m.offset + sbe_encoded_length(m))
+end
+function Base.show(io::IO, m::AbstractBaseNumber)
+    print(io, "BaseNumber", "(offset=", m.offset, ", size=", sbe_encoded_length(m), ")")
+end
+begin
+    baseNumber_id(::AbstractBaseNumber) = begin
+            UInt16(0xffff)
+        end
+    baseNumber_id(::Type{<:AbstractBaseNumber}) = begin
+            UInt16(0xffff)
+        end
+    baseNumber_since_version(::AbstractBaseNumber) = begin
+            UInt16(0)
+        end
+    baseNumber_since_version(::Type{<:AbstractBaseNumber}) = begin
+            UInt16(0)
+        end
+    baseNumber_in_acting_version(m::AbstractBaseNumber) = begin
+            m.acting_version >= UInt16(0)
+        end
+    baseNumber_encoding_offset(::AbstractBaseNumber) = begin
+            Int(0)
+        end
+    baseNumber_encoding_offset(::Type{<:AbstractBaseNumber}) = begin
+            Int(0)
+        end
+    baseNumber_encoding_length(::AbstractBaseNumber) = begin
+            Int(4)
+        end
+    baseNumber_encoding_length(::Type{<:AbstractBaseNumber}) = begin
+            Int(4)
+        end
+    baseNumber_null_value(::AbstractBaseNumber) = begin
+            UInt32(0xffffffff)
+        end
+    baseNumber_null_value(::Type{<:AbstractBaseNumber}) = begin
+            UInt32(0xffffffff)
+        end
+    baseNumber_min_value(::AbstractBaseNumber) = begin
+            UInt32(0x00000000)
+        end
+    baseNumber_min_value(::Type{<:AbstractBaseNumber}) = begin
+            UInt32(0x00000000)
+        end
+    baseNumber_max_value(::AbstractBaseNumber) = begin
+            UInt32(0xffffffff)
+        end
+    baseNumber_max_value(::Type{<:AbstractBaseNumber}) = begin
+            UInt32(0xffffffff)
+        end
+end
+begin
+    @inline function baseNumber(m::Decoder)
+            return decode_value(UInt32, m.buffer, m.offset + 0)
+        end
+    @inline baseNumber!(m::Encoder, val) = begin
+                encode_value(UInt32, m.buffer, m.offset + 0, val)
+            end
+    export baseNumber, baseNumber!
+end
+export AbstractBaseNumber, Decoder, Encoder
+end
 module Product
 using SBE: AbstractSbeMessage, AbstractSbeEncodedType, AbstractSbeData, AbstractSbeGroup
 using MappedArrays: mappedarray
@@ -1696,5 +1807,5 @@ begin
     export description, description!, description_length, description_length!, skip_description!
 end
 end
-export Status, Features, MessageHeader, GroupSizeEncoding, VarStringEncoding, Product
+export Status, Features, MessageHeader, GroupSizeEncoding, VarStringEncoding, BaseNumber, Product
 end

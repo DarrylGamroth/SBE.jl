@@ -983,6 +983,256 @@ begin
 end
 export AbstractPoint, Decoder, Encoder
 end
+module IpV4Address
+using SBE: AbstractSbeCompositeType, AbstractSbeEncodedType
+import SBE: id, since_version, encoding_offset, encoding_length, null_value, min_value, max_value
+import SBE: value, value!
+using MappedArrays: mappedarray
+nothing
+begin
+    import SBE: encode_value_le, decode_value_le, encode_array_le, decode_array_le
+    const encode_value = encode_value_le
+    const decode_value = decode_value_le
+    const encode_array = encode_array_le
+    const decode_array = decode_array_le
+end
+abstract type AbstractIpV4Address <: AbstractSbeCompositeType end
+struct Decoder{T <: AbstractArray{UInt8}} <: AbstractIpV4Address
+    buffer::T
+    offset::Int64
+    acting_version::UInt16
+end
+struct Encoder{T <: AbstractArray{UInt8}} <: AbstractIpV4Address
+    buffer::T
+    offset::Int64
+end
+@inline function Decoder(buffer::AbstractArray{UInt8})
+        Decoder(buffer, Int64(0), UInt16(0x0003))
+    end
+@inline function Decoder(buffer::AbstractArray{UInt8}, offset::Integer)
+        Decoder(buffer, Int64(offset), UInt16(0x0003))
+    end
+@inline function Encoder(buffer::AbstractArray{UInt8})
+        Encoder(buffer, Int64(0))
+    end
+sbe_encoded_length(::AbstractIpV4Address) = begin
+        UInt16(4)
+    end
+sbe_encoded_length(::Type{<:AbstractIpV4Address}) = begin
+        UInt16(4)
+    end
+sbe_acting_version(m::Decoder) = begin
+        m.acting_version
+    end
+sbe_acting_version(::Encoder) = begin
+        UInt16(0x0003)
+    end
+Base.sizeof(m::AbstractIpV4Address) = begin
+        sbe_encoded_length(m)
+    end
+function Base.convert(::Type{<:AbstractArray{UInt8}}, m::AbstractIpV4Address)
+    return view(m.buffer, m.offset + 1:m.offset + sbe_encoded_length(m))
+end
+function Base.show(io::IO, m::AbstractIpV4Address)
+    print(io, "IpV4Address", "(offset=", m.offset, ", size=", sbe_encoded_length(m), ")")
+end
+begin
+    ipV4Address_id(::AbstractIpV4Address) = begin
+            UInt16(0xffff)
+        end
+    ipV4Address_id(::Type{<:AbstractIpV4Address}) = begin
+            UInt16(0xffff)
+        end
+    ipV4Address_since_version(::AbstractIpV4Address) = begin
+            UInt16(0)
+        end
+    ipV4Address_since_version(::Type{<:AbstractIpV4Address}) = begin
+            UInt16(0)
+        end
+    ipV4Address_in_acting_version(m::AbstractIpV4Address) = begin
+            m.acting_version >= UInt16(0)
+        end
+    ipV4Address_encoding_offset(::AbstractIpV4Address) = begin
+            Int(0)
+        end
+    ipV4Address_encoding_offset(::Type{<:AbstractIpV4Address}) = begin
+            Int(0)
+        end
+    ipV4Address_encoding_length(::AbstractIpV4Address) = begin
+            Int(4)
+        end
+    ipV4Address_encoding_length(::Type{<:AbstractIpV4Address}) = begin
+            Int(4)
+        end
+    ipV4Address_null_value(::AbstractIpV4Address) = begin
+            UInt8(0xff)
+        end
+    ipV4Address_null_value(::Type{<:AbstractIpV4Address}) = begin
+            UInt8(0xff)
+        end
+    ipV4Address_min_value(::AbstractIpV4Address) = begin
+            UInt8(0x00)
+        end
+    ipV4Address_min_value(::Type{<:AbstractIpV4Address}) = begin
+            UInt8(0x00)
+        end
+    ipV4Address_max_value(::AbstractIpV4Address) = begin
+            UInt8(0xff)
+        end
+    ipV4Address_max_value(::Type{<:AbstractIpV4Address}) = begin
+            UInt8(0xff)
+        end
+end
+begin
+    @inline function ipV4Address(m::Decoder)
+            return decode_array(UInt8, m.buffer, m.offset + 0, 4)
+        end
+    @inline function ipV4Address!(m::Encoder)
+            return encode_array(UInt8, m.buffer, m.offset + 0, 4)
+        end
+    @inline function ipV4Address!(m::Encoder, val)
+            copyto!(ipV4Address!(m), val)
+        end
+    export ipV4Address, ipV4Address!
+end
+export AbstractIpV4Address, Decoder, Encoder
+end
+module CcyPair
+using SBE: AbstractSbeCompositeType, AbstractSbeEncodedType
+import SBE: id, since_version, encoding_offset, encoding_length, null_value, min_value, max_value
+import SBE: value, value!
+using MappedArrays: mappedarray
+nothing
+begin
+    import SBE: encode_value_le, decode_value_le, encode_array_le, decode_array_le
+    const encode_value = encode_value_le
+    const decode_value = decode_value_le
+    const encode_array = encode_array_le
+    const decode_array = decode_array_le
+end
+abstract type AbstractCcyPair <: AbstractSbeCompositeType end
+struct Decoder{T <: AbstractArray{UInt8}} <: AbstractCcyPair
+    buffer::T
+    offset::Int64
+    acting_version::UInt16
+end
+struct Encoder{T <: AbstractArray{UInt8}} <: AbstractCcyPair
+    buffer::T
+    offset::Int64
+end
+@inline function Decoder(buffer::AbstractArray{UInt8})
+        Decoder(buffer, Int64(0), UInt16(0x0003))
+    end
+@inline function Decoder(buffer::AbstractArray{UInt8}, offset::Integer)
+        Decoder(buffer, Int64(offset), UInt16(0x0003))
+    end
+@inline function Encoder(buffer::AbstractArray{UInt8})
+        Encoder(buffer, Int64(0))
+    end
+sbe_encoded_length(::AbstractCcyPair) = begin
+        UInt16(6)
+    end
+sbe_encoded_length(::Type{<:AbstractCcyPair}) = begin
+        UInt16(6)
+    end
+sbe_acting_version(m::Decoder) = begin
+        m.acting_version
+    end
+sbe_acting_version(::Encoder) = begin
+        UInt16(0x0003)
+    end
+Base.sizeof(m::AbstractCcyPair) = begin
+        sbe_encoded_length(m)
+    end
+function Base.convert(::Type{<:AbstractArray{UInt8}}, m::AbstractCcyPair)
+    return view(m.buffer, m.offset + 1:m.offset + sbe_encoded_length(m))
+end
+function Base.show(io::IO, m::AbstractCcyPair)
+    print(io, "CcyPair", "(offset=", m.offset, ", size=", sbe_encoded_length(m), ")")
+end
+begin
+    ccyPair_id(::AbstractCcyPair) = begin
+            UInt16(0xffff)
+        end
+    ccyPair_id(::Type{<:AbstractCcyPair}) = begin
+            UInt16(0xffff)
+        end
+    ccyPair_since_version(::AbstractCcyPair) = begin
+            UInt16(0)
+        end
+    ccyPair_since_version(::Type{<:AbstractCcyPair}) = begin
+            UInt16(0)
+        end
+    ccyPair_in_acting_version(m::AbstractCcyPair) = begin
+            m.acting_version >= UInt16(0)
+        end
+    ccyPair_encoding_offset(::AbstractCcyPair) = begin
+            Int(0)
+        end
+    ccyPair_encoding_offset(::Type{<:AbstractCcyPair}) = begin
+            Int(0)
+        end
+    ccyPair_encoding_length(::AbstractCcyPair) = begin
+            Int(6)
+        end
+    ccyPair_encoding_length(::Type{<:AbstractCcyPair}) = begin
+            Int(6)
+        end
+    ccyPair_null_value(::AbstractCcyPair) = begin
+            UInt8(0xff)
+        end
+    ccyPair_null_value(::Type{<:AbstractCcyPair}) = begin
+            UInt8(0xff)
+        end
+    ccyPair_min_value(::AbstractCcyPair) = begin
+            UInt8(0x00)
+        end
+    ccyPair_min_value(::Type{<:AbstractCcyPair}) = begin
+            UInt8(0x00)
+        end
+    ccyPair_max_value(::AbstractCcyPair) = begin
+            UInt8(0xff)
+        end
+    ccyPair_max_value(::Type{<:AbstractCcyPair}) = begin
+            UInt8(0xff)
+        end
+end
+using StringViews: StringView
+begin
+    @inline function ccyPair(m::Decoder)
+            bytes = decode_array(UInt8, m.buffer, m.offset + 0, 6)
+            pos = findfirst(iszero, bytes)
+            len = if pos !== nothing
+                    pos - 1
+                else
+                    Base.length(bytes)
+                end
+            return StringView(view(bytes, 1:len))
+        end
+    @inline function ccyPair!(m::Encoder)
+            return encode_array(UInt8, m.buffer, m.offset + 0, 6)
+        end
+    @inline function ccyPair!(m::Encoder, value::AbstractString)
+            bytes = codeunits(value)
+            dest = encode_array(UInt8, m.buffer, m.offset + 0, 6)
+            len = min(length(bytes), length(dest))
+            copyto!(dest, 1, bytes, 1, len)
+            if len < length(dest)
+                fill!(view(dest, len + 1:length(dest)), 0x00)
+            end
+        end
+    @inline function ccyPair!(m::Encoder, value::AbstractVector{UInt8})
+            dest = encode_array(UInt8, m.buffer, m.offset + 0, 6)
+            len = min(length(value), length(dest))
+            copyto!(dest, 1, value, 1, len)
+            if len < length(dest)
+                fill!(view(dest, len + 1:length(dest)), 0x00)
+            end
+        end
+    export ccyPair, ccyPair!
+end
+export AbstractCcyPair, Decoder, Encoder
+end
 module MultipleVarLength
 using SBE: AbstractSbeMessage, AbstractSbeEncodedType, AbstractSbeData, AbstractSbeGroup
 using MappedArrays: mappedarray
@@ -16550,5 +16800,5 @@ begin
     export b, b!, b_length, b_length!, skip_b!
 end
 end
-export Direction, Flags, MessageHeader, GroupSizeEncoding, VarDataEncoding, Point, MultipleVarLength, GroupAndVarLength, VarLengthInsideGroup, NestedGroups, CompositeInsideGroup, AddPrimitiveV0, AddPrimitiveV1, AddPrimitiveBeforeGroupV0, AddPrimitiveBeforeGroupV1, AddPrimitiveBeforeVarDataV0, AddPrimitiveBeforeVarDataV1, AddPrimitiveInsideGroupV0, AddPrimitiveInsideGroupV1, AddGroupBeforeVarDataV0, AddGroupBeforeVarDataV1, AddEnumBeforeGroupV0, AddEnumBeforeGroupV1, AddCompositeBeforeGroupV0, AddCompositeBeforeGroupV1, AddArrayBeforeGroupV0, AddArrayBeforeGroupV1, AddBitSetBeforeGroupV0, AddBitSetBeforeGroupV1, EnumInsideGroup, ArrayInsideGroup, BitSetInsideGroup, MultipleGroups, AddVarDataV0, AddVarDataV1, AddAsciiBeforeGroupV0, AddAsciiBeforeGroupV1, AsciiInsideGroup, NoBlock, GroupWithNoBlock, NestedGroupWithVarLength, SkipVersionAddPrimitiveV1, SkipVersionAddPrimitiveV2, SkipVersionAddGroupV1, SkipVersionAddGroupV2, SkipVersionAddVarDataV1, SkipVersionAddVarDataV2, SkipVersionAddGroupBeforeVarDataV2
+export Direction, Flags, MessageHeader, GroupSizeEncoding, VarDataEncoding, Point, IpV4Address, CcyPair, MultipleVarLength, GroupAndVarLength, VarLengthInsideGroup, NestedGroups, CompositeInsideGroup, AddPrimitiveV0, AddPrimitiveV1, AddPrimitiveBeforeGroupV0, AddPrimitiveBeforeGroupV1, AddPrimitiveBeforeVarDataV0, AddPrimitiveBeforeVarDataV1, AddPrimitiveInsideGroupV0, AddPrimitiveInsideGroupV1, AddGroupBeforeVarDataV0, AddGroupBeforeVarDataV1, AddEnumBeforeGroupV0, AddEnumBeforeGroupV1, AddCompositeBeforeGroupV0, AddCompositeBeforeGroupV1, AddArrayBeforeGroupV0, AddArrayBeforeGroupV1, AddBitSetBeforeGroupV0, AddBitSetBeforeGroupV1, EnumInsideGroup, ArrayInsideGroup, BitSetInsideGroup, MultipleGroups, AddVarDataV0, AddVarDataV1, AddAsciiBeforeGroupV0, AddAsciiBeforeGroupV1, AsciiInsideGroup, NoBlock, GroupWithNoBlock, NestedGroupWithVarLength, SkipVersionAddPrimitiveV1, SkipVersionAddPrimitiveV2, SkipVersionAddGroupV1, SkipVersionAddGroupV2, SkipVersionAddVarDataV1, SkipVersionAddVarDataV2, SkipVersionAddGroupBeforeVarDataV2
 end

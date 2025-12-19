@@ -50,8 +50,11 @@ function add_type_tokens!(tokens::Vector{IR.IRToken}, type_def::Schema.AbstractT
         add_enum_tokens!(tokens, type_def, schema)
     elseif type_def isa Schema.SetType
         add_set_tokens!(tokens, type_def, schema)
+    elseif type_def isa Schema.EncodedType
+        # Standalone EncodedTypes (like "Percentage") need to be added as a simple composite
+        # with a single encoding member so they can be referenced
+        add_standalone_encoded_type_tokens!(tokens, type_def, schema)
     end
-    # EncodedType standalone types don't generate tokens (they're referenced)
 end
 
 """
@@ -142,6 +145,38 @@ function add_ref_type_token!(tokens::Vector{IR.IRToken}, ref::Schema.RefType, of
         signal = IR.ENCODING,
         name = ref.name,
         referenced_name = ref.type_ref
+    ))
+end
+
+"""
+Add tokens for a standalone encoded type (like "Percentage")
+These are reusable type definitions that can be referenced by other types
+"""
+function add_standalone_encoded_type_tokens!(tokens::Vector{IR.IRToken}, encoded::Schema.EncodedType, schema::Schema.MessageSchema)
+    # Wrap in a composite so it can be reconstructed properly
+    offset = encoded.offset !== nothing ? Int32(encoded.offset) : Int32(0)
+    size = Int32(get_type_size(encoded, schema))
+    
+    # BEGIN_COMPOSITE token
+    push!(tokens, IR.IRToken(
+        token_offset = offset,
+        token_size = size,
+        field_id = Int32(-1),
+        token_version = Int32(encoded.since_version),
+        component_token_count = Int32(1),  # One member: the encoding itself
+        signal = IR.BEGIN_COMPOSITE,
+        name = encoded.name,
+        description = encoded.description,
+        semantic_type = encoded.semantic_type !== nothing ? encoded.semantic_type : ""
+    ))
+    
+    # Add the encoding token
+    add_encoded_type_token!(tokens, encoded, 0, schema)
+    
+    # END_COMPOSITE token
+    push!(tokens, IR.IRToken(
+        signal = IR.END_COMPOSITE,
+        name = encoded.name
     ))
 end
 

@@ -79,6 +79,27 @@ function ir_to_schema(ir::IR.IntermediateRepresentation)
         if token.signal == IR.BEGIN_COMPOSITE
             composite, consumed = parse_composite_from_ir(ir.tokens, token_idx)
             push!(types, composite)
+            # Extract nested types from composite and add to top-level types
+            for member in composite.members
+                if member isa Schema.EncodedType && member.name != ""
+                    # Only add if not already in types
+                    if !any(t -> (t isa Schema.EncodedType && t.name == member.name), types)
+                        push!(types, member)
+                    end
+                elseif member isa Schema.EnumType
+                    if !any(t -> (t isa Schema.EnumType && t.name == member.name), types)
+                        push!(types, member)
+                    end
+                elseif member isa Schema.SetType
+                    if !any(t -> (t isa Schema.SetType && t.name == member.name), types)
+                        push!(types, member)
+                    end
+                elseif member isa Schema.CompositeType
+                    if !any(t -> (t isa Schema.CompositeType && t.name == member.name), types)
+                        push!(types, member)
+                    end
+                end
+            end
             token_idx += consumed
         elseif token.signal == IR.BEGIN_ENUM
             enum, consumed = parse_enum_from_ir(ir.tokens, token_idx)

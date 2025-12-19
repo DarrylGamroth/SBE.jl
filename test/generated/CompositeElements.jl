@@ -16,6 +16,142 @@ end
         Value10 = UInt8(0x0a)
         NULL_VALUE = UInt8(0xff)
     end
+@enumx T = SbeEnum EnumOne::UInt8 begin
+        Value1 = UInt8(0x01)
+        Value10 = UInt8(0x0a)
+        NULL_VALUE = UInt8(0xff)
+    end
+module SetOne
+using SBE: AbstractSbeEncodedType
+begin
+    import SBE: encode_value_le, decode_value_le, encode_array_le, decode_array_le
+    const encode_value = encode_value_le
+    const decode_value = decode_value_le
+    const encode_array = encode_array_le
+    const decode_array = decode_array_le
+end
+abstract type AbstractSetOne <: AbstractSbeEncodedType end
+struct Decoder{T <: AbstractVector{UInt8}} <: AbstractSetOne
+    buffer::T
+    offset::Int
+    acting_version::UInt16
+end
+struct Encoder{T <: AbstractVector{UInt8}} <: AbstractSetOne
+    buffer::T
+    offset::Int
+end
+@inline function Decoder(buffer::AbstractVector{UInt8})
+        Decoder(buffer, Int64(0), UInt16(0x0000))
+    end
+@inline function Decoder(buffer::AbstractVector{UInt8}, offset::Integer)
+        Decoder(buffer, Int64(offset), UInt16(0x0000))
+    end
+@inline function Encoder(buffer::AbstractVector{UInt8})
+        Encoder(buffer, Int64(0))
+    end
+id(::Type{<:AbstractSetOne}) = begin
+        UInt16(0xffff)
+    end
+id(::AbstractSetOne) = begin
+        UInt16(0xffff)
+    end
+since_version(::Type{<:AbstractSetOne}) = begin
+        UInt16(0)
+    end
+since_version(::AbstractSetOne) = begin
+        UInt16(0)
+    end
+encoding_offset(::Type{<:AbstractSetOne}) = begin
+        1
+    end
+encoding_offset(::AbstractSetOne) = begin
+        1
+    end
+encoding_length(::Type{<:AbstractSetOne}) = begin
+        4
+    end
+encoding_length(::AbstractSetOne) = begin
+        4
+    end
+sbe_acting_version(m::Decoder) = begin
+        m.acting_version
+    end
+sbe_acting_version(::Encoder) = begin
+        UInt16(0x0000)
+    end
+Base.eltype(::Type{<:AbstractSetOne}) = begin
+        UInt32
+    end
+Base.eltype(::AbstractSetOne) = begin
+        UInt32
+    end
+@inline function clear!(set::Encoder)
+        encode_value(UInt32, set.buffer, set.offset, zero(UInt32))
+        return set
+    end
+@inline function is_empty(set::AbstractSetOne)
+        return decode_value(UInt32, set.buffer, set.offset) == zero(UInt32)
+    end
+@inline function raw_value(set::AbstractSetOne)
+        return decode_value(UInt32, set.buffer, set.offset)
+    end
+begin
+    @inline function Bit0(set::AbstractSetOne)
+            return decode_value(UInt32, set.buffer, set.offset) & UInt32(0x01) << 0 != 0
+        end
+end
+begin
+    @inline function Bit0!(set::Encoder, value::Bool)
+            bits = decode_value(UInt32, set.buffer, set.offset)
+            bits = if value
+                    bits | UInt32(0x01) << 0
+                else
+                    bits & ~(UInt32(0x01) << 0)
+                end
+            encode_value(UInt32, set.buffer, set.offset, bits)
+            return set
+        end
+end
+export Bit0, Bit0!
+begin
+    @inline function Bit16(set::AbstractSetOne)
+            return decode_value(UInt32, set.buffer, set.offset) & UInt32(0x01) << 16 != 0
+        end
+end
+begin
+    @inline function Bit16!(set::Encoder, value::Bool)
+            bits = decode_value(UInt32, set.buffer, set.offset)
+            bits = if value
+                    bits | UInt32(0x01) << 16
+                else
+                    bits & ~(UInt32(0x01) << 16)
+                end
+            encode_value(UInt32, set.buffer, set.offset, bits)
+            return set
+        end
+end
+export Bit16, Bit16!
+begin
+    @inline function Bit26(set::AbstractSetOne)
+            return decode_value(UInt32, set.buffer, set.offset) & UInt32(0x01) << 26 != 0
+        end
+end
+begin
+    @inline function Bit26!(set::Encoder, value::Bool)
+            bits = decode_value(UInt32, set.buffer, set.offset)
+            bits = if value
+                    bits | UInt32(0x01) << 26
+                else
+                    bits & ~(UInt32(0x01) << 26)
+                end
+            encode_value(UInt32, set.buffer, set.offset, bits)
+            return set
+        end
+end
+export Bit26, Bit26!
+export AbstractSetOne, Decoder, Encoder
+export clear!, is_empty, raw_value
+end
 module SetOne
 using SBE: AbstractSbeEncodedType
 begin
@@ -819,6 +955,173 @@ begin
 end
 export AbstractOuter, Decoder, Encoder
 end
+module Inner
+using SBE: AbstractSbeCompositeType, AbstractSbeEncodedType
+import SBE: id, since_version, encoding_offset, encoding_length, null_value, min_value, max_value
+import SBE: value, value!
+using MappedArrays: mappedarray
+nothing
+begin
+    import SBE: encode_value_le, decode_value_le, encode_array_le, decode_array_le
+    const encode_value = encode_value_le
+    const decode_value = decode_value_le
+    const encode_array = encode_array_le
+    const decode_array = decode_array_le
+end
+abstract type AbstractInner <: AbstractSbeCompositeType end
+struct Decoder{T <: AbstractArray{UInt8}} <: AbstractInner
+    buffer::T
+    offset::Int64
+    acting_version::UInt16
+end
+struct Encoder{T <: AbstractArray{UInt8}} <: AbstractInner
+    buffer::T
+    offset::Int64
+end
+@inline function Decoder(buffer::AbstractArray{UInt8})
+        Decoder(buffer, Int64(0), UInt16(0x0000))
+    end
+@inline function Decoder(buffer::AbstractArray{UInt8}, offset::Integer)
+        Decoder(buffer, Int64(offset), UInt16(0x0000))
+    end
+@inline function Encoder(buffer::AbstractArray{UInt8})
+        Encoder(buffer, Int64(0))
+    end
+sbe_encoded_length(::AbstractInner) = begin
+        UInt16(16)
+    end
+sbe_encoded_length(::Type{<:AbstractInner}) = begin
+        UInt16(16)
+    end
+sbe_acting_version(m::Decoder) = begin
+        m.acting_version
+    end
+sbe_acting_version(::Encoder) = begin
+        UInt16(0x0000)
+    end
+Base.sizeof(m::AbstractInner) = begin
+        sbe_encoded_length(m)
+    end
+function Base.convert(::Type{<:AbstractArray{UInt8}}, m::AbstractInner)
+    return view(m.buffer, m.offset + 1:m.offset + sbe_encoded_length(m))
+end
+function Base.show(io::IO, m::AbstractInner)
+    print(io, "Inner", "(offset=", m.offset, ", size=", sbe_encoded_length(m), ")")
+end
+begin
+    first_id(::AbstractInner) = begin
+            UInt16(0xffff)
+        end
+    first_id(::Type{<:AbstractInner}) = begin
+            UInt16(0xffff)
+        end
+    first_since_version(::AbstractInner) = begin
+            UInt16(0)
+        end
+    first_since_version(::Type{<:AbstractInner}) = begin
+            UInt16(0)
+        end
+    first_in_acting_version(m::AbstractInner) = begin
+            m.acting_version >= UInt16(0)
+        end
+    first_encoding_offset(::AbstractInner) = begin
+            Int(0)
+        end
+    first_encoding_offset(::Type{<:AbstractInner}) = begin
+            Int(0)
+        end
+    first_encoding_length(::AbstractInner) = begin
+            Int(8)
+        end
+    first_encoding_length(::Type{<:AbstractInner}) = begin
+            Int(8)
+        end
+    first_null_value(::AbstractInner) = begin
+            Int64(-9223372036854775808)
+        end
+    first_null_value(::Type{<:AbstractInner}) = begin
+            Int64(-9223372036854775808)
+        end
+    first_min_value(::AbstractInner) = begin
+            Int64(-9223372036854775808)
+        end
+    first_min_value(::Type{<:AbstractInner}) = begin
+            Int64(-9223372036854775808)
+        end
+    first_max_value(::AbstractInner) = begin
+            Int64(9223372036854775807)
+        end
+    first_max_value(::Type{<:AbstractInner}) = begin
+            Int64(9223372036854775807)
+        end
+end
+begin
+    @inline function first(m::Decoder)
+            return decode_value(Int64, m.buffer, m.offset + 0)
+        end
+    @inline first!(m::Encoder, val) = begin
+                encode_value(Int64, m.buffer, m.offset + 0, val)
+            end
+    export first, first!
+end
+begin
+    second_id(::AbstractInner) = begin
+            UInt16(0xffff)
+        end
+    second_id(::Type{<:AbstractInner}) = begin
+            UInt16(0xffff)
+        end
+    second_since_version(::AbstractInner) = begin
+            UInt16(0)
+        end
+    second_since_version(::Type{<:AbstractInner}) = begin
+            UInt16(0)
+        end
+    second_in_acting_version(m::AbstractInner) = begin
+            m.acting_version >= UInt16(0)
+        end
+    second_encoding_offset(::AbstractInner) = begin
+            Int(8)
+        end
+    second_encoding_offset(::Type{<:AbstractInner}) = begin
+            Int(8)
+        end
+    second_encoding_length(::AbstractInner) = begin
+            Int(8)
+        end
+    second_encoding_length(::Type{<:AbstractInner}) = begin
+            Int(8)
+        end
+    second_null_value(::AbstractInner) = begin
+            Int64(-9223372036854775808)
+        end
+    second_null_value(::Type{<:AbstractInner}) = begin
+            Int64(-9223372036854775808)
+        end
+    second_min_value(::AbstractInner) = begin
+            Int64(-9223372036854775808)
+        end
+    second_min_value(::Type{<:AbstractInner}) = begin
+            Int64(-9223372036854775808)
+        end
+    second_max_value(::AbstractInner) = begin
+            Int64(9223372036854775807)
+        end
+    second_max_value(::Type{<:AbstractInner}) = begin
+            Int64(9223372036854775807)
+        end
+end
+begin
+    @inline function second(m::Decoder)
+            return decode_value(Int64, m.buffer, m.offset + 8)
+        end
+    @inline second!(m::Encoder, val) = begin
+                encode_value(Int64, m.buffer, m.offset + 8, val)
+            end
+    export second, second!
+end
+export AbstractInner, Decoder, Encoder
+end
 module Msg
 using SBE: AbstractSbeMessage, AbstractSbeEncodedType, AbstractSbeData, AbstractSbeGroup
 using MappedArrays: mappedarray
@@ -978,5 +1281,5 @@ begin
         end
 end
 end
-export EnumOne, SetOne, Inner, MessageHeader, Outer, Msg
+export EnumOne, EnumOne, SetOne, SetOne, Inner, MessageHeader, Outer, Inner, Msg
 end

@@ -18,6 +18,339 @@ end
         CANCELLED = UInt8(0x03)
         NULL_VALUE = UInt8(0xff)
     end
+module OptionalUInt32
+using SBE: AbstractSbeCompositeType, AbstractSbeEncodedType
+import SBE: id, since_version, encoding_offset, encoding_length, null_value, min_value, max_value
+import SBE: value, value!
+using MappedArrays: mappedarray
+nothing
+begin
+    import SBE: encode_value_le, decode_value_le, encode_array_le, decode_array_le
+    const encode_value = encode_value_le
+    const decode_value = decode_value_le
+    const encode_array = encode_array_le
+    const decode_array = decode_array_le
+end
+abstract type AbstractOptionalUInt32 <: AbstractSbeCompositeType end
+struct Decoder{T <: AbstractArray{UInt8}} <: AbstractOptionalUInt32
+    buffer::T
+    offset::Int64
+    acting_version::UInt16
+end
+struct Encoder{T <: AbstractArray{UInt8}} <: AbstractOptionalUInt32
+    buffer::T
+    offset::Int64
+end
+@inline function Decoder(buffer::AbstractArray{UInt8})
+        Decoder(buffer, Int64(0), UInt16(0x0000))
+    end
+@inline function Decoder(buffer::AbstractArray{UInt8}, offset::Integer)
+        Decoder(buffer, Int64(offset), UInt16(0x0000))
+    end
+@inline function Encoder(buffer::AbstractArray{UInt8})
+        Encoder(buffer, Int64(0))
+    end
+sbe_encoded_length(::AbstractOptionalUInt32) = begin
+        UInt16(4)
+    end
+sbe_encoded_length(::Type{<:AbstractOptionalUInt32}) = begin
+        UInt16(4)
+    end
+sbe_acting_version(m::Decoder) = begin
+        m.acting_version
+    end
+sbe_acting_version(::Encoder) = begin
+        UInt16(0x0000)
+    end
+Base.sizeof(m::AbstractOptionalUInt32) = begin
+        sbe_encoded_length(m)
+    end
+function Base.convert(::Type{<:AbstractArray{UInt8}}, m::AbstractOptionalUInt32)
+    return view(m.buffer, m.offset + 1:m.offset + sbe_encoded_length(m))
+end
+function Base.show(io::IO, m::AbstractOptionalUInt32)
+    print(io, "OptionalUInt32", "(offset=", m.offset, ", size=", sbe_encoded_length(m), ")")
+end
+begin
+    optionalUInt32_id(::AbstractOptionalUInt32) = begin
+            UInt16(0xffff)
+        end
+    optionalUInt32_id(::Type{<:AbstractOptionalUInt32}) = begin
+            UInt16(0xffff)
+        end
+    optionalUInt32_since_version(::AbstractOptionalUInt32) = begin
+            UInt16(0)
+        end
+    optionalUInt32_since_version(::Type{<:AbstractOptionalUInt32}) = begin
+            UInt16(0)
+        end
+    optionalUInt32_in_acting_version(m::AbstractOptionalUInt32) = begin
+            m.acting_version >= UInt16(0)
+        end
+    optionalUInt32_encoding_offset(::AbstractOptionalUInt32) = begin
+            Int(0)
+        end
+    optionalUInt32_encoding_offset(::Type{<:AbstractOptionalUInt32}) = begin
+            Int(0)
+        end
+    optionalUInt32_encoding_length(::AbstractOptionalUInt32) = begin
+            Int(4)
+        end
+    optionalUInt32_encoding_length(::Type{<:AbstractOptionalUInt32}) = begin
+            Int(4)
+        end
+    optionalUInt32_null_value(::AbstractOptionalUInt32) = begin
+            UInt32(0xffffffff)
+        end
+    optionalUInt32_null_value(::Type{<:AbstractOptionalUInt32}) = begin
+            UInt32(0xffffffff)
+        end
+    optionalUInt32_min_value(::AbstractOptionalUInt32) = begin
+            UInt32(0x00000000)
+        end
+    optionalUInt32_min_value(::Type{<:AbstractOptionalUInt32}) = begin
+            UInt32(0x00000000)
+        end
+    optionalUInt32_max_value(::AbstractOptionalUInt32) = begin
+            UInt32(0xffffffff)
+        end
+    optionalUInt32_max_value(::Type{<:AbstractOptionalUInt32}) = begin
+            UInt32(0xffffffff)
+        end
+end
+begin
+    @inline function optionalUInt32(m::Decoder)
+            return decode_value(UInt32, m.buffer, m.offset + 0)
+        end
+    @inline optionalUInt32!(m::Encoder, val) = begin
+                encode_value(UInt32, m.buffer, m.offset + 0, val)
+            end
+    export optionalUInt32, optionalUInt32!
+end
+export AbstractOptionalUInt32, Decoder, Encoder
+end
+module OptionalInt64
+using SBE: AbstractSbeCompositeType, AbstractSbeEncodedType
+import SBE: id, since_version, encoding_offset, encoding_length, null_value, min_value, max_value
+import SBE: value, value!
+using MappedArrays: mappedarray
+nothing
+begin
+    import SBE: encode_value_le, decode_value_le, encode_array_le, decode_array_le
+    const encode_value = encode_value_le
+    const decode_value = decode_value_le
+    const encode_array = encode_array_le
+    const decode_array = decode_array_le
+end
+abstract type AbstractOptionalInt64 <: AbstractSbeCompositeType end
+struct Decoder{T <: AbstractArray{UInt8}} <: AbstractOptionalInt64
+    buffer::T
+    offset::Int64
+    acting_version::UInt16
+end
+struct Encoder{T <: AbstractArray{UInt8}} <: AbstractOptionalInt64
+    buffer::T
+    offset::Int64
+end
+@inline function Decoder(buffer::AbstractArray{UInt8})
+        Decoder(buffer, Int64(0), UInt16(0x0000))
+    end
+@inline function Decoder(buffer::AbstractArray{UInt8}, offset::Integer)
+        Decoder(buffer, Int64(offset), UInt16(0x0000))
+    end
+@inline function Encoder(buffer::AbstractArray{UInt8})
+        Encoder(buffer, Int64(0))
+    end
+sbe_encoded_length(::AbstractOptionalInt64) = begin
+        UInt16(8)
+    end
+sbe_encoded_length(::Type{<:AbstractOptionalInt64}) = begin
+        UInt16(8)
+    end
+sbe_acting_version(m::Decoder) = begin
+        m.acting_version
+    end
+sbe_acting_version(::Encoder) = begin
+        UInt16(0x0000)
+    end
+Base.sizeof(m::AbstractOptionalInt64) = begin
+        sbe_encoded_length(m)
+    end
+function Base.convert(::Type{<:AbstractArray{UInt8}}, m::AbstractOptionalInt64)
+    return view(m.buffer, m.offset + 1:m.offset + sbe_encoded_length(m))
+end
+function Base.show(io::IO, m::AbstractOptionalInt64)
+    print(io, "OptionalInt64", "(offset=", m.offset, ", size=", sbe_encoded_length(m), ")")
+end
+begin
+    optionalInt64_id(::AbstractOptionalInt64) = begin
+            UInt16(0xffff)
+        end
+    optionalInt64_id(::Type{<:AbstractOptionalInt64}) = begin
+            UInt16(0xffff)
+        end
+    optionalInt64_since_version(::AbstractOptionalInt64) = begin
+            UInt16(0)
+        end
+    optionalInt64_since_version(::Type{<:AbstractOptionalInt64}) = begin
+            UInt16(0)
+        end
+    optionalInt64_in_acting_version(m::AbstractOptionalInt64) = begin
+            m.acting_version >= UInt16(0)
+        end
+    optionalInt64_encoding_offset(::AbstractOptionalInt64) = begin
+            Int(0)
+        end
+    optionalInt64_encoding_offset(::Type{<:AbstractOptionalInt64}) = begin
+            Int(0)
+        end
+    optionalInt64_encoding_length(::AbstractOptionalInt64) = begin
+            Int(8)
+        end
+    optionalInt64_encoding_length(::Type{<:AbstractOptionalInt64}) = begin
+            Int(8)
+        end
+    optionalInt64_null_value(::AbstractOptionalInt64) = begin
+            Int64(-9223372036854775808)
+        end
+    optionalInt64_null_value(::Type{<:AbstractOptionalInt64}) = begin
+            Int64(-9223372036854775808)
+        end
+    optionalInt64_min_value(::AbstractOptionalInt64) = begin
+            Int64(-9223372036854775808)
+        end
+    optionalInt64_min_value(::Type{<:AbstractOptionalInt64}) = begin
+            Int64(-9223372036854775808)
+        end
+    optionalInt64_max_value(::AbstractOptionalInt64) = begin
+            Int64(9223372036854775807)
+        end
+    optionalInt64_max_value(::Type{<:AbstractOptionalInt64}) = begin
+            Int64(9223372036854775807)
+        end
+end
+begin
+    @inline function optionalInt64(m::Decoder)
+            return decode_value(Int64, m.buffer, m.offset + 0)
+        end
+    @inline optionalInt64!(m::Encoder, val) = begin
+                encode_value(Int64, m.buffer, m.offset + 0, val)
+            end
+    export optionalInt64, optionalInt64!
+end
+export AbstractOptionalInt64, Decoder, Encoder
+end
+module OptionalFloat
+using SBE: AbstractSbeCompositeType, AbstractSbeEncodedType
+import SBE: id, since_version, encoding_offset, encoding_length, null_value, min_value, max_value
+import SBE: value, value!
+using MappedArrays: mappedarray
+nothing
+begin
+    import SBE: encode_value_le, decode_value_le, encode_array_le, decode_array_le
+    const encode_value = encode_value_le
+    const decode_value = decode_value_le
+    const encode_array = encode_array_le
+    const decode_array = decode_array_le
+end
+abstract type AbstractOptionalFloat <: AbstractSbeCompositeType end
+struct Decoder{T <: AbstractArray{UInt8}} <: AbstractOptionalFloat
+    buffer::T
+    offset::Int64
+    acting_version::UInt16
+end
+struct Encoder{T <: AbstractArray{UInt8}} <: AbstractOptionalFloat
+    buffer::T
+    offset::Int64
+end
+@inline function Decoder(buffer::AbstractArray{UInt8})
+        Decoder(buffer, Int64(0), UInt16(0x0000))
+    end
+@inline function Decoder(buffer::AbstractArray{UInt8}, offset::Integer)
+        Decoder(buffer, Int64(offset), UInt16(0x0000))
+    end
+@inline function Encoder(buffer::AbstractArray{UInt8})
+        Encoder(buffer, Int64(0))
+    end
+sbe_encoded_length(::AbstractOptionalFloat) = begin
+        UInt16(4)
+    end
+sbe_encoded_length(::Type{<:AbstractOptionalFloat}) = begin
+        UInt16(4)
+    end
+sbe_acting_version(m::Decoder) = begin
+        m.acting_version
+    end
+sbe_acting_version(::Encoder) = begin
+        UInt16(0x0000)
+    end
+Base.sizeof(m::AbstractOptionalFloat) = begin
+        sbe_encoded_length(m)
+    end
+function Base.convert(::Type{<:AbstractArray{UInt8}}, m::AbstractOptionalFloat)
+    return view(m.buffer, m.offset + 1:m.offset + sbe_encoded_length(m))
+end
+function Base.show(io::IO, m::AbstractOptionalFloat)
+    print(io, "OptionalFloat", "(offset=", m.offset, ", size=", sbe_encoded_length(m), ")")
+end
+begin
+    optionalFloat_id(::AbstractOptionalFloat) = begin
+            UInt16(0xffff)
+        end
+    optionalFloat_id(::Type{<:AbstractOptionalFloat}) = begin
+            UInt16(0xffff)
+        end
+    optionalFloat_since_version(::AbstractOptionalFloat) = begin
+            UInt16(0)
+        end
+    optionalFloat_since_version(::Type{<:AbstractOptionalFloat}) = begin
+            UInt16(0)
+        end
+    optionalFloat_in_acting_version(m::AbstractOptionalFloat) = begin
+            m.acting_version >= UInt16(0)
+        end
+    optionalFloat_encoding_offset(::AbstractOptionalFloat) = begin
+            Int(0)
+        end
+    optionalFloat_encoding_offset(::Type{<:AbstractOptionalFloat}) = begin
+            Int(0)
+        end
+    optionalFloat_encoding_length(::AbstractOptionalFloat) = begin
+            Int(4)
+        end
+    optionalFloat_encoding_length(::Type{<:AbstractOptionalFloat}) = begin
+            Int(4)
+        end
+    optionalFloat_null_value(::AbstractOptionalFloat) = begin
+            Float32(NaN32)
+        end
+    optionalFloat_null_value(::Type{<:AbstractOptionalFloat}) = begin
+            Float32(NaN32)
+        end
+    optionalFloat_min_value(::AbstractOptionalFloat) = begin
+            Float32(-Inf32)
+        end
+    optionalFloat_min_value(::Type{<:AbstractOptionalFloat}) = begin
+            Float32(-Inf32)
+        end
+    optionalFloat_max_value(::AbstractOptionalFloat) = begin
+            Float32(Inf32)
+        end
+    optionalFloat_max_value(::Type{<:AbstractOptionalFloat}) = begin
+            Float32(Inf32)
+        end
+end
+begin
+    @inline function optionalFloat(m::Decoder)
+            return decode_value(Float32, m.buffer, m.offset + 0)
+        end
+    @inline optionalFloat!(m::Encoder, val) = begin
+                encode_value(Float32, m.buffer, m.offset + 0, val)
+            end
+    export optionalFloat, optionalFloat!
+end
+export AbstractOptionalFloat, Decoder, Encoder
+end
 module Price
 using SBE: AbstractSbeCompositeType, AbstractSbeEncodedType
 import SBE: id, since_version, encoding_offset, encoding_length, null_value, min_value, max_value
@@ -1116,5 +1449,5 @@ begin
         end
 end
 end
-export Status, Price, MessageHeader, Order
+export Status, OptionalUInt32, OptionalInt64, OptionalFloat, Price, MessageHeader, Order
 end
