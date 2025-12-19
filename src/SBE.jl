@@ -196,6 +196,9 @@ include("codegen_utils.jl")
 # Schema to IR conversion (uses functions from codegen_utils.jl)
 include("schema_to_ir.jl")
 
+# IR to Julia code generation (IR → Julia)
+include("ir_codegen.jl")
+
 # ============================================================================
 # @load_schema Macro - Primary User API
 # ============================================================================
@@ -275,9 +278,11 @@ export Schema  # Users can access Schema.MessageDefinition, etc.
 export IR      # Users can access IR module for intermediate representation
 export SBECodec, SBEFlyweight, SBEMessage
 export @load_schema, create_codec_from_schema, create_message, parse_sbe_schema
-export generate  # Main code generation API
+export generate  # Main code generation API (XML → Schema → IR → Julia)
 export generate_ir  # Generate IR from XML schema
+export generate_from_ir  # Generate Julia code from IR
 export schema_to_ir  # Schema to IR conversion
+export ir_to_schema  # IR to Schema conversion (bridge function)
 
 # Export position pointer type
 export PositionPointer

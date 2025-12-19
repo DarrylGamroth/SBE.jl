@@ -3183,11 +3183,14 @@ function generate(xml_path::String, output_path::String)
     schema = parse_sbe_schema(xml_content)
     
     # Generate IR (Step 2: Schema → IR)
-    # The IR is now available for inspection/serialization if needed
     ir = schema_to_ir(schema)
     
-    # Generate the module expression (Step 3: Schema → Julia Code)
-    module_expr = generate_module_expr(schema)
+    # Reconstruct schema from IR (Step 3: IR → Schema)
+    # This ensures the IR is the canonical representation
+    schema_from_ir = ir_to_schema(ir)
+    
+    # Generate the module expression (Step 4: Schema → Julia Code)
+    module_expr = generate_module_expr(schema_from_ir)
     
     # Convert to code string
     module_code = expr_to_code_string(module_expr)
@@ -3256,13 +3259,14 @@ function generate(xml_path::String)
     schema = parse_sbe_schema(xml_content)
     
     # Generate IR (Step 2: Schema → IR)
-    # The IR is now available for inspection/serialization if needed
-    # but we continue with direct code generation from Schema for performance
     ir = schema_to_ir(schema)
     
-    # Generate the complete module expression (Step 3: Schema → Julia Code)
-    # Note: We generate from Schema directly for now, but IR is available
-    module_expr = generate_module_expr(schema)
+    # Reconstruct schema from IR (Step 3: IR → Schema)
+    # This ensures the IR is the canonical representation
+    schema_from_ir = ir_to_schema(ir)
+    
+    # Generate the complete module expression (Step 4: Schema → Julia Code)
+    module_expr = generate_module_expr(schema_from_ir)
     
     # Convert to code string and return
     return expr_to_code_string(module_expr)

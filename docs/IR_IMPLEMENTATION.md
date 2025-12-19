@@ -35,13 +35,18 @@ Each token represents a structural element with signal types like:
 - `VALID_VALUE` - Enumeration value
 - `CHOICE` - Bitset choice
 
-### Step 3: Schema → Julia Code
-Currently, Julia code is generated directly from the Schema AST for performance. However, the IR is generated and available for:
+### Step 3: IR → Julia Code
+Julia code is now generated from the IR (not directly from Schema). The IR is the **canonical intermediate representation**. The code generation follows this path:
 
-- **Inspection**: Users can call `generate_ir()` to examine the IR
-- **Serialization**: The IR can be serialized using the SBE IR schema
-- **Cross-platform compatibility**: The IR can be compared with other SBE implementations
-- **Future optimization**: Code generation from IR may be added later
+1. **IR → Schema** (`ir_codegen.jl:ir_to_schema`): The IR tokens are parsed to reconstruct a Schema structure. This serves as a bridge to the existing code generator.
+2. **Schema → Julia AST** (existing `codegen_utils.jl`): The Schema is used to generate Julia expressions.
+3. **Julia AST → Code String**: The expressions are converted to Julia source code.
+
+This approach:
+- Makes IR the canonical representation (Schema is reconstructed from IR)
+- Validates IR roundtrips correctly
+- Reuses the robust existing code generation infrastructure
+- Enables future direct IR → Julia AST generation
 
 ## API
 
