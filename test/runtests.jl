@@ -1,5 +1,14 @@
 using Test
 
+# Generate test schemas if needed
+test_dir = @__DIR__
+generated_dir = joinpath(test_dir, "generated")
+
+if !isdir(generated_dir) || isempty(readdir(generated_dir))
+    println("Generating test schemas...")
+    include("generate_test_schemas.jl")
+end
+
 # Load pre-generated schemas for file-based testing
 include("generated/Baseline.jl")
 include("generated/Extension.jl")

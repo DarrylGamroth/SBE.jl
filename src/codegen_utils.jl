@@ -808,7 +808,7 @@ function generateComposite_expr(composite_def::Schema.CompositeType, schema::Sch
     offset = 0
     for member in composite_def.members
         if member isa Schema.EncodedType
-            member_exprs = generate_composite_member_expr(member, offset, abstract_type_name, decoder_name, encoder_name, schema)
+            member_exprs = generate_composite_member_expr(member, offset, abstract_type_name, decoder_name, encoder_name, schema, composite_name)
             append!(field_exprs, member_exprs)
             # Constants don't occupy space in the encoding
             if member.presence != "constant"
@@ -1035,12 +1035,15 @@ Helper function to generate expressions for a composite member field.
 Returns an array of expressions for all the accessor functions and metadata.
 """
 function generate_composite_member_expr(member::Schema.EncodedType, offset::Int, 
-                                       base_type_name::Symbol, decoder_name::Symbol, encoder_name::Symbol, schema::Schema.MessageSchema)
+                                       base_type_name::Symbol, decoder_name::Symbol, encoder_name::Symbol, schema::Schema.MessageSchema, composite_name::Symbol=:NoComposite)
     member_name = Symbol(toCamelCase(member.name))
     julia_type = to_julia_type(member.primitive_type)
     julia_type_symbol = Symbol(julia_type)
     is_constant = member.presence == "constant"
     encoding_length = is_constant ? 0 : sizeof(julia_type) * member.length
+    
+    # Check if member name conflicts with composite module name
+    conflicts_with_module = (member_name == composite_name)
     
     exprs = Expr[]
     
@@ -1074,18 +1077,22 @@ function generate_composite_member_expr(member::Schema.EncodedType, offset::Int,
         if member.length == 1
             const_val = parse_constant_value(julia_type, member.constant_value)
             julia_type_symbol = Symbol(julia_type)
+            # Use a suffix for accessor if it conflicts with module name
+            actual_accessor = conflicts_with_module ? Symbol(member_name, "_value") : member_name
             push!(exprs, quote
-                @inline $member_name(::$base_type_name) = $julia_type_symbol($const_val)
-                @inline $member_name(::Type{<:$base_type_name}) = $julia_type_symbol($const_val)
-                export $member_name
+                @inline $actual_accessor(::$base_type_name) = $julia_type_symbol($const_val)
+                @inline $actual_accessor(::Type{<:$base_type_name}) = $julia_type_symbol($const_val)
+                export $actual_accessor
             end)
         else
             # Array constant
             if julia_type == UInt8  # Char array - return as string
+                # Use a suffix for accessor if it conflicts with module name
+                actual_accessor = conflicts_with_module ? Symbol(member_name, "_value") : member_name
                 push!(exprs, quote
-                    @inline $member_name(::$base_type_name) = $(member.constant_value)
-                    @inline $member_name(::Type{<:$base_type_name}) = $(member.constant_value)
-                    export $member_name
+                    @inline $actual_accessor(::$base_type_name) = $(member.constant_value)
+                    @inline $actual_accessor(::Type{<:$base_type_name}) = $(member.constant_value)
+                    export $actual_accessor
                 end)
             else
                 error("Array constants only supported for char type")
@@ -1095,14 +1102,18 @@ function generate_composite_member_expr(member::Schema.EncodedType, offset::Int,
         # Non-constant field
         if member.length == 1
             # Single value
+            # Use a suffix for accessor if it conflicts with module name
+            actual_accessor = conflicts_with_module ? Symbol(member_name, "_value") : member_name
+            actual_setter = Symbol(actual_accessor, :!)
+            
             push!(exprs, quote
-                @inline function $member_name(m::$decoder_name)
+                @inline function $actual_accessor(m::$decoder_name)
                     return decode_value($julia_type, m.buffer, m.offset + $offset)
                 end
                 
-                @inline $(Symbol(member_name, :!))(m::$encoder_name, val) = encode_value($julia_type, m.buffer, m.offset + $offset, val)
+                @inline $actual_setter(m::$encoder_name, val) = encode_value($julia_type, m.buffer, m.offset + $offset, val)
                 
-                export $member_name, $(Symbol(member_name, :!))
+                export $actual_accessor, $actual_setter
             end)
         else
             # Array value
@@ -1113,9 +1124,13 @@ function generate_composite_member_expr(member::Schema.EncodedType, offset::Int,
                 # Character arrays return String by default
                 push!(exprs, :(using StringViews: StringView))
                 
+                # Use a suffix for accessor if it conflicts with module name
+                actual_accessor = conflicts_with_module ? Symbol(member_name, "_value") : member_name
+                actual_setter = Symbol(actual_accessor, :!)
+                
                 push!(exprs, quote
                     # Direct decoder function: returns StringView with null-byte trimming
-                    @inline function $member_name(m::$decoder_name)
+                    @inline function $actual_accessor(m::$decoder_name)
                         bytes = decode_array($julia_type, m.buffer, m.offset + $offset, $(member.length))
                         # Remove trailing null bytes - use findfirst to avoid allocation
                         pos = findfirst(iszero, bytes)
@@ -1124,12 +1139,12 @@ function generate_composite_member_expr(member::Schema.EncodedType, offset::Int,
                     end
 
                     # Direct encoder function: returns array view for writing (matches baseline)
-                    @inline function $(Symbol(member_name, :!))(m::$encoder_name)
+                    @inline function $actual_setter(m::$encoder_name)
                         return encode_array($julia_type, m.buffer, m.offset + $offset, $(member.length))
                     end
 
                     # Convenience encoder with AbstractString (copies with null padding)
-                    @inline function $(Symbol(member_name, :!))(m::$encoder_name, value::AbstractString)
+                    @inline function $actual_setter(m::$encoder_name, value::AbstractString)
                         bytes = codeunits(value)
                         dest = encode_array($julia_type, m.buffer, m.offset + $offset, $(member.length))
                         len = min(length(bytes), length(dest))
@@ -1141,7 +1156,7 @@ function generate_composite_member_expr(member::Schema.EncodedType, offset::Int,
                     end
 
                     # Convenience encoder with UInt8 vector (copies as-is)
-                    @inline function $(Symbol(member_name, :!))(m::$encoder_name, value::AbstractVector{UInt8})
+                    @inline function $actual_setter(m::$encoder_name, value::AbstractVector{UInt8})
                         dest = encode_array($julia_type, m.buffer, m.offset + $offset, $(member.length))
                         len = min(length(value), length(dest))
                         copyto!(dest, 1, value, 1, len)
@@ -1151,24 +1166,28 @@ function generate_composite_member_expr(member::Schema.EncodedType, offset::Int,
                         end
                     end
 
-                    export $member_name, $(Symbol(member_name, :!))
+                    export $actual_accessor, $actual_setter
                 end)
             else
                 # Non-character arrays: return numeric array view
+                # Use a suffix for accessor if it conflicts with module name
+                actual_accessor = conflicts_with_module ? Symbol(member_name, "_value") : member_name
+                actual_setter = Symbol(actual_accessor, :!)
+                
                 push!(exprs, quote
-                    @inline function $member_name(m::$decoder_name)
+                    @inline function $actual_accessor(m::$decoder_name)
                         return decode_array($julia_type, m.buffer, m.offset + $offset, $(member.length))
                     end
                     
-                    @inline function $(Symbol(member_name, :!))(m::$encoder_name)
+                    @inline function $actual_setter(m::$encoder_name)
                         return encode_array($julia_type, m.buffer, m.offset + $offset, $(member.length))
                     end
                     
-                    @inline function $(Symbol(member_name, :!))(m::$encoder_name, val)
-                        copyto!($(Symbol(member_name, :!))(m), val)
+                    @inline function $actual_setter(m::$encoder_name, val)
+                        copyto!($actual_setter(m), val)
                     end
                     
-                    export $member_name, $(Symbol(member_name, :!))
+                    export $actual_accessor, $actual_setter
                 end)
             end
         end
