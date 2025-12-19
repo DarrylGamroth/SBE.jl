@@ -182,11 +182,19 @@ function sbe_description end
 include("Schema.jl")
 import .Schema
 
+# Import IR (Intermediate Representation) module
+include("IR.jl")
+import .IR
+
 # XML parsing
 include("xml_parser.jl")
 
 # Code generation utilities (includes abstract types and runtime support)
+# Must be included BEFORE schema_to_ir.jl since it provides utility functions
 include("codegen_utils.jl")
+
+# Schema to IR conversion (uses functions from codegen_utils.jl)
+include("schema_to_ir.jl")
 
 # ============================================================================
 # @load_schema Macro - Primary User API
@@ -264,9 +272,11 @@ end
 
 # Re-export important types and functions that users need
 export Schema  # Users can access Schema.MessageDefinition, etc.
+export IR      # Users can access IR module for intermediate representation
 export SBECodec, SBEFlyweight, SBEMessage
 export @load_schema, create_codec_from_schema, create_message, parse_sbe_schema
 export generate  # Main code generation API
+export schema_to_ir  # Schema to IR conversion
 
 # Export position pointer type
 export PositionPointer
