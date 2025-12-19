@@ -2,11 +2,20 @@
 
 ## Overview
 
-Successfully implemented Intermediate Representation (IR) generation step compatible with the reference SBE implementation. The code generation pipeline now follows:
+Implemented Intermediate Representation (IR) generation step compatible with the reference SBE implementation. The code generation pipeline now follows:
 
 **XML → Schema → IR → Julia Code**
 
 The IR is now the **canonical intermediate representation**, ensuring compatibility with the reference implementation.
+
+### ⚠️  Known Technical Debt
+
+The current implementation uses a **Schema bridge** in `generate_from_ir()`. This deviates from the reference implementation which generates code directly from IR tokens. The bridge adds maintenance overhead and should be eliminated.
+
+**Current**: `IR → Schema → Julia` (via bridge in ir_codegen.jl)  
+**Correct**: `IR → Julia` (direct token processing, matches reference implementation)
+
+The bridge is isolated in `ir_to_schema()` and should be replaced with a direct IR token → Julia AST generator.
 
 ## What Was Implemented
 
@@ -25,11 +34,11 @@ The IR is now the **canonical intermediate representation**, ensuring compatibil
      - Primitive type encodings
    - Helper functions for type mapping and size calculation
 
-3. **src/ir_codegen.jl** (489 lines)
-   - Converts IR back to Schema structure
-   - Token parsing state machine
-   - Bridges IR to existing code generation infrastructure
+3. **src/ir_codegen.jl** (489 lines) ⚠️  Contains technical debt
    - Entry point: `generate_from_ir(ir) -> String`
+   - **TECHNICAL DEBT**: Uses Schema bridge (`ir_to_schema()`) instead of direct token processing
+   - Should be replaced with direct IR token → Julia AST generator
+   - Bridge isolated and clearly marked for removal
 
 ### Modified Files
 

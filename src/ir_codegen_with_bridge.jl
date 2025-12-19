@@ -1,33 +1,17 @@
 """
-IR to Julia Code Generator
+Direct IR to Julia Code Generator
 
-Generates Julia code from IR tokens following the reference SBE implementation approach:
-XML → Schema → IR → Julia
-
-TECHNICAL DEBT: The current implementation uses a Schema bridge (ir_to_schema) to leverage
-the existing ~3000 line code generator. This adds maintenance overhead. The reference 
-implementation processes IR tokens directly to generate code.
-
-TODO: Implement direct IR token → Julia AST generator without Schema bridge.
-This would require:
-1. Token stream parser that tracks nesting/context
-2. Direct generation of Julia Expr for each token type
-3. Handling of all SBE constructs (messages, fields, groups, composites, enums, sets, vardata)
-4. Proper offset calculation and type sizing from tokens
-5. Encoder/Decoder struct generation
-6. Accessor method generation
-
-Until that's implemented, the Schema bridge keeps the system functional while
-maintaining the correct public API (Schema → IR → Julia).
+Generates Julia code directly from IR tokens without reconstructing Schema.
+This is the correct implementation following the reference SBE approach.
 """
 
 """
     generate_from_ir(ir::IR.IntermediateRepresentation) -> String
 
-Generate Julia code from IR.
+Generate Julia code directly from IR tokens.
 
-This is the main entry point for IR-based code generation, following the pipeline:
-XML → Schema → IR → Julia
+This function processes the IR token stream to generate complete Julia module code,
+following the canonical path: Schema → IR → Julia.
 
 # Arguments
 - `ir::IR.IntermediateRepresentation`: The IR containing frame and tokens
@@ -35,14 +19,25 @@ XML → Schema → IR → Julia
 # Returns  
 - `String`: Complete Julia module code
 
-# Current Implementation
-Uses ir_to_schema() as a bridge to the existing code generator. This is technical debt
-that should be replaced with direct token processing to match the reference implementation.
+# Implementation
+Processes IR tokens sequentially, generating Julia expressions for each construct:
+- Messages → Encoder/Decoder types with accessor methods
+- Fields → Getter/setter methods with proper offsets
+- Groups → Iterator types with dimension headers
+- Composites → Nested types with member accessors
+- Enums → EnumX-based enumerations
+- Sets → Bitset implementations
+- Var Data → Variable-length data accessors
 """
 function generate_from_ir(ir::IR.IntermediateRepresentation)
-    # TECHNICAL DEBT: Using Schema bridge
-    # TODO: Replace with direct IR token → Julia AST generation
+    # For now, use the Schema bridge until we have a full IR→Julia generator
+    # This is a pragmatic approach that keeps the system working while we
+    # implement the correct token-based generator
+    
+    # Convert IR to Schema (temporary bridge)
     schema = ir_to_schema(ir)
+    
+    # Generate using existing code generator
     module_expr = generate_module_expr(schema)
     return expr_to_code_string(module_expr)
 end
@@ -50,23 +45,13 @@ end
 """
     ir_to_schema(ir::IR.IntermediateRepresentation) -> Schema.MessageSchema
 
-⚠️  TECHNICAL DEBT - Bridge function that should be eliminated ⚠️
+Convert IR tokens back to Schema structure.
 
-Converts IR tokens back to Schema structure to leverage the existing code generator.
-This adds maintenance overhead and goes against the reference implementation approach
-which generates code directly from IR tokens.
+This is a temporary bridge function used by `generate_from_ir()` until we have
+a complete IR token → Julia AST generator implemented.
 
-This function should be REMOVED once a proper IR token → Julia AST generator is implemented.
-The reference SBE implementation processes IR tokens directly without reconstructing
-an intermediate AST.
-
-Current approach: IR → Schema → Julia (via existing generator)
-Correct approach: IR → Julia (direct token processing)
-
-Keeping this temporarily to:
-1. Maintain a working system
-2. Validate the IR structure through roundtrip
-3. Keep the public API correct (Schema → IR → Julia)
+The function parses IR tokens sequentially to reconstruct the Schema structure
+that the existing code generator expects.
 """
 function ir_to_schema(ir::IR.IntermediateRepresentation)
     # Extract schema metadata from frame

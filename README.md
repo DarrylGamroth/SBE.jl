@@ -181,7 +181,7 @@ The IR enables:
 - **Schema inspection** - Programmatic access to schema structure
 - **Future optimizations** - Alternative code generation strategies
 
-See [docs/IR_IMPLEMENTATION.md](docs/IR_IMPLEMENTATION.md) for details.
+**Note**: Current implementation uses a Schema bridge for code generation. The reference implementation generates code directly from IR tokens. See [docs/IR_IMPLEMENTATION.md](docs/IR_IMPLEMENTATION.md) for details and roadmap.
 
 ## Documentation
 
