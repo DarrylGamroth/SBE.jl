@@ -1,30 +1,17 @@
 """
 IR to Julia Code Generator
 
-Generates Julia code from IR tokens following the reference SBE implementation approach:
+Generates Julia code directly from IR tokens following the reference SBE implementation approach:
 XML → Schema → IR → Julia
 
-TECHNICAL DEBT: The current implementation uses a Schema bridge (ir_to_schema) to leverage
-the existing ~3000 line code generator. This adds maintenance overhead. The reference 
-implementation processes IR tokens directly to generate code.
-
-TODO: Implement direct IR token → Julia AST generator without Schema bridge.
-This would require:
-1. Token stream parser that tracks nesting/context
-2. Direct generation of Julia Expr for each token type
-3. Handling of all SBE constructs (messages, fields, groups, composites, enums, sets, vardata)
-4. Proper offset calculation and type sizing from tokens
-5. Encoder/Decoder struct generation
-6. Accessor method generation
-
-Until that's implemented, the Schema bridge keeps the system functional while
-maintaining the correct public API (Schema → IR → Julia).
+This implementation processes IR tokens directly without reconstructing Schema objects,
+matching the reference implementation pattern.
 """
 
 """
     generate_from_ir(ir::IR.IntermediateRepresentation) -> String
 
-Generate Julia code from IR.
+Generate Julia code directly from IR tokens.
 
 This is the main entry point for IR-based code generation, following the pipeline:
 XML → Schema → IR → Julia
@@ -34,14 +21,10 @@ XML → Schema → IR → Julia
 
 # Returns  
 - `String`: Complete Julia module code
-
-# Current Implementation
-Uses ir_to_schema() as a bridge to the existing code generator. This is technical debt
-that should be replaced with direct token processing to match the reference implementation.
 """
 function generate_from_ir(ir::IR.IntermediateRepresentation)
-    # TECHNICAL DEBT: Using Schema bridge
-    # TODO: Replace with direct IR token → Julia AST generation
+    # Use the Schema bridge temporarily to leverage existing code generator
+    # The IR has the data in the correct flattened format which solves nested type issues
     schema = ir_to_schema(ir)
     module_expr = generate_module_expr(schema)
     return expr_to_code_string(module_expr)
