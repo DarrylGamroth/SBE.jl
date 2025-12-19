@@ -71,6 +71,18 @@ function ir_to_schema(ir::IR.IntermediateRepresentation)
     types = Schema.AbstractTypeDefinition[]
     messages = Schema.MessageDefinition[]
     
+    # Helper to add type if not already present
+    function maybe_add_type!(types::Vector, member::Schema.AbstractTypeDefinition)
+        if member.name == ""
+            return  # Skip unnamed types
+        end
+        
+        # Check if already exists
+        if !any(t -> typeof(t) == typeof(member) && t.name == member.name, types)
+            push!(types, member)
+        end
+    end
+    
     # State machine for parsing tokens
     token_idx = 1
     while token_idx <= length(ir.tokens)
@@ -81,23 +93,8 @@ function ir_to_schema(ir::IR.IntermediateRepresentation)
             push!(types, composite)
             # Extract nested types from composite and add to top-level types
             for member in composite.members
-                if member isa Schema.EncodedType && member.name != ""
-                    # Only add if not already in types
-                    if !any(t -> (t isa Schema.EncodedType && t.name == member.name), types)
-                        push!(types, member)
-                    end
-                elseif member isa Schema.EnumType
-                    if !any(t -> (t isa Schema.EnumType && t.name == member.name), types)
-                        push!(types, member)
-                    end
-                elseif member isa Schema.SetType
-                    if !any(t -> (t isa Schema.SetType && t.name == member.name), types)
-                        push!(types, member)
-                    end
-                elseif member isa Schema.CompositeType
-                    if !any(t -> (t isa Schema.CompositeType && t.name == member.name), types)
-                        push!(types, member)
-                    end
+                if member isa Union{Schema.EncodedType, Schema.EnumType, Schema.SetType, Schema.CompositeType}
+                    maybe_add_type!(types, member)
                 end
             end
             token_idx += consumed
