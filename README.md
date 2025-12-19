@@ -165,6 +165,24 @@ This approach:
 - ✅ Makes generated code reviewable
 - ✅ Works with Julia's package precompilation
 
+## Intermediate Representation (IR)
+
+SBE.jl includes a complete Intermediate Representation (IR) compatible with the reference implementation. The code generation pipeline follows: **XML → Schema → IR → Julia Code**
+
+```julia
+# Generate and inspect IR
+ir = SBE.generate_ir("example-schema.xml")
+println("Package: ", ir.frame.package_name)
+println("Number of tokens: ", length(ir.tokens))
+```
+
+The IR enables:
+- **Cross-implementation compatibility** - IR can be serialized and shared with other SBE implementations
+- **Schema inspection** - Programmatic access to schema structure
+- **Future optimizations** - Alternative code generation strategies
+
+See [docs/IR_IMPLEMENTATION.md](docs/IR_IMPLEMENTATION.md) for details.
+
 ## Documentation
 
 - **[CHANGELOG.md](CHANGELOG.md)** - Development history and completed features
