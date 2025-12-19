@@ -3000,10 +3000,10 @@ function generate_module_expr(schema::Schema.MessageSchema)
     
     # 1. Generate enum types (no dependencies)
     #    First pass: extract nested enums from composites and generate them
-    nested_enums = Schema.EnumType[]
+    nested_types = Union{Schema.EnumType, Schema.SetType, Schema.CompositeType}[]
     for type_def in schema.types
         if type_def isa Schema.CompositeType
-            extract_nested_types!(type_def, nested_enums)
+            extract_nested_types!(type_def, nested_types)
         end
     end
     
@@ -3018,7 +3018,7 @@ function generate_module_expr(schema::Schema.MessageSchema)
     end
     
     # Generate nested enums that were extracted
-    for enum_def in nested_enums
+    for enum_def in nested_types
         if enum_def isa Schema.EnumType
             enum_name = Symbol(to_pascal_case(enum_def.name))
             enum_expr = generateEnum_expr(enum_def, schema)
@@ -3038,7 +3038,7 @@ function generate_module_expr(schema::Schema.MessageSchema)
     end
     
     # Generate nested sets that were extracted
-    for set_def in nested_enums  # Reuse the same array since we extracted all types
+    for set_def in nested_types
         if set_def isa Schema.SetType
             set_name = Symbol(to_pascal_case(set_def.name))
             set_expr = generateSet_expr(set_def, schema)
@@ -3048,7 +3048,7 @@ function generate_module_expr(schema::Schema.MessageSchema)
     end
     
     # 3. Generate nested composites that were extracted (before their parents)
-    for nested_def in nested_enums
+    for nested_def in nested_types
         if nested_def isa Schema.CompositeType
             composite_name = Symbol(to_pascal_case(nested_def.name))
             composite_expr = generateComposite_expr(nested_def, schema, true)  # true = is_nested, don't recurse

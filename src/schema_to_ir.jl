@@ -235,7 +235,7 @@ function add_message_tokens!(tokens::Vector{IR.IRToken}, message::Schema.Message
     block_length = if message.block_length !== nothing
         parse(Int32, message.block_length)
     else
-        Int32(sum(get_field_size(schema, f) for f in message.fields))
+        Int32(sum(get_field_size(schema, f) for f in message.fields; init=0))
     end
     
     # BEGIN_MESSAGE token
@@ -277,10 +277,36 @@ end
 Add tokens for a field
 """
 function add_field_tokens!(tokens::Vector{IR.IRToken}, field::Schema.FieldDefinition, schema::Schema.MessageSchema)
+    # Try to find type in schema types
     type_def = find_type(schema, field.type_ref)
     
+    # If not found, it might be a primitive type - create a virtual EncodedType
     if type_def === nothing
-        error("Type not found: $(field.type_ref)")
+        # Check if it's a valid primitive type
+        if field.type_ref in ["char", "int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64", "float", "double"]
+            # Create a virtual EncodedType for this primitive
+            # Constructor: name, primitive_type, length, null_value, min_value, max_value, 
+            #              character_encoding, offset, presence, constant_value, semantic_type, 
+            #              description, since_version, deprecated
+            type_def = Schema.EncodedType(
+                field.name,  # name
+                field.type_ref,  # primitive_type
+                1,  # length
+                nothing,  # null_value
+                nothing,  # min_value
+                nothing,  # max_value
+                nothing,  # character_encoding
+                field.offset,  # offset
+                "required",  # presence
+                nothing,  # constant_value
+                field.semantic_type,  # semantic_type
+                "",  # description
+                field.since_version,  # since_version
+                nothing  # deprecated
+            )
+        else
+            error("Type not found: $(field.type_ref)")
+        end
     end
     
     # BEGIN_FIELD token
@@ -338,7 +364,7 @@ function add_group_tokens!(tokens::Vector{IR.IRToken}, group::Schema.GroupDefini
     block_length = if group.block_length !== nothing
         parse(Int32, group.block_length)
     else
-        Int32(sum(get_field_size(schema, f) for f in group.fields))
+        Int32(sum(get_field_size(schema, f) for f in group.fields; init=0))
     end
     
     # BEGIN_GROUP token
