@@ -6,13 +6,15 @@ This document describes the Intermediate Representation (IR) implementation in S
 
 ## Architecture
 
-The code generation pipeline now follows three steps:
+The code generation pipeline now follows:
 
 ```
 XML Schema → Schema (AST) → IR → Julia Code
      ↓            ↓          ↓         ↓
  parse_sbe  Schema types  IR types  generate()
 ```
+
+The IR is the **canonical intermediate representation** in this pipeline.
 
 ### Step 1: XML → Schema
 The XML parser (`xml_parser.jl`) parses the SBE XML schema into a structured `Schema.MessageSchema` representation. This is an Abstract Syntax Tree (AST) that represents the schema structure.
@@ -36,17 +38,19 @@ Each token represents a structural element with signal types like:
 - `CHOICE` - Bitset choice
 
 ### Step 3: IR → Julia Code
-Julia code is now generated from the IR (not directly from Schema). The IR is the **canonical intermediate representation**. The code generation follows this path:
+Julia code is generated from the IR. The IR is the **canonical intermediate representation**.
 
-1. **IR → Schema** (`ir_codegen.jl:ir_to_schema`): The IR tokens are parsed to reconstruct a Schema structure. This serves as a bridge to the existing code generator.
-2. **Schema → Julia AST** (existing `codegen_utils.jl`): The Schema is used to generate Julia expressions.
-3. **Julia AST → Code String**: The expressions are converted to Julia source code.
+The `generate_from_ir()` function takes IR and produces Julia code. Currently, this is implemented using Schema as an internal bridge:
+
+1. **IR → Schema** (internal): IR tokens are parsed to reconstruct a Schema structure
+2. **Schema → Julia AST**: The Schema is used to generate Julia expressions
+3. **Julia AST → Code String**: The expressions are converted to Julia source code
 
 This approach:
-- Makes IR the canonical representation (Schema is reconstructed from IR)
-- Validates IR roundtrips correctly
+- Makes IR the canonical representation in the pipeline
 - Reuses the robust existing code generation infrastructure
-- Enables future direct IR → Julia AST generation
+- Keeps Schema reconstruction as an internal implementation detail
+- Enables future direct IR → Julia AST generation without the Schema bridge
 
 ## API
 

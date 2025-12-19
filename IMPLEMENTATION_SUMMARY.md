@@ -4,7 +4,7 @@
 
 Successfully implemented Intermediate Representation (IR) generation step compatible with the reference SBE implementation. The code generation pipeline now follows:
 
-**XML → Schema → IR → Schema → Julia Code**
+**XML → Schema → IR → Julia Code**
 
 The IR is now the **canonical intermediate representation**, ensuring compatibility with the reference implementation.
 
@@ -41,7 +41,7 @@ The IR is now the **canonical intermediate representation**, ensuring compatibil
 2. **src/codegen_utils.jl**
    - Updated `generate()` functions to use IR pipeline
    - Added `generate_ir()` function for IR inspection
-   - Pipeline: XML → Schema → IR → Schema → Julia
+   - Pipeline: XML → Schema → IR → Julia
 
 3. **README.md**
    - Added IR section explaining the new architecture
@@ -89,28 +89,25 @@ The IR is now the **canonical intermediate representation**, ensuring compatibil
 ┌─────────────┐
 │     IR      │  (Canonical representation)
 └──────┬──────┘
-       │ ir_to_schema()
-       ▼
-┌─────────────┐
-│   Schema    │  (Reconstructed from IR)
-└──────┬──────┘
-       │ generate_module_expr()
+       │ generate_from_ir()
        ▼
 ┌─────────────┐
 │ Julia Code  │
 └─────────────┘
 ```
 
+**Implementation Note**: `generate_from_ir()` currently uses Schema as an internal bridge to the existing code generator, but this is an implementation detail. The public API flows Schema → IR → Julia.
+
 ### Why IR is Canonical
 
 The implementation makes IR the canonical representation by:
 1. Always generating IR from Schema
-2. Reconstructing Schema from IR before code generation
-3. Validating IR roundtrips correctly
-4. Making direct Schema → Julia generation unavailable
+2. Code generation goes through IR (via `generate_from_ir()`)
+3. IR can be inspected, serialized, and validated
+4. The main `generate()` function enforces the Schema → IR → Julia path
 
 This ensures:
-- IR can be inspected, serialized, and validated
+- IR is the required intermediate format
 - Cross-implementation compatibility
 - Future IR-level optimizations possible
 

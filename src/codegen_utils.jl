@@ -3185,15 +3185,8 @@ function generate(xml_path::String, output_path::String)
     # Generate IR (Step 2: Schema → IR)
     ir = schema_to_ir(schema)
     
-    # Reconstruct schema from IR (Step 3: IR → Schema)
-    # This ensures the IR is the canonical representation
-    schema_from_ir = ir_to_schema(ir)
-    
-    # Generate the module expression (Step 4: Schema → Julia Code)
-    module_expr = generate_module_expr(schema_from_ir)
-    
-    # Convert to code string
-    module_code = expr_to_code_string(module_expr)
+    # Generate Julia code from IR (Step 3: IR → Julia)
+    module_code = generate_from_ir(ir)
     
     # Create output directory if needed
     output_dir = dirname(output_path)
@@ -3217,7 +3210,8 @@ This version generates the code in-memory without writing to a file. The returne
 string can be used with `Base.include_string()` to load the module dynamically.
 
 The generation process follows: XML → Schema → IR → Julia Code
-The IR (Intermediate Representation) is compatible with the reference SBE implementation.
+The IR (Intermediate Representation) is the canonical intermediate format,
+compatible with the reference SBE implementation.
 
 # Arguments
 - `xml_path::String`: Path to the SBE XML schema file
@@ -3261,15 +3255,8 @@ function generate(xml_path::String)
     # Generate IR (Step 2: Schema → IR)
     ir = schema_to_ir(schema)
     
-    # Reconstruct schema from IR (Step 3: IR → Schema)
-    # This ensures the IR is the canonical representation
-    schema_from_ir = ir_to_schema(ir)
-    
-    # Generate the complete module expression (Step 4: Schema → Julia Code)
-    module_expr = generate_module_expr(schema_from_ir)
-    
-    # Convert to code string and return
-    return expr_to_code_string(module_expr)
+    # Generate Julia code from IR (Step 3: IR → Julia)
+    return generate_from_ir(ir)
 end
 
 """
