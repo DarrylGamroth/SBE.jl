@@ -163,6 +163,12 @@ function parse_composite_from_ir(tokens::Vector{IR.IRToken}, start_idx::Int)
         token = tokens[idx]
         
         if token.signal == IR.END_COMPOSITE
+            # Check if this is a wrapped standalone EncodedType (single-member composite with same name)
+            if length(members) == 1 && members[1] isa Schema.EncodedType && members[1].name == name
+                # This is a wrapped EncodedType - return it directly
+                return (members[1], idx - start_idx + 1)
+            end
+            
             composite = Schema.CompositeType(
                 name, members, offset, semantic_type, description, 
                 since_version, nothing

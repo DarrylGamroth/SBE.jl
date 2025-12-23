@@ -1,13 +1,18 @@
 using Test
 
-# Generate test schemas if needed
+# Always regenerate test schemas to ensure they're up to date
 test_dir = @__DIR__
 generated_dir = joinpath(test_dir, "generated")
 
-if !isdir(generated_dir) || isempty(readdir(generated_dir))
-    println("Generating test schemas...")
-    include("generate_test_schemas.jl")
+# Clean up old generated files
+if isdir(generated_dir)
+    println("Cleaning old generated schemas...")
+    rm(generated_dir, recursive=true, force=true)
 end
+
+# Generate fresh schemas
+println("Generating test schemas...")
+include("generate_test_schemas.jl")
 
 # Load pre-generated schemas for file-based testing
 include("generated/Baseline.jl")

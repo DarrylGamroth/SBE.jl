@@ -51,9 +51,8 @@ function add_type_tokens!(tokens::Vector{IR.IRToken}, type_def::Schema.AbstractT
     elseif type_def isa Schema.SetType
         add_set_tokens!(tokens, type_def, schema)
     elseif type_def isa Schema.EncodedType
-        # Standalone EncodedTypes are type aliases and should be inlined when referenced
-        # They don't need separate IR tokens - they'll be embedded when fields reference them
-        # This is intentionally left empty
+        # Standalone EncodedTypes - wrap as simple single-member composites
+        add_standalone_encoded_type_tokens!(tokens, type_def, schema)
     end
 end
 
