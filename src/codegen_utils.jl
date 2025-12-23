@@ -872,7 +872,7 @@ function generateComposite_expr(composite_def::Schema.CompositeType, schema::Sch
             # Handle nested composite definitions (e.g., <composite name="inner">)
             # NOTE: Nested composites are generated at top-level in generate_module_expr, not here
             # We only generate the accessor for this composite field
-            composite_name = Symbol(to_pascal_case(member.name))
+            member_composite_name = Symbol(to_pascal_case(member.name))  # Use different variable name to avoid shadowing!
             
             # Generate field accessor for this composite (references the top-level composite module)
             accessor_exprs = generate_composite_nested_composite_accessor(member, offset, abstract_type_name, decoder_name, encoder_name, schema)

@@ -83,6 +83,25 @@ function ir_to_schema(ir::IR.IntermediateRepresentation)
         end
     end
     
+    # Helper to recursively extract nested types from composites (like generate_module_expr does)
+    function extract_nested_types!(composite_def::Schema.CompositeType, extracted_types::Vector)
+        for member in composite_def.members
+            if member isa Schema.EnumType
+                maybe_add_type!(extracted_types, member)
+            elseif member isa Schema.SetType
+                maybe_add_type!(extracted_types, member)
+            elseif member isa Schema.CompositeType
+                # Recursively extract from nested composite
+                extract_nested_types!(member, extracted_types)
+                # Add the nested composite itself
+                maybe_add_type!(extracted_types, member)
+            elseif member isa Schema.EncodedType
+                # EncodedTypes might be reusable definitions
+                maybe_add_type!(extracted_types, member)
+            end
+        end
+    end
+    
     # State machine for parsing tokens
     token_idx = 1
     while token_idx <= length(ir.tokens)
@@ -91,12 +110,8 @@ function ir_to_schema(ir::IR.IntermediateRepresentation)
         if token.signal == IR.BEGIN_COMPOSITE
             composite, consumed = parse_composite_from_ir(ir.tokens, token_idx)
             push!(types, composite)
-            # Extract nested types from composite and add to top-level types
-            for member in composite.members
-                if member isa Union{Schema.EncodedType, Schema.EnumType, Schema.SetType, Schema.CompositeType}
-                    maybe_add_type!(types, member)
-                end
-            end
+            # Extract nested types from composite and add to top-level types (recursively!)
+            extract_nested_types!(composite, types)
             token_idx += consumed
         elseif token.signal == IR.BEGIN_ENUM
             enum, consumed = parse_enum_from_ir(ir.tokens, token_idx)
