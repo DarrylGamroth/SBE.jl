@@ -51,9 +51,9 @@ function add_type_tokens!(tokens::Vector{IR.IRToken}, type_def::Schema.AbstractT
     elseif type_def isa Schema.SetType
         add_set_tokens!(tokens, type_def, schema)
     elseif type_def isa Schema.EncodedType
-        # Standalone EncodedTypes (like "Percentage") need to be added as a simple composite
-        # with a single encoding member so they can be referenced
-        add_standalone_encoded_type_tokens!(tokens, type_def, schema)
+        # Standalone EncodedTypes are type aliases and should be inlined when referenced
+        # They don't need separate IR tokens - they'll be embedded when fields reference them
+        # This is intentionally left empty
     end
 end
 
@@ -115,6 +115,18 @@ function add_encoded_type_token!(tokens::Vector{IR.IRToken}, encoded::Schema.Enc
     presence = presence_to_ir(encoded.presence)
     byte_order = schema.byte_order == "littleEndian" ? IR.SBE_LITTLE_ENDIAN : IR.SBE_BIG_ENDIAN
     
+    # Compute null_value if not explicitly set and presence is optional
+    null_value_str = if encoded.null_value !== nothing
+        encoded.null_value
+    elseif encoded.presence == "optional"
+        # Compute default null value for optional fields
+        julia_type = to_julia_type(encoded.primitive_type)
+        null_val = get_null_value(julia_type, encoded)
+        string(null_val)
+    else
+        ""
+    end
+    
     push!(tokens, IR.IRToken(
         token_offset = Int32(offset !== nothing ? offset : (encoded.offset !== nothing ? encoded.offset : 0)),
         token_size = Int32(get_type_size(encoded, schema)),
@@ -128,7 +140,7 @@ function add_encoded_type_token!(tokens::Vector{IR.IRToken}, encoded::Schema.Enc
         const_value = encoded.constant_value !== nothing ? encoded.constant_value : "",
         min_value = encoded.min_value !== nothing ? encoded.min_value : "",
         max_value = encoded.max_value !== nothing ? encoded.max_value : "",
-        null_value = encoded.null_value !== nothing ? encoded.null_value : "",
+        null_value = null_value_str,
         character_encoding = encoded.character_encoding !== nothing ? encoded.character_encoding : "",
         semantic_type = encoded.semantic_type !== nothing ? encoded.semantic_type : "",
         description = encoded.description
@@ -357,6 +369,8 @@ function add_field_tokens!(tokens::Vector{IR.IRToken}, field::Schema.FieldDefini
     
     # Add type-specific tokens
     if type_def isa Schema.EncodedType
+        # EncodedTypes are always inlined (even if they're named types like "optionalInt64")
+        # They're type aliases and should be embedded directly into the field
         add_encoded_type_token!(tokens, type_def, field.offset, schema)
     elseif type_def isa Schema.CompositeType
         # For composite fields, reference the composite type
