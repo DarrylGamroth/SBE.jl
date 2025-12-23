@@ -122,7 +122,7 @@ function ir_to_schema(ir::IR.IntermediateRepresentation)
             push!(types, set)
             token_idx += consumed
         elseif token.signal == IR.BEGIN_MESSAGE
-            message, consumed = parse_message_from_ir(ir.tokens, token_idx)
+            message, consumed = parse_message_from_ir(ir.tokens, token_idx, types)
             push!(messages, message)
             token_idx += consumed
         else
@@ -306,7 +306,7 @@ function parse_set_from_ir(tokens::Vector{IR.IRToken}, start_idx::Int)
     error("Unclosed BEGIN_SET for $name")
 end
 
-function parse_message_from_ir(tokens::Vector{IR.IRToken}, start_idx::Int)
+function parse_message_from_ir(tokens::Vector{IR.IRToken}, start_idx::Int, types::Vector{Schema.AbstractTypeDefinition})
     begin_token = tokens[start_idx]
     @assert begin_token.signal == IR.BEGIN_MESSAGE
     
@@ -333,11 +333,11 @@ function parse_message_from_ir(tokens::Vector{IR.IRToken}, start_idx::Int)
             )
             return (message, idx - start_idx + 1)
         elseif token.signal == IR.BEGIN_FIELD
-            field, consumed = parse_field_from_ir(tokens, idx)
+            field, consumed = parse_field_from_ir(tokens, idx, types)
             push!(fields, field)
             idx += consumed
         elseif token.signal == IR.BEGIN_GROUP
-            group, consumed = parse_group_from_ir(tokens, idx)
+            group, consumed = parse_group_from_ir(tokens, idx, types)
             push!(groups, group)
             idx += consumed
         elseif token.signal == IR.BEGIN_VAR_DATA
@@ -352,7 +352,7 @@ function parse_message_from_ir(tokens::Vector{IR.IRToken}, start_idx::Int)
     error("Unclosed BEGIN_MESSAGE for $name")
 end
 
-function parse_field_from_ir(tokens::Vector{IR.IRToken}, start_idx::Int)
+function parse_field_from_ir(tokens::Vector{IR.IRToken}, start_idx::Int, types::Vector{Schema.AbstractTypeDefinition})
     begin_token = tokens[start_idx]
     @assert begin_token.signal == IR.BEGIN_FIELD
     
@@ -379,10 +379,48 @@ function parse_field_from_ir(tokens::Vector{IR.IRToken}, start_idx::Int)
         elseif token.signal == IR.ENCODING
             if !isempty(token.referenced_name)
                 type_ref = token.referenced_name
+                presence = presence_from_ir(token.presence)
             else
-                type_ref = primitive_type_from_ir(token.primitive_type)
+                # Inline ENCODING - need to create a virtual type with the attributes
+                primitive_type = primitive_type_from_ir(token.primitive_type)
+                presence = presence_from_ir(token.presence)
+                
+                # If this is just a basic primitive with no special attributes, use primitive name
+                has_special_attrs = !isempty(token.null_value) || !isempty(token.min_value) || 
+                                   !isempty(token.max_value) || !isempty(token.const_value) ||
+                                   presence == "optional" || presence == "constant"
+                
+                if !has_special_attrs
+                    # Basic primitive - just use the type name
+                    type_ref = primitive_type
+                else
+                    # Has special attributes - create a virtual EncodedType
+                    virtual_type = parse_encoding_from_ir(token)
+                    # Give it a unique name based on field name
+                    virtual_type_name = "__$(name)_type"
+                    virtual_type = Schema.EncodedType(
+                        virtual_type_name,
+                        virtual_type.primitive_type,
+                        virtual_type.length,
+                        virtual_type.null_value,
+                        virtual_type.min_value,
+                        virtual_type.max_value,
+                        virtual_type.character_encoding,
+                        virtual_type.offset,
+                        virtual_type.presence,
+                        virtual_type.constant_value,
+                        virtual_type.semantic_type,
+                        virtual_type.description,
+                        virtual_type.since_version,
+                        virtual_type.deprecated
+                    )
+                    # Add to types list if not already there
+                    if !any(t -> t isa Schema.EncodedType && t.name == virtual_type_name, types)
+                        push!(types, virtual_type)
+                    end
+                    type_ref = virtual_type_name
+                end
             end
-            presence = presence_from_ir(token.presence)
             idx += 1
         else
             idx += 1
@@ -392,7 +430,7 @@ function parse_field_from_ir(tokens::Vector{IR.IRToken}, start_idx::Int)
     error("Unclosed BEGIN_FIELD for $name")
 end
 
-function parse_group_from_ir(tokens::Vector{IR.IRToken}, start_idx::Int)
+function parse_group_from_ir(tokens::Vector{IR.IRToken}, start_idx::Int, types::Vector{Schema.AbstractTypeDefinition})
     begin_token = tokens[start_idx]
     @assert begin_token.signal == IR.BEGIN_GROUP
     
@@ -420,11 +458,11 @@ function parse_group_from_ir(tokens::Vector{IR.IRToken}, start_idx::Int)
             )
             return (group, idx - start_idx + 1)
         elseif token.signal == IR.BEGIN_FIELD
-            field, consumed = parse_field_from_ir(tokens, idx)
+            field, consumed = parse_field_from_ir(tokens, idx, types)
             push!(fields, field)
             idx += consumed
         elseif token.signal == IR.BEGIN_GROUP
-            nested, consumed = parse_group_from_ir(tokens, idx)
+            nested, consumed = parse_group_from_ir(tokens, idx, types)
             push!(nested_groups, nested)
             idx += consumed
         elseif token.signal == IR.BEGIN_VAR_DATA
