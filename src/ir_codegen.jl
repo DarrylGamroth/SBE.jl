@@ -110,8 +110,8 @@ function ir_to_schema(ir::IR.IntermediateRepresentation)
         if token.signal == IR.BEGIN_COMPOSITE
             composite, consumed = parse_composite_from_ir(ir.tokens, token_idx)
             push!(types, composite)
-            # Extract nested types from composite and add to top-level types (recursively!)
-            extract_nested_types!(composite, types)
+            # NOTE: Do NOT extract nested types - they are generated inline within composite modules
+            # extract_nested_types!(composite, types)  # This causes duplicates!
             token_idx += consumed
         elseif token.signal == IR.BEGIN_ENUM
             enum, consumed = parse_enum_from_ir(ir.tokens, token_idx)
