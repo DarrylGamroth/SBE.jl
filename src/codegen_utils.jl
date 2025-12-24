@@ -2695,16 +2695,17 @@ function generateVarData_expr(data_def::Schema.VarDataDefinition, schema::Schema
         end
     end
     
-    # Calculate header length and extract length field type from the composite
-    header_length = calculate_composite_size(encoding_type_def, schema)
-    
+    # Calculate header length (only the length field size, not the whole composite)
     # Find the length field (first member) and get its primitive type
     length_primitive_type = :UInt32  # Default fallback
+    header_length = 4  # Default: UInt32 = 4 bytes
     is_character_encoded = false
     if !isempty(encoding_type_def.members)
         first_member = encoding_type_def.members[1]
         if first_member isa Schema.EncodedType
             length_primitive_type = to_julia_type(first_member.primitive_type)
+            # Header length is the size of the length field only
+            header_length = sizeof(eval(length_primitive_type))
         end
         # Check if second member (varData field) is character-encoded
         if length(encoding_type_def.members) >= 2
