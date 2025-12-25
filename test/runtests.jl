@@ -28,7 +28,8 @@ include("generated/CompositeElements.jl")
     include("test_nested_sets_in_composites.jl")  # Nested sets in composites
     include("test_optional_fields.jl")  # Optional field handling tests
     include("test_consistent_field_api.jl")  # Consistent API tests (Baseline schema)
-    
+    include("test_ir_decoder.jl")  # IR decoding vs sbeir
+
     # Integration and validation tests
     include("test_complex_patterns.jl")
     include("test_allocations.jl")

@@ -865,13 +865,50 @@ function generate_enum_field_expr(
     push!(exprs, field_meta_attribute_expr(field_name, abstract_type_name, field_token))
 
     if field_token.encoding.presence == IR.Presence.CONSTANT
-        literal = encoding_literal(enum_token.encoding.const_value, encoding_type, IR.primitive_type_null)
-        push!(exprs, quote
-            @inline function $field_name(::$decoder_name)
-                return $enum_module.SbeEnum($literal)
-            end
-            export $field_name
-        end)
+        const_value = field_token.encoding.const_value
+        null_val = encoding_literal(enum_token.encoding.null_value, encoding_type, IR.primitive_type_null)
+        if const_value !== nothing
+            const_str = const_value.value
+            dot_index = findlast(==('.'), const_str)
+            value_name = dot_index === nothing ? const_str : const_str[(dot_index + 1):end]
+            value_symbol = Symbol(value_name)
+            enum_value_expr = Expr(:., enum_module, value_symbol)
+            int_value_expr = Expr(:call, julia_type_symbol, enum_value_expr)
+            push!(exprs, quote
+                @inline function $field_name(m::$decoder_name, ::Type{Integer})
+                    if m.acting_version < $(version_expr(ir, field_token.version))
+                        return $julia_type_symbol($(null_val))
+                    end
+                    return $int_value_expr
+                end
+
+                @inline function $field_name(m::$decoder_name)
+                    if m.acting_version < $(version_expr(ir, field_token.version))
+                        return $enum_module.NULL_VALUE
+                    end
+                    return $enum_value_expr
+                end
+                export $field_name
+            end)
+        else
+            literal = encoding_literal(enum_token.encoding.const_value, encoding_type, IR.primitive_type_null)
+            push!(exprs, quote
+                @inline function $field_name(m::$decoder_name, ::Type{Integer})
+                    if m.acting_version < $(version_expr(ir, field_token.version))
+                        return $julia_type_symbol($(null_val))
+                    end
+                    return $julia_type_symbol($literal)
+                end
+
+                @inline function $field_name(m::$decoder_name)
+                    if m.acting_version < $(version_expr(ir, field_token.version))
+                        return $enum_module.NULL_VALUE
+                    end
+                    return $enum_module.SbeEnum($literal)
+                end
+                export $field_name
+            end)
+        end
         return exprs
     end
 

@@ -289,7 +289,9 @@ function parse_enum_type(
     offset_attribute = parse(Int, haskey(node, "offset") ? node["offset"] : "-1")
     since_version = parse(Int, haskey(node, "sinceVersion") ? node["sinceVersion"] : "0")
     deprecated = parse(Int, haskey(node, "deprecated") ? node["deprecated"] : "0")
-    null_value = haskey(node, "nullValue") ? primitive_value_from_text(node["nullValue"], encoding_type, 1, nothing) : nothing
+    null_value = haskey(node, "nullValue") ?
+        primitive_value_from_text(node["nullValue"], encoding_type, 1, nothing) :
+        IR.primitive_type_null(encoding_type)
 
     values = XmlValidValue[]
     for value_node in findall("validValue", node)
@@ -883,14 +885,26 @@ function add_message_signal!(state::IrGeneratorState, message::XmlMessage, signa
 end
 
 function add_field_signal!(state::IrGeneratorState, field::XmlField, signal::IR.Signal.T, type_since_version::Int)
+    primitive_type = IR.PrimitiveType.NONE
+    const_value = nothing
+    if field.presence == IR.Presence.CONSTANT && field.value_ref !== nothing
+        const_value = primitive_value_from_text(
+            field.value_ref,
+            IR.PrimitiveType.CHAR,
+            ncodeunits(field.value_ref),
+            "US-ASCII"
+        )
+        primitive_type = IR.PrimitiveType.CHAR
+    end
+
     encoding = IR.Encoding(
         map_presence(field.presence),
-        IR.PrimitiveType.NONE,
+        primitive_type,
         state.schema.byte_order,
         nothing,
         nothing,
         nothing,
-        nothing,
+        const_value,
         nothing,
         field.epoch,
         field.time_unit,
@@ -1019,36 +1033,19 @@ end
 
 function add_enum_type!(state::IrGeneratorState, type_def::XmlEnumType, offset::Int, field::Union{Nothing, XmlField})
     version = field === nothing ? type_def.since_version : max(field.since_version, type_def.since_version)
-    if field !== nothing && field.presence == IR.Presence.CONSTANT
-        const_value = field.value_ref === nothing ? type_def.null_value : lookup_value_ref(state.schema, field.value_ref)
-        encoding = IR.Encoding(
-            IR.Presence.CONSTANT,
-            type_def.encoding_type,
-            state.schema.byte_order,
-            nothing,
-            nothing,
-            type_def.null_value,
-            const_value,
-            nothing,
-            nothing,
-            nothing,
-            type_def.semantic_type !== nothing ? type_def.semantic_type : field.semantic_type
-        )
-    else
-        encoding = IR.Encoding(
-            IR.Presence.REQUIRED,
-            type_def.encoding_type,
-            state.schema.byte_order,
-            nothing,
-            nothing,
-            type_def.null_value,
-            nothing,
-            nothing,
-            nothing,
-            nothing,
-            type_def.semantic_type !== nothing ? type_def.semantic_type : (field === nothing ? nothing : field.semantic_type)
-        )
-    end
+    encoding = IR.Encoding(
+        IR.Presence.REQUIRED,
+        type_def.encoding_type,
+        state.schema.byte_order,
+        nothing,
+        nothing,
+        type_def.null_value,
+        nothing,
+        nothing,
+        nothing,
+        nothing,
+        type_def.semantic_type !== nothing ? type_def.semantic_type : (field === nothing ? nothing : field.semantic_type)
+    )
 
     begin_token = IR.Token(
         IR.Signal.BEGIN_ENUM,
@@ -1059,7 +1056,7 @@ function add_enum_type!(state::IrGeneratorState, type_def::XmlEnumType, offset::
         IR.INVALID_ID,
         version,
         type_def.deprecated,
-        field !== nothing && field.presence == IR.Presence.CONSTANT ? 0 : IR.primitive_type_size(type_def.encoding_type),
+        IR.primitive_type_size(type_def.encoding_type),
         offset,
         1,
         encoding
@@ -1068,7 +1065,7 @@ function add_enum_type!(state::IrGeneratorState, type_def::XmlEnumType, offset::
 
     for value in type_def.valid_values
         value_encoding = IR.Encoding(
-            IR.Presence.CONSTANT,
+            IR.Presence.REQUIRED,
             type_def.encoding_type,
             state.schema.byte_order,
             nothing,
@@ -1106,7 +1103,7 @@ function add_enum_type!(state::IrGeneratorState, type_def::XmlEnumType, offset::
         IR.INVALID_ID,
         version,
         type_def.deprecated,
-        field !== nothing && field.presence == IR.Presence.CONSTANT ? 0 : IR.primitive_type_size(type_def.encoding_type),
+        IR.primitive_type_size(type_def.encoding_type),
         offset,
         1,
         encoding
@@ -1148,7 +1145,7 @@ function add_set_type!(state::IrGeneratorState, type_def::XmlSetType, offset::In
 
     for choice in type_def.choices
         choice_encoding = IR.Encoding(
-            IR.Presence.CONSTANT,
+            IR.Presence.REQUIRED,
             type_def.encoding_type,
             state.schema.byte_order,
             nothing,

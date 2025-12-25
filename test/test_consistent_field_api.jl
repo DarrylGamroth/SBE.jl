@@ -1,7 +1,5 @@
 using Test
 using SBE
-using SBE.Schema
-
 # Load pre-generated Baseline schema
 include("generated/Baseline.jl")
 

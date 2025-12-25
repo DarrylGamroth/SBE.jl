@@ -178,19 +178,16 @@ function sbe_description end
 # Include Source Files
 # ============================================================================
 
-# Import schema definitions
-include("Schema.jl")
-import .Schema
-
 # Intermediate Representation (IR)
 include("IR.jl")
 import .IR
 
-# XML parsing
-include("xml_parser.jl")
-
 # IR generation from XML
 include("ir_generator.jl")
+
+# IR decoding from .sbeir
+include("ir_decoder.jl")
+import .IrDecoder: decode_ir
 
 # IR code generation utilities
 include("ir_codegen.jl")
@@ -276,9 +273,7 @@ end
 parse_sbe_schema(xml_content::AbstractString) = parse_xml_schema(xml_content)
 
 # Re-export important types and functions that users need
-export Schema  # Users can access Schema.MessageDefinition, etc.
-export SBECodec, SBEFlyweight, SBEMessage
-export @load_schema, create_codec_from_schema, create_message, parse_xml_schema, parse_sbe_schema
+export @load_schema, parse_xml_schema, parse_sbe_schema
 export generate  # Main code generation API
 
 # Export position pointer type
@@ -301,5 +296,6 @@ export to_string
 
 # Export utility functions for testing (with underscore prefix they're still internal)
 export generate_encoded_field_type
+export decode_ir
 
 end # module SBE
