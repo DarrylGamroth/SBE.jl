@@ -84,6 +84,16 @@ module GeneratedJsonPrinterSchema
 end
 const JsonPrinterSchema = GeneratedJsonPrinterSchema.Baseline
 
+module GeneratedBasicTypes
+    include("generated/BasicTypes.jl")
+end
+const BasicTypes = GeneratedBasicTypes.SBETests
+
+module GeneratedBasicVariableLength
+    include("generated/BasicVariableLength.jl")
+end
+const BasicVariableLength = GeneratedBasicVariableLength.SBETests
+
 module GeneratedValueRefLowerCaseEnum
     include("generated/ValueRefLowerCaseEnum.jl")
 end
@@ -322,6 +332,8 @@ const Issue849 = GeneratedIssue849.Issue849
     include("test_npe_small_header.jl")  # Small header layout test
     include("test_bigendian_schema.jl")  # Big endian schema tests
     include("test_json_printer_schema.jl")  # Json printer schema tests
+    include("test_basic_types_schema.jl")  # Basic types schema tests
+    include("test_basic_variable_length_schema.jl")  # Basic var-data schema tests
     include("test_issue483.jl")  # Required/optional/constant parity tests
     include("test_issue435.jl")  # Enum/set reference parity tests
     include("test_issue496.jl")  # Nested composite refs parity tests

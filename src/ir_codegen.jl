@@ -88,17 +88,17 @@ const JULIA_KEYWORDS = Set([
 ])
 
 function sanitize_identifier(name::String)
-    candidate = name
-    while true
-        if all(==('_'), candidate)
-            candidate *= "field"
-            continue
-        end
-        if !Base.isidentifier(candidate) || (candidate in JULIA_KEYWORDS)
-            candidate *= "_"
-            continue
-        end
-        break
+    candidate = replace(name, r"[^A-Za-z0-9_]" => "_")
+    if isempty(candidate)
+        candidate = "field"
+    elseif all(==('_'), candidate)
+        candidate *= "field"
+    end
+    if !isempty(candidate) && isdigit(first(candidate))
+        candidate = "_" * candidate
+    end
+    while !Base.isidentifier(candidate) || (candidate in JULIA_KEYWORDS)
+        candidate *= "_"
     end
     return candidate
 end

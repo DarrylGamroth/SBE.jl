@@ -50,6 +50,8 @@ schemas = [
     (joinpath("resources", "npe-small-header.xml"), "NpeSmallHeader.jl", "NpeSmallHeader"),
     (joinpath("resources", "example-bigendian-test-schema.xml"), "BigEndianBaseline.jl", "BigEndianBaseline"),
     (joinpath("resources", "json-printer-test-schema.xml"), "JsonPrinterSchema.jl", "JsonPrinterSchema"),
+    (joinpath("resources", "basic-types-schema.xml"), "BasicTypes.jl", "BasicTypes"),
+    (joinpath("resources", "basic-variable-length-schema.xml"), "BasicVariableLength.jl", "BasicVariableLength"),
     (joinpath("resources", "value-ref-with-lower-case-enum.xml"), "ValueRefLowerCaseEnum.jl", "ValueRefLowerCaseEnum"),
     (joinpath("resources", "extension-schema.xml"), "ExtensionSchema.jl", "ExtensionSchema"),
     (joinpath("resources", "constant-enum-fields.xml"), "ConstantEnumFields.jl", "ConstantEnumFields"),
