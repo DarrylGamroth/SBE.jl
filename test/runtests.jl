@@ -74,6 +74,16 @@ module GeneratedNpeSmallHeader
 end
 const NpeSmallHeader = GeneratedNpeSmallHeader.NOTUSED
 
+module GeneratedBigEndianBaseline
+    include("generated/BigEndianBaseline.jl")
+end
+const BigEndianBaseline = GeneratedBigEndianBaseline.BaselineBigendian
+
+module GeneratedJsonPrinterSchema
+    include("generated/JsonPrinterSchema.jl")
+end
+const JsonPrinterSchema = GeneratedJsonPrinterSchema.Baseline
+
 module GeneratedValueRefLowerCaseEnum
     include("generated/ValueRefLowerCaseEnum.jl")
 end
@@ -310,6 +320,8 @@ const Issue849 = GeneratedIssue849.Issue849
     include("test_deprecated_message.jl")  # Deprecated message parity tests
     include("test_explicit_package.jl")  # Explicit package type references
     include("test_npe_small_header.jl")  # Small header layout test
+    include("test_bigendian_schema.jl")  # Big endian schema tests
+    include("test_json_printer_schema.jl")  # Json printer schema tests
     include("test_issue483.jl")  # Required/optional/constant parity tests
     include("test_issue435.jl")  # Enum/set reference parity tests
     include("test_issue496.jl")  # Nested composite refs parity tests

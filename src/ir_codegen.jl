@@ -1949,7 +1949,8 @@ end
 
 function generate_ir_module_expr(ir::IR.Ir)
     module_name = module_name_from_package(ir.package_name)
-    alias_name = Symbol(uppercasefirst(replace(ir.package_name, "." => "_")))
+    alias_raw = replace(ir.package_name, r"[^A-Za-z0-9_]" => "_")
+    alias_name = Symbol(sanitize_identifier(uppercasefirst(alias_raw)))
     type_exprs = Expr[]
     message_exprs = Expr[]
 
