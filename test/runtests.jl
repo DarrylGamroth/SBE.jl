@@ -12,9 +12,9 @@ function ensure_java_fixtures!()
     jar_path = get(ENV, "SBE_JAR_PATH", jar_default)
 
     if !isfile(jar_path) || !isdir(class_dir)
-        script_path = joinpath(@__DIR__, "..", "scripts", "generate_java_fixtures.sh")
+        script_path = joinpath(@__DIR__, "..", "scripts", "generate_java_fixtures.jl")
         isfile(script_path) || error("Missing Java fixture generator: $script_path")
-        run(`bash $script_path`)
+        run(`$(Base.julia_cmd()) --project=$(joinpath(@__DIR__, "..")) $script_path`)
     end
 end
 

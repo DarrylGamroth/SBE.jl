@@ -78,7 +78,7 @@ jobs:
       - uses: julia-actions/cache@v2
       - name: Generate Java fixtures (Linux)
         if: runner.os == 'Linux'
-        run: ./scripts/generate_java_fixtures.sh
+        run: julia --project=. scripts/generate_java_fixtures.jl
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
       - uses: julia-actions/julia-processcoverage@v1

@@ -25,8 +25,8 @@ SBE.jl generates zero-allocation, type-stable Julia code from SBE XML schemas. T
 ```julia
 using SBE
 
-# Load schema and generate types
-Baseline = SBE.load_schema("example-schema.xml")
+# Load schema and generate types at parse time
+Baseline = @load_schema "example-schema.xml"
 ```
 
 ### Encoding a Message
@@ -167,12 +167,8 @@ This approach:
 
 ## Documentation
 
-- **[CHANGELOG.md](CHANGELOG.md)** - Development history and completed features
-- **[TODO.md](TODO.md)** - Planned enhancements and known issues
-- **[Technical Documentation](docs/technical/)** - Deep dives into implementation details:
-  - Code generation comparison with sbe-tool
-  - Performance analysis and zero-allocation verification
-  - Julia 1.12 world-age semantics analysis
+- **[Usage Guide](docs/USAGE.md)** - Comprehensive API guide and examples
+- **[spec.md](spec.md)** - Architecture plan and parity checklist
 
 ## Testing
 
@@ -182,9 +178,12 @@ julia --project -e 'using Pkg; Pkg.test()'
 
 # Run specific test
 julia --project test/test_groups.jl
+
+# Generate Java fixtures (used for parity tests)
+julia --project=. scripts/generate_java_fixtures.jl
 ```
 
-Current status: **533+ tests passing** ✅
+Current status: **947 tests passing** ✅
 
 ## Performance
 
