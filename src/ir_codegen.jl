@@ -1107,17 +1107,6 @@ function generate_group_expr(
         append!(var_data_exprs, generate_var_data_expr(var_data_tokens, abstract_type_name, decoder_name, encoder_name, ir))
     end
 
-    for group_tokens in groups
-        group_defs, parent_accessors, accessor_name = generate_group_expr(group_tokens, message_name, abstract_type_name, ir)
-        append!(group_exprs, group_defs)
-        append!(group_accessors, parent_accessors)
-        push!(skip_calls, quote
-            for group in $accessor_name(m)
-                sbe_skip!(group)
-            end
-        end)
-    end
-
     group_body = Expr(:block,
         :(export $group_struct_name, $decoder_name, $encoder_name),
         :(abstract type $group_struct_name{T} end),
