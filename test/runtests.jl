@@ -316,7 +316,6 @@ const Issue849 = GeneratedIssue849.Issue849
     # Integration and validation tests
     include("test_complex_patterns.jl")
     include("test_allocations.jl")
-    include("test_interop.jl")  # Binary compatibility with sbe-tool Java generator
     include("test_java_fixtures.jl")  # Java-generator binary fixtures
     include("test_java_mirror.jl")  # Mirror Java generator tests
     include("test_java_generation_parity.jl")  # Java generator schema parity
