@@ -315,6 +315,7 @@ const Issue849 = GeneratedIssue849.Issue849
     include("test_optional_fields.jl")  # Optional field handling tests
     include("test_consistent_field_api.jl")  # Consistent API tests (Baseline schema)
     include("test_ir_decoder.jl")  # IR decoding vs sbeir
+    include("test_ir_utils.jl")  # IR/codegen utility coverage
 
     # Integration and validation tests
     include("test_complex_patterns.jl")
