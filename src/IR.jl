@@ -206,9 +206,9 @@ function primitive_type_min(pt::PrimitiveType.T)
     elseif pt == PrimitiveType.UINT64
         return primitive_value_long(0, 8)
     elseif pt == PrimitiveType.FLOAT
-        return primitive_value_double(-Float32(Inf), 4)
+        return primitive_value_double(-floatmax(Float32), 4)
     elseif pt == PrimitiveType.DOUBLE
-        return primitive_value_double(-Float64(Inf), 8)
+        return primitive_value_double(-floatmax(Float64), 8)
     end
     return primitive_value_long(0, 0)
 end
@@ -233,9 +233,9 @@ function primitive_type_max(pt::PrimitiveType.T)
     elseif pt == PrimitiveType.UINT64
         return primitive_value_long(0xffffffffffffffff - 1, 8)
     elseif pt == PrimitiveType.FLOAT
-        return primitive_value_double(Float32(Inf), 4)
+        return primitive_value_double(floatmax(Float32), 4)
     elseif pt == PrimitiveType.DOUBLE
-        return primitive_value_double(Float64(Inf), 8)
+        return primitive_value_double(floatmax(Float64), 8)
     end
     return primitive_value_long(0, 0)
 end
@@ -283,7 +283,7 @@ function update_component_token_counts!(tokens::Vector{Token})
     stacks = Dict{String, Vector{Int}}()
     for i in eachindex(tokens)
         token = tokens[i]
-        signal_name = String(token.signal)
+        signal_name = string(token.signal)
         if startswith(signal_name, "BEGIN_")
             component_type = signal_name[7:end]
             stack = get!(stacks, component_type, Int[])
