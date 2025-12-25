@@ -192,6 +192,9 @@ include("xml_parser.jl")
 # IR generation from XML
 include("ir_generator.jl")
 
+# IR code generation utilities
+include("ir_codegen.jl")
+
 # Code generation utilities (includes abstract types and runtime support)
 include("codegen_utils.jl")
 
