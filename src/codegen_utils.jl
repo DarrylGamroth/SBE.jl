@@ -152,7 +152,7 @@ Encode a single value of type T into the buffer at the given offset (0-based).
 Uses little-endian byte order (SBE default).
 """
 @inline function encode_value_le(::Type{T}, buffer, offset, value) where {T}
-    @inbounds reinterpret(T, view(buffer, offset+1:offset+sizeof(T)))[] = htol(value)
+    @inbounds reinterpret(T, view(buffer, offset+1:offset+sizeof(T)))[] = htol(T(value))
 end
 
 """
@@ -194,7 +194,7 @@ Encode a single value of type T into the buffer at the given offset (0-based).
 Uses big-endian byte order.
 """
 @inline function encode_value_be(::Type{T}, buffer, offset, value) where {T}
-    @inbounds reinterpret(T, view(buffer, offset+1:offset+sizeof(T)))[] = hton(value)
+    @inbounds reinterpret(T, view(buffer, offset+1:offset+sizeof(T)))[] = hton(T(value))
 end
 
 """

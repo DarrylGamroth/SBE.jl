@@ -134,6 +134,51 @@ module GeneratedIssue567
 end
 const Issue567 = GeneratedIssue567.Tests
 
+module GeneratedIssue895
+    include("generated/Issue895.jl")
+end
+const Issue895 = GeneratedIssue895.Issue895
+
+module GeneratedIssue910
+    include("generated/Issue910.jl")
+end
+const Issue910 = GeneratedIssue910.Issue910
+
+module GeneratedIssue967
+    include("generated/Issue967.jl")
+end
+const Issue967 = GeneratedIssue967.Issue967
+
+module GeneratedIssue972
+    include("generated/Issue972.jl")
+end
+const Issue972 = GeneratedIssue972.Issue972
+
+module GeneratedIssue984
+    include("generated/Issue984.jl")
+end
+const Issue984 = GeneratedIssue984.Issue984
+
+module GeneratedIssue987
+    include("generated/Issue987.jl")
+end
+const Issue987 = GeneratedIssue987.Issue987
+
+module GeneratedIssue1028
+    include("generated/Issue1028.jl")
+end
+const Issue1028 = GeneratedIssue1028.Issue1028
+
+module GeneratedIssue1057
+    include("generated/Issue1057.jl")
+end
+const Issue1057 = GeneratedIssue1057.Issue1057
+
+module GeneratedIssue1066
+    include("generated/Issue1066.jl")
+end
+const Issue1066 = GeneratedIssue1066.Issue1066
+
 module GeneratedIssue483
     include("generated/Issue483.jl")
 end
@@ -225,6 +270,15 @@ const Issue849 = GeneratedIssue849.Issue849
     include("test_issue1007.jl")  # Keyword enum value parity tests
     include("test_issue560.jl")  # Constant valueRef parity tests
     include("test_issue567.jl")  # Group count width parity tests
+    include("test_issue895.jl")  # Optional float/double parity tests
+    include("test_issue910.jl")  # Keyword yield parity tests
+    include("test_issue967.jl")  # Optional composite parity tests
+    include("test_issue972.jl")  # Optional composite sinceVersion parity tests
+    include("test_issue984.jl")  # Group field sinceVersion parity tests
+    include("test_issue987.jl")  # Composite offsets parity tests
+    include("test_issue1028.jl")  # Set sinceVersion in composite parity tests
+    include("test_issue1057.jl")  # Set + ref composite parity tests
+    include("test_issue1066.jl")  # Optional field sinceVersion parity tests
     include("test_issue483.jl")  # Required/optional/constant parity tests
     include("test_issue435.jl")  # Enum/set reference parity tests
     include("test_issue496.jl")  # Nested composite refs parity tests
