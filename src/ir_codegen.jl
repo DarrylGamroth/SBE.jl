@@ -1191,7 +1191,8 @@ function generate_group_expr(
                     return nothing
                 end
             end
-            Base.eltype(::Type{<:$group_struct_name}) = $group_struct_name
+            Base.eltype(::Type{$decoder_name}) = $decoder_name
+            Base.eltype(::Type{$encoder_name}) = $encoder_name
             Base.isdone(g::$group_struct_name, state=nothing) = g.index >= g.count
             Base.length(g::$group_struct_name) = g.count
         end,
