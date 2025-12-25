@@ -124,6 +124,21 @@ module GeneratedIssue1007
 end
 const Issue1007 = GeneratedIssue1007.Issue1007
 
+module GeneratedIssue483
+    include("generated/Issue483.jl")
+end
+const Issue483 = GeneratedIssue483.Issue483
+
+module GeneratedIssue435
+    include("generated/Issue435.jl")
+end
+const Issue435 = GeneratedIssue435.Issue435
+
+module GeneratedIssue496
+    include("generated/Issue496.jl")
+end
+const Issue496 = GeneratedIssue496.Issue488
+
 @testset "SBE.jl Tests" begin
     # Core functionality tests
     include("test_metaprogramming.jl")
@@ -163,4 +178,7 @@ const Issue1007 = GeneratedIssue1007.Issue1007
     include("test_group_with_constant_fields.jl")  # Group constants parity tests
     include("test_nested_composite_name.jl")  # Nested composite name parity tests
     include("test_issue1007.jl")  # Keyword enum value parity tests
+    include("test_issue483.jl")  # Required/optional/constant parity tests
+    include("test_issue435.jl")  # Enum/set reference parity tests
+    include("test_issue496.jl")  # Nested composite refs parity tests
 end

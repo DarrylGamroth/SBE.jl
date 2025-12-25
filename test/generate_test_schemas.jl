@@ -46,6 +46,9 @@ schemas = [
     (joinpath("resources", "group-with-constant-fields.xml"), "GroupWithConstantFields.jl", "GroupWithConstantFields"),
     (joinpath("resources", "nested-composite-name.xml"), "NestedCompositeName.jl", "NestedCompositeName"),
     (joinpath("resources", "issue1007.xml"), "Issue1007.jl", "Issue1007"),
+    (joinpath("resources", "issue483.xml"), "Issue483.jl", "Issue483"),
+    (joinpath("resources", "issue435.xml"), "Issue435.jl", "Issue435"),
+    (joinpath("resources", "issue496.xml"), "Issue496.jl", "Issue496"),
 ]
 
 for (schema_file, output_file, module_name) in schemas
