@@ -124,6 +124,16 @@ module GeneratedIssue1007
 end
 const Issue1007 = GeneratedIssue1007.Issue1007
 
+module GeneratedIssue560
+    include("generated/Issue560.jl")
+end
+const Issue560 = GeneratedIssue560.Issue560
+
+module GeneratedIssue567
+    include("generated/Issue567.jl")
+end
+const Issue567 = GeneratedIssue567.Tests
+
 module GeneratedIssue483
     include("generated/Issue483.jl")
 end
@@ -153,6 +163,26 @@ module GeneratedIssue661
     include("generated/Issue661.jl")
 end
 const Issue661 = GeneratedIssue661.Issue661
+
+module GeneratedIssue827
+    include("generated/Issue827.jl")
+end
+const Issue827 = GeneratedIssue827.Issue827
+
+module GeneratedIssue847
+    include("generated/Issue847.jl")
+end
+const Issue847 = GeneratedIssue847.Issue847
+
+module GeneratedIssue848
+    include("generated/Issue848.jl")
+end
+const Issue848 = GeneratedIssue848.Issue848
+
+module GeneratedIssue849
+    include("generated/Issue849.jl")
+end
+const Issue849 = GeneratedIssue849.Issue849
 
 @testset "SBE.jl Tests" begin
     # Core functionality tests
@@ -193,10 +223,16 @@ const Issue661 = GeneratedIssue661.Issue661
     include("test_group_with_constant_fields.jl")  # Group constants parity tests
     include("test_nested_composite_name.jl")  # Nested composite name parity tests
     include("test_issue1007.jl")  # Keyword enum value parity tests
+    include("test_issue560.jl")  # Constant valueRef parity tests
+    include("test_issue567.jl")  # Group count width parity tests
     include("test_issue483.jl")  # Required/optional/constant parity tests
     include("test_issue435.jl")  # Enum/set reference parity tests
     include("test_issue496.jl")  # Nested composite refs parity tests
     include("test_issue488.jl")  # Var-data length parity tests
     include("test_issue472.jl")  # Optional uint64 parity tests
     include("test_issue661.jl")  # SinceVersion set parity tests
+    include("test_issue827.jl")  # Big-endian set parity tests
+    include("test_issue847.jl")  # Composite refs in message header
+    include("test_issue848.jl")  # Composite refs in message and message header
+    include("test_issue849.jl")  # Deep composite refs in message header and body
 end

@@ -31,6 +31,8 @@ schemas = [
     (joinpath("resources", "field-order-check-schema.xml"), "OrderCheck.jl", "OrderCheck"),
     (joinpath("resources", "composite-elements-schema.xml"), "CompositeElements.jl", "CompositeElements"),
     (joinpath("resources", "issue505.xml"), "Issue505.jl", "Issue505"),
+    (joinpath("resources", "issue560.xml"), "Issue560.jl", "Issue560"),
+    (joinpath("resources", "issue567-valid.xml"), "Issue567.jl", "Issue567"),
     (joinpath("resources", "issue889.xml"), "Issue889.jl", "Issue889"),
     (joinpath("resources", "value-ref-with-lower-case-enum.xml"), "ValueRefLowerCaseEnum.jl", "ValueRefLowerCaseEnum"),
     (joinpath("resources", "extension-schema.xml"), "ExtensionSchema.jl", "ExtensionSchema"),
@@ -52,6 +54,10 @@ schemas = [
     (joinpath("resources", "issue488.xml"), "Issue488.jl", "Issue488"),
     (joinpath("resources", "issue472.xml"), "Issue472.jl", "Issue472"),
     (joinpath("resources", "issue661.xml"), "Issue661.jl", "Issue661"),
+    (joinpath("resources", "issue827.xml"), "Issue827.jl", "Issue827"),
+    (joinpath("resources", "issue847.xml"), "Issue847.jl", "Issue847"),
+    (joinpath("resources", "issue848.xml"), "Issue848.jl", "Issue848"),
+    (joinpath("resources", "issue849.xml"), "Issue849.jl", "Issue849"),
 ]
 
 for (schema_file, output_file, module_name) in schemas

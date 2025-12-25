@@ -1311,6 +1311,8 @@ function generate_group_expr(
     max_count = primitive_value_int(num_in_group_token.encoding.max_value, num_in_group_token.encoding.primitive_type, IR.primitive_type_max)
     min_count = primitive_value_int(num_in_group_token.encoding.min_value, num_in_group_token.encoding.primitive_type, IR.primitive_type_min)
     min_check = min_count > 0 ? :(count < $min_count) : nothing
+    count_type_symbol = IR.primitive_type_julia(num_in_group_token.encoding.primitive_type)
+    count_zero_expr = :($count_type_symbol(0))
 
     body_start = 2 + dimension_tokens[1].component_token_count
     fields, idx = split_components(group_tokens, IR.Signal.BEGIN_FIELD, body_start)
@@ -1399,12 +1401,13 @@ function generate_group_expr(
             const position_ptr::P
             const block_length::UInt16
             const acting_version::UInt16
-            const count::UInt16
-            index::UInt16
+            const count::$count_type_symbol
+            index::$count_type_symbol
             function $decoder_name(buffer::T, offset::Integer, position_ptr::P,
                 block_length::Integer, acting_version::Integer,
                 count::Integer, index::Integer) where {T,P}
-                new{T,P}(buffer, offset, position_ptr, block_length, acting_version, count, index)
+                new{T,P}(buffer, offset, position_ptr, block_length, acting_version,
+                    $count_type_symbol(count), $count_type_symbol(index))
             end
         end
 
@@ -1413,11 +1416,12 @@ function generate_group_expr(
             offset::Int64
             const position_ptr::P
             const initial_position::Int64
-            count::UInt16
-            index::UInt16
+            count::$count_type_symbol
+            index::$count_type_symbol
             function $encoder_name(buffer::T, offset::Integer, position_ptr::P,
                 initial_position::Int64, count::Integer, index::Integer) where {T,P}
-                new{T,P}(buffer, offset, position_ptr, initial_position, count, index)
+                new{T,P}(buffer, offset, position_ptr, initial_position,
+                    $count_type_symbol(count), $count_type_symbol(index))
             end
         end
 
@@ -1425,7 +1429,7 @@ function generate_group_expr(
             dimensions = $dimension_decoder(buffer, position_ptr[])
             position_ptr[] += $dimension_header_length
             return $decoder_name(buffer, 0, position_ptr, $block_length_get(dimensions),
-                acting_version, $num_in_group_get(dimensions), 0)
+                acting_version, $num_in_group_get(dimensions), $count_zero_expr)
         end
 
         @inline function $encoder_name(buffer, count, position_ptr)
@@ -1437,7 +1441,7 @@ function generate_group_expr(
             $num_in_group_set(dimensions, count)
             initial_position = position_ptr[]
             position_ptr[] += $dimension_header_length
-            return $encoder_name(buffer, 0, position_ptr, initial_position, count, 0)
+            return $encoder_name(buffer, 0, position_ptr, initial_position, count, $count_zero_expr)
         end
 
         sbe_header_size(::$abstract_type_name) = $dimension_header_length
@@ -1455,14 +1459,14 @@ function generate_group_expr(
             end
             g.offset = sbe_position(g)
             sbe_position!(g, g.offset + sbe_acting_block_length(g))
-            g.index += 1
+            g.index += one($count_type_symbol)
             return g
         end
         function Base.iterate(g::$abstract_type_name, state=nothing)
             if g.index < g.count
                 g.offset = sbe_position(g)
                 sbe_position!(g, g.offset + sbe_acting_block_length(g))
-                g.index += 1
+                g.index += one($count_type_symbol)
                 return g, state
             else
                 return nothing
@@ -1471,7 +1475,7 @@ function generate_group_expr(
         Base.eltype(::Type{<:$decoder_name}) = $decoder_name
         Base.eltype(::Type{<:$encoder_name}) = $encoder_name
         Base.isdone(g::$abstract_type_name, state=nothing) = g.index >= g.count
-        Base.length(g::$abstract_type_name) = g.count
+        Base.length(g::$abstract_type_name) = Int(g.count)
 
         function reset_count_to_index!(g::$encoder_name)
             g.count = g.index
@@ -1506,7 +1510,7 @@ function generate_group_expr(
             @inline function $accessor_name(m::$parent_abstract_type)
                 if sbe_acting_version(m) < $(version_expr(ir, since_version))
                     return $group_module_name.Decoder(m.buffer, 0, sbe_position_ptr(m), $(version_expr(ir, 0)),
-                        sbe_acting_version(m), $(version_expr(ir, 0)), $(version_expr(ir, 0)))
+                        sbe_acting_version(m), $count_zero_expr, $count_zero_expr)
                 end
                 return $group_module_name.Decoder(m.buffer, sbe_position_ptr(m), sbe_acting_version(m))
             end
