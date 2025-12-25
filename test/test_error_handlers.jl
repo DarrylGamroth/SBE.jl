@@ -6,4 +6,5 @@ using SBE
 
     @test_throws ErrorException SBE.generate(joinpath(base_dir, "error-handler-group-dimensions-schema.xml"))
     @test_throws ErrorException SBE.generate(joinpath(base_dir, "error-handler-message-schema.xml"))
+    @test_throws ErrorException SBE.generate(joinpath(base_dir, "cyclic-refs-schema.xml"))
 end
