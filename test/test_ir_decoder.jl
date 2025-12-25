@@ -55,7 +55,9 @@ end
 @testset "SBE IR Dogfooding" begin
     java = Sys.which("java")
     if java === nothing || !isfile(SBE_JAR_PATH)
-        @test_skip "SBE IR fixtures not available"
+        reason = "Skipping SBE IR dogfooding: missing java=$(java === nothing ? "not found" : java), " *
+                 "SBE_JAR_PATH=$(isfile(SBE_JAR_PATH) ? "found" : "missing")"
+        @test_skip reason
         return
     end
 

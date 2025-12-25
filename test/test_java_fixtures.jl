@@ -384,7 +384,10 @@ end
     classpath_sep = Sys.iswindows() ? ";" : ":"
 
     if java === nothing || !isfile(jar_path) || !isdir(class_dir)
-        @test_skip "Java fixtures not available"
+        reason = "Skipping Java round-trip: missing java=$(java === nothing ? "not found" : java), " *
+                 "SBE_JAR_PATH=$(isfile(jar_path) ? "found" : "missing"), " *
+                 "classes=$(isdir(class_dir) ? "found" : "missing")"
+        @test_skip reason
         return
     end
 
