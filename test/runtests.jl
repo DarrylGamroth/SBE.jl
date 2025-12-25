@@ -279,6 +279,7 @@ const Issue849 = GeneratedIssue849.Issue849
     include("test_issue1028.jl")  # Set sinceVersion in composite parity tests
     include("test_issue1057.jl")  # Set + ref composite parity tests
     include("test_issue1066.jl")  # Optional field sinceVersion parity tests
+    include("test_issue889.jl")  # Optional enum null value parity tests
     include("test_issue483.jl")  # Required/optional/constant parity tests
     include("test_issue435.jl")  # Enum/set reference parity tests
     include("test_issue496.jl")  # Nested composite refs parity tests
