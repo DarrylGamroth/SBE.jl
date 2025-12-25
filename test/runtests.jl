@@ -1,6 +1,9 @@
 using Test
 
-# Load pre-generated schemas for file-based testing
+# Generate schemas for file-based testing
+include("generate_test_schemas.jl")
+
+# Load generated schemas for file-based testing
 include("generated/Baseline.jl")
 include("generated/Extension.jl")
 include("generated/Optional.jl")
