@@ -162,7 +162,7 @@ function parse_primitive_type(value::String)
 end
 
 function primitive_value_from_text(
-    value::String,
+    value::AbstractString,
     primitive_type::IR.PrimitiveType.T,
     length::Int,
     character_encoding::Union{Nothing, String}
@@ -457,12 +457,12 @@ function parse_type_node(
 end
 
 function get_types_package_attribute(node)
-    parent = node.parent
+    parent = node.parentnode
     while parent !== nothing
         if nodename(parent) == "types"
             return haskey(parent, "package") ? parent["package"] : nothing
         end
-        parent = parent.parent
+        parent = parent.parentnode
     end
     return nothing
 end
@@ -569,7 +569,29 @@ end
 function parse_field(node, types_by_name::Dict{String, XmlType})
     type_name = node["type"]
     type_def = get(types_by_name, type_name, nothing)
-    type_def === nothing && error("could not find type: $(type_name)")
+    if type_def === nothing
+        primitive_type = parse_primitive_type(type_name)
+        primitive_type == IR.PrimitiveType.NONE && error("could not find type: $(type_name)")
+        type_def = XmlEncodedType(
+            type_name,
+            nothing,
+            nothing,
+            IR.Presence.REQUIRED,
+            "",
+            nothing,
+            primitive_type,
+            1,
+            false,
+            nothing,
+            nothing,
+            nothing,
+            nothing,
+            nothing,
+            0,
+            0,
+            0
+        )
+    end
     return XmlField(
         node["name"],
         parse(Int, node["id"]),
@@ -762,15 +784,15 @@ function capture_types!(ir::IR.Ir, tokens::Vector{IR.Token}, begin_index::Int=1,
         token = tokens[i]
         type_begin = i
         if token.signal == IR.Signal.BEGIN_COMPOSITE
-            end_index = capture_type!(ir, tokens, i, IR.Signal.END_COMPOSITE, token.name, token.referenced_name)
-            capture_types!(ir, tokens, type_begin + 1, end_index - 1)
-            i = end_index + 1
+            type_end = capture_type!(ir, tokens, i, IR.Signal.END_COMPOSITE, token.name, token.referenced_name)
+            capture_types!(ir, tokens, type_begin + 1, type_end - 1)
+            i = type_end + 1
         elseif token.signal == IR.Signal.BEGIN_ENUM
-            end_index = capture_type!(ir, tokens, i, IR.Signal.END_ENUM, token.name, token.referenced_name)
-            i = end_index + 1
+            type_end = capture_type!(ir, tokens, i, IR.Signal.END_ENUM, token.name, token.referenced_name)
+            i = type_end + 1
         elseif token.signal == IR.Signal.BEGIN_SET
-            end_index = capture_type!(ir, tokens, i, IR.Signal.END_SET, token.name, token.referenced_name)
-            i = end_index + 1
+            type_end = capture_type!(ir, tokens, i, IR.Signal.END_SET, token.name, token.referenced_name)
+            i = type_end + 1
         else
             i += 1
         end

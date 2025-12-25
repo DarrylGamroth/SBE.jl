@@ -64,6 +64,69 @@ function relative_using_expr(depth::Int, name::Symbol)
     return Meta.parse("using " * dots * string(name))
 end
 
+function julia_type_from_symbol(sym::Symbol)
+    if sym === :UInt8
+        return UInt8
+    elseif sym === :UInt16
+        return UInt16
+    elseif sym === :UInt32
+        return UInt32
+    elseif sym === :UInt64
+        return UInt64
+    elseif sym === :Int8
+        return Int8
+    elseif sym === :Int16
+        return Int16
+    elseif sym === :Int32
+        return Int32
+    elseif sym === :Int64
+        return Int64
+    elseif sym === :Float32
+        return Float32
+    elseif sym === :Float64
+        return Float64
+    end
+    error("Unsupported Julia type symbol: $(sym)")
+end
+
+function strip_interpolations!(expr)
+    if expr isa Expr
+        if expr.head == :$
+            return strip_interpolations!(expr.args[1])
+        end
+        for i in eachindex(expr.args)
+            arg = expr.args[i]
+            if arg isa Expr
+                expr.args[i] = strip_interpolations!(arg)
+            elseif arg isa AbstractVector
+                for j in eachindex(arg)
+                    arg_j = arg[j]
+                    if arg_j isa Expr
+                        arg[j] = strip_interpolations!(arg_j)
+                    end
+                end
+            end
+        end
+    end
+    return expr
+end
+
+function normalize_dotted_exprs!(expr)
+    if expr isa Expr
+        if expr.head == :. && length(expr.args) == 2 && expr.args[2] isa Symbol
+            expr.args[2] = QuoteNode(expr.args[2])
+        end
+        for i in eachindex(expr.args)
+            normalize_dotted_exprs!(expr.args[i])
+        end
+    elseif expr isa AbstractVector
+        for item in expr
+            normalize_dotted_exprs!(item)
+        end
+    end
+    return expr
+end
+
 function primitive_value_literal(value::IR.PrimitiveValue, primitive_type::IR.PrimitiveType.T)
     if value.representation == IR.PrimitiveValueRepresentation.BYTE_ARRAY
         return repr(value.value)
@@ -74,6 +137,13 @@ function primitive_value_literal(value::IR.PrimitiveValue, primitive_type::IR.Pr
             return "Float64(" * value.value * ")"
         end
         return value.value
+    elseif primitive_type == IR.PrimitiveType.CHAR &&
+           value.representation == IR.PrimitiveValueRepresentation.LONG
+        if all(isdigit, value.value) || startswith(value.value, "0x")
+            return "UInt8(" * value.value * ")"
+        end
+        code = Int(codeunit(value.value, 1))
+        return "UInt8(0x" * lowercase(string(code, base=16, pad=2)) * ")"
     end
 
     if primitive_type == IR.PrimitiveType.CHAR
@@ -737,8 +807,7 @@ function generate_enum_field_expr(
     push!(exprs, field_meta_attribute_expr(field_name, abstract_type_name, field_token))
 
     if field_token.encoding.presence == IR.Presence.CONSTANT
-        const_val = field_token.encoding.const_value
-        literal = primitive_value_literal(const_val, encoding_type)
+        literal = encoding_literal(field_token.encoding.const_value, encoding_type, IR.primitive_type_null)
         push!(exprs, quote
             @inline function $field_name(::$decoder_name)
                 return $enum_module.SbeEnum($(Meta.parse(literal)))
@@ -1110,7 +1179,8 @@ function generate_group_expr(
     var_data_exprs = Expr[]
     for var_data_tokens in var_data
         name_symbol = Symbol(format_property_name(var_data_tokens[1].name))
-        push!(skip_calls, :(skip_$(name_symbol)!(m)))
+        skip_name = Symbol(string("skip_", name_symbol, "!"))
+        push!(skip_calls, :($skip_name(m)))
         append!(var_data_exprs, generate_var_data_expr(var_data_tokens, abstract_type_name, decoder_name, encoder_name, ir))
     end
 
@@ -1125,12 +1195,17 @@ function generate_group_expr(
 
     group_quoted = quote
         module $group_module_name
-        using ..: rstrip_nul
         using StringViews: StringView
         $([relative_using_expr(module_depth, enum_name) for enum_name in enum_imports]...)
         $([relative_using_expr(module_depth, composite_name) for composite_name in composite_imports]...)
 
         $endian_imports
+
+        @inline function rstrip_nul(a::Union{AbstractString,AbstractArray})
+            pos = findfirst(iszero, a)
+            len = pos !== nothing ? pos - 1 : Base.length(a)
+            return view(a, 1:len)
+        end
 
         abstract type $abstract_type_name{T} end
 
@@ -1337,7 +1412,8 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
 
     for var_data_tokens in var_data
         name_symbol = Symbol(format_property_name(var_data_tokens[1].name))
-        push!(skip_calls, :(skip_$(name_symbol)!(m)))
+        skip_name = Symbol(string("skip_", name_symbol, "!"))
+        push!(skip_calls, :($skip_name(m)))
         append!(var_data_exprs, generate_var_data_expr(var_data_tokens, abstract_type_name, decoder_name, encoder_name, ir))
     end
 
@@ -1347,12 +1423,17 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
         abstract type $abstract_type_name{T} end
 
         using ..$header_module
-        using ..: rstrip_nul
         using StringViews: StringView
         $([:($using_stmt) for using_stmt in [:(using ..$enum_name) for enum_name in enum_imports]]...)
         $([:($using_stmt) for using_stmt in [:(using ..$composite_name) for composite_name in composite_imports]]...)
 
         $endian_imports
+
+        @inline function rstrip_nul(a::Union{AbstractString,AbstractArray})
+            pos = findfirst(iszero, a)
+            len = pos !== nothing ? pos - 1 : Base.length(a)
+            return view(a, 1:len)
+        end
 
         struct $decoder_name{T<:AbstractArray{UInt8}} <: $abstract_type_name{T}
             buffer::T
@@ -1380,7 +1461,7 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
 
         @inline function $decoder_name(buffer::AbstractArray, offset::Integer=0;
             position_ptr::Base.RefValue{Int64}=Ref(0),
-            header::$header_module=$header_module(buffer, offset))
+            header=$header_module.Decoder(buffer, offset))
             if $header_module.templateId(header) != $(template_id_expr(ir, msg_token.id)) ||
                $header_module.schemaId(header) != $(schema_id_expr(ir, ir.id))
                 throw(DomainError("Template id or schema id mismatch"))
@@ -1391,7 +1472,7 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
 
         @inline function $encoder_name(buffer::AbstractArray, offset::Integer=0;
             position_ptr::Base.RefValue{Int64}=Ref(0),
-            header::$header_module=$header_module(buffer, offset))
+            header=$header_module.Encoder(buffer, offset))
             $header_module.blockLength!(header, $(block_length_expr(ir, msg_token.encoded_length)))
             $header_module.templateId!(header, $(template_id_expr(ir, msg_token.id)))
             $header_module.schemaId!(header, $(schema_id_expr(ir, ir.id)))
@@ -1462,6 +1543,7 @@ function generate_enum_expr(enum_def::IrEnumDef)
     enum_name = Symbol(format_struct_name(enum_def.name))
     encoding_julia_type = IR.primitive_type_julia(enum_def.encoding_type)
     encoding_type_symbol = Symbol(encoding_julia_type)
+    encoding_type = julia_type_from_symbol(encoding_type_symbol)
     enum_values = Expr[]
 
     for value in enum_def.values
@@ -1472,18 +1554,19 @@ function generate_enum_expr(enum_def::IrEnumDef)
     null_value = if enum_def.encoding_type == IR.PrimitiveType.CHAR
         UInt8(0x0)
     else
-        encoding_julia_type <: Unsigned ? typemax(encoding_julia_type) : typemin(encoding_julia_type)
+        encoding_type <: Unsigned ? typemax(encoding_type) : typemin(encoding_type)
     end
 
     push!(enum_values, :(NULL_VALUE = $encoding_type_symbol($null_value)))
 
-    enum_quoted = quote
-        @enumx T = SbeEnum $enum_name::$encoding_julia_type begin
-            $(enum_values...)
-        end
-    end
-
-    return extract_expr_from_quote(enum_quoted, :macrocall)
+    return Expr(
+        :macrocall,
+        Symbol("@enumx"),
+        LineNumberNode(0, Symbol("ir_codegen")),
+        Expr(:(=), :T, :SbeEnum),
+        Expr(:(::), enum_name, encoding_type_symbol),
+        Expr(:block, enum_values...)
+    )
 end
 
 function header_field_type(ir::IR.Ir, field_name::String)
@@ -1537,7 +1620,8 @@ function generate_set_expr(set_def::IrSetDef, ir::IR.Ir)
 
     encoding_julia_type = IR.primitive_type_julia(set_def.encoding_type)
     encoding_type_symbol = Symbol(encoding_julia_type)
-    encoding_size = sizeof(encoding_julia_type)
+    encoding_type = julia_type_from_symbol(encoding_type_symbol)
+    encoding_size = sizeof(encoding_type)
 
     choice_exprs = Expr[]
     for choice in set_def.choices
@@ -1651,24 +1735,58 @@ end
 
 function generate_ir_module_expr(ir::IR.Ir)
     module_name = module_name_from_package(ir.package_name)
-    enum_exprs = Expr[]
-    set_exprs = Expr[]
-    composite_exprs = Expr[]
+    type_exprs = Expr[]
     message_exprs = Expr[]
 
-    for tokens in values(ir.types_by_name)
-        if isempty(tokens)
-            continue
+    type_deps = Dict{String, Set{String}}()
+    for (name, tokens) in ir.types_by_name
+        deps = Set{String}()
+        for (idx, token) in enumerate(tokens)
+            if idx == 1
+                continue
+            end
+            if token.signal == IR.Signal.BEGIN_COMPOSITE ||
+               token.signal == IR.Signal.BEGIN_ENUM ||
+               token.signal == IR.Signal.BEGIN_SET
+                dep_name = token.referenced_name === nothing ? token.name : token.referenced_name
+                dep_name == name && continue
+                push!(deps, dep_name)
+            end
         end
+        type_deps[name] = deps
+    end
+
+    ordered_types = String[]
+    visited = Dict{String, Symbol}()
+    function visit_type(name::String)
+        state = get(visited, name, :none)
+        state == :visiting && return
+        state == :done && return
+        visited[name] = :visiting
+        for dep in get(type_deps, name, Set{String}())
+            haskey(type_deps, dep) || continue
+            visit_type(dep)
+        end
+        visited[name] = :done
+        push!(ordered_types, name)
+    end
+
+    for name in sort!(collect(keys(type_deps)))
+        visit_type(name)
+    end
+
+    for name in ordered_types
+        tokens = ir.types_by_name[name]
+        isempty(tokens) && continue
         if tokens[1].signal == IR.Signal.BEGIN_ENUM
             enum_def = enum_def_from_tokens(tokens)
-            push!(enum_exprs, generate_enum_expr(enum_def))
+            push!(type_exprs, generate_enum_expr(enum_def))
         elseif tokens[1].signal == IR.Signal.BEGIN_SET
             set_def = set_def_from_tokens(tokens)
-            push!(set_exprs, generate_set_expr(set_def, ir))
+            push!(type_exprs, generate_set_expr(set_def, ir))
         elseif tokens[1].signal == IR.Signal.BEGIN_COMPOSITE
             composite_def = composite_def_from_tokens(tokens)
-            push!(composite_exprs, generate_composite_expr(composite_def, ir))
+            push!(type_exprs, generate_composite_expr(composite_def, ir))
         end
     end
 
@@ -1687,12 +1805,13 @@ function generate_ir_module_expr(ir::IR.Ir)
                 return view(a, 1:len)
             end
 
-            $(enum_exprs...)
-            $(set_exprs...)
-            $(composite_exprs...)
+            $(type_exprs...)
             $(message_exprs...)
         end
     end
 
-    return extract_expr_from_quote(module_quoted, :module)
+    module_expr = extract_expr_from_quote(module_quoted, :module)
+    strip_interpolations!(module_expr)
+    normalize_dotted_exprs!(module_expr)
+    return module_expr
 end
