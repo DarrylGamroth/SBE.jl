@@ -46,6 +46,10 @@ function main()
     mkpath(dirname(fixture_out))
     mkpath(dirname(sbe_jar))
 
+    if haskey(ENV, "SBE_JAR_PATH") && !isfile(sbe_jar)
+        error("SBE_JAR_PATH is set but does not exist: $(sbe_jar)")
+    end
+
     if !isfile(sbe_jar)
         println("Downloading sbe-all $(sbe_version)...")
         Downloads.download(sbe_url, sbe_jar)

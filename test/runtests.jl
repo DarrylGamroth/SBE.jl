@@ -10,6 +10,9 @@ function ensure_java_fixtures!()
     sbe_version = get(ENV, "SBE_VERSION", "1.36.2")
     jar_default = joinpath(homedir(), ".cache", "sbe", "sbe-all-$(sbe_version).jar")
     jar_path = get(ENV, "SBE_JAR_PATH", jar_default)
+    if haskey(ENV, "SBE_JAR_PATH") && !isfile(jar_path)
+        error("SBE_JAR_PATH is set but does not exist: $(jar_path)")
+    end
 
     if !isfile(jar_path) || !isdir(class_dir)
         script_path = joinpath(@__DIR__, "..", "scripts", "generate_java_fixtures.jl")
