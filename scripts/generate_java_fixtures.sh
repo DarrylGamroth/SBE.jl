@@ -35,7 +35,8 @@ JAVA_SOURCES=$(find "${OUT_DIR}" -name '*.java')
 javac -cp "${SBE_JAR}" -d "${CLASS_DIR}" ${JAVA_SOURCES} \
   "${ROOT_DIR}/scripts/GenerateCarFixture.java" \
   "${ROOT_DIR}/scripts/GenerateExtensionFixture.java" \
-  "${ROOT_DIR}/scripts/GenerateCodeGenFixture.java"
+  "${ROOT_DIR}/scripts/GenerateCodeGenFixture.java" \
+  "${ROOT_DIR}/scripts/VerifyCarFixture.java"
 
 java "${JAVA_OPTS[@]}" -cp "${SBE_JAR}:${CLASS_DIR}" GenerateCarFixture "${FIXTURE_OUT}"
 java "${JAVA_OPTS[@]}" -cp "${SBE_JAR}:${CLASS_DIR}" GenerateExtensionFixture "${EXT_FIXTURE_OUT}"
