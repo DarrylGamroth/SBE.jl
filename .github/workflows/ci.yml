@@ -57,11 +57,19 @@ jobs:
             allow_failure: true
     steps:
       - uses: actions/checkout@v4
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'zulu'
+          java-version: '17'
       - uses: julia-actions/setup-julia@v2
         with:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
       - uses: julia-actions/cache@v2
+      - name: Generate Java fixtures (Linux)
+        if: runner.os == 'Linux'
+        run: ./scripts/generate_java_fixtures.sh
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
       - uses: julia-actions/julia-processcoverage@v1

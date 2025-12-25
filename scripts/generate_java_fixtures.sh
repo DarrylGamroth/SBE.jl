@@ -2,7 +2,11 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SBE_JAR="${ROOT_DIR}/../simple-binary-encoding/sbe-all/build/libs/sbe-all-1.37.0-SNAPSHOT.jar"
+SBE_VERSION="${SBE_VERSION:-1.37.0}"
+SBE_GROUP="uk.co.real-logic"
+SBE_ARTIFACT="sbe-all"
+M2_REPO="${M2_REPO:-${HOME}/.m2/repository}"
+SBE_JAR="${M2_REPO}/${SBE_GROUP//./\/}/${SBE_ARTIFACT}/${SBE_VERSION}/${SBE_ARTIFACT}-${SBE_VERSION}.jar"
 SCHEMA="${ROOT_DIR}/test/example-schema.xml"
 EXT_SCHEMA="${ROOT_DIR}/test/example-extension-schema.xml"
 CODEGEN_SCHEMA="${ROOT_DIR}/test/resources/java-code-generation-schema.xml"
@@ -15,6 +19,18 @@ JAVA_OPTS=(--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED)
 
 rm -rf "${OUT_DIR}" "${CLASS_DIR}"
 mkdir -p "${OUT_DIR}" "${CLASS_DIR}" "${ROOT_DIR}/test/java-fixtures"
+
+if ! command -v mvn >/dev/null 2>&1; then
+  echo "mvn is required to download sbe-all from Maven (missing on PATH)." >&2
+  exit 1
+fi
+
+mvn -q dependency:get -Dartifact="${SBE_GROUP}:${SBE_ARTIFACT}:${SBE_VERSION}" -Dtransitive=false
+
+if [[ ! -f "${SBE_JAR}" ]]; then
+  echo "sbe-all jar not found at ${SBE_JAR} after Maven download." >&2
+  exit 1
+fi
 
 java "${JAVA_OPTS[@]}" -Dsbe.keyword.append.token=_ -Dsbe.target.language=java -Dsbe.output.dir="${OUT_DIR}" -jar "${SBE_JAR}" "${SCHEMA}"
 java "${JAVA_OPTS[@]}" -Dsbe.keyword.append.token=_ -Dsbe.target.language=java -Dsbe.output.dir="${OUT_DIR}" -jar "${SBE_JAR}" "${EXT_SCHEMA}"
