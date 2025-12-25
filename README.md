@@ -160,10 +160,10 @@ using .Baseline
 ```
 
 This approach:
-- ✅ Avoids Core.eval and world-age issues
-- ✅ Enables proper IDE support and autocomplete
-- ✅ Makes generated code reviewable
-- ✅ Works with Julia's package precompilation
+- Avoids Core.eval and world-age issues
+- Enables proper IDE support and autocomplete
+- Makes generated code reviewable
+- Works with Julia's package precompilation
 
 ## Documentation
 
@@ -183,7 +183,7 @@ julia --project test/test_groups.jl
 julia --project=. scripts/generate_java_fixtures.jl
 ```
 
-Current status: **947 tests passing** ✅
+Current status: **947 tests passing**
 
 ## Performance
 
@@ -198,9 +198,9 @@ See [PERFORMANCE_INSIGHTS.md](docs/technical/PERFORMANCE_INSIGHTS.md) for detail
 ## Binary Compatibility
 
 SBE.jl is binary-compatible with the official sbe-tool:
-- ✅ Can decode messages encoded by sbe-tool
-- ✅ sbe-tool can decode messages encoded by SBE.jl
-- ✅ Identical byte layouts for all types
+- Can decode messages encoded by sbe-tool
+- sbe-tool can decode messages encoded by SBE.jl
+- Identical byte layouts for all types
 
 See [CODEGEN_COMPARISON.md](docs/technical/CODEGEN_COMPARISON.md) for API differences.
 
