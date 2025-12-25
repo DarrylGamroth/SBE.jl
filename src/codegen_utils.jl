@@ -321,10 +321,16 @@ function expr_to_code_string(expr::Expr)
     # Remove line numbers for cleaner output
     expr_clean = Base.remove_linenums!(deepcopy(expr))
     
-    # Unwrap single-element quote blocks (quote...end becomes begin...end)
-    # We need to extract the actual content
-    code_str = if expr_clean.head == :block && length(expr_clean.args) == 1
-        string(expr_clean.args[1])
+    # Unwrap blocks when possible to avoid top-level begin...end wrappers.
+    code_str = if expr_clean.head == :block
+        args = [arg for arg in expr_clean.args if !(arg isa LineNumberNode)]
+        if length(args) == 1
+            string(args[1])
+        elseif !isempty(args) && args[1] isa Expr && args[1].head == :module
+            join(string.(args), "\n\n")
+        else
+            string(expr_clean)
+        end
     else
         string(expr_clean)
     end

@@ -1019,19 +1019,36 @@ end
 
 function add_enum_type!(state::IrGeneratorState, type_def::XmlEnumType, offset::Int, field::Union{Nothing, XmlField})
     version = field === nothing ? type_def.since_version : max(field.since_version, type_def.since_version)
-    encoding = IR.Encoding(
-        IR.Presence.REQUIRED,
-        type_def.encoding_type,
-        state.schema.byte_order,
-        nothing,
-        nothing,
-        type_def.null_value,
-        nothing,
-        nothing,
-        nothing,
-        nothing,
-        type_def.semantic_type !== nothing ? type_def.semantic_type : (field === nothing ? nothing : field.semantic_type)
-    )
+    if field !== nothing && field.presence == IR.Presence.CONSTANT
+        const_value = field.value_ref === nothing ? type_def.null_value : lookup_value_ref(state.schema, field.value_ref)
+        encoding = IR.Encoding(
+            IR.Presence.CONSTANT,
+            type_def.encoding_type,
+            state.schema.byte_order,
+            nothing,
+            nothing,
+            type_def.null_value,
+            const_value,
+            nothing,
+            nothing,
+            nothing,
+            type_def.semantic_type !== nothing ? type_def.semantic_type : field.semantic_type
+        )
+    else
+        encoding = IR.Encoding(
+            IR.Presence.REQUIRED,
+            type_def.encoding_type,
+            state.schema.byte_order,
+            nothing,
+            nothing,
+            type_def.null_value,
+            nothing,
+            nothing,
+            nothing,
+            nothing,
+            type_def.semantic_type !== nothing ? type_def.semantic_type : (field === nothing ? nothing : field.semantic_type)
+        )
+    end
 
     begin_token = IR.Token(
         IR.Signal.BEGIN_ENUM,
@@ -1042,7 +1059,7 @@ function add_enum_type!(state::IrGeneratorState, type_def::XmlEnumType, offset::
         IR.INVALID_ID,
         version,
         type_def.deprecated,
-        IR.primitive_type_size(type_def.encoding_type),
+        field !== nothing && field.presence == IR.Presence.CONSTANT ? 0 : IR.primitive_type_size(type_def.encoding_type),
         offset,
         1,
         encoding
@@ -1089,7 +1106,7 @@ function add_enum_type!(state::IrGeneratorState, type_def::XmlEnumType, offset::
         IR.INVALID_ID,
         version,
         type_def.deprecated,
-        IR.primitive_type_size(type_def.encoding_type),
+        field !== nothing && field.presence == IR.Presence.CONSTANT ? 0 : IR.primitive_type_size(type_def.encoding_type),
         offset,
         1,
         encoding

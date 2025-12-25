@@ -59,6 +59,13 @@ function format_property_name(name::String)
     return lowercasefirst(parts[1]) * join([uppercasefirst(part) for part in parts[2:end]])
 end
 
+function format_choice_name(name::String)
+    if !isempty(name) && isuppercase(first(name))
+        return format_struct_name(name)
+    end
+    return format_property_name(name)
+end
+
 function relative_using_expr(depth::Int, name::Symbol)
     dots = repeat(".", depth + 1)
     return Meta.parse("using " * dots * string(name))
@@ -131,43 +138,15 @@ function primitive_value_literal(value::IR.PrimitiveValue, primitive_type::IR.Pr
     if value.representation == IR.PrimitiveValueRepresentation.BYTE_ARRAY
         return repr(value.value)
     elseif value.representation == IR.PrimitiveValueRepresentation.DOUBLE
-        if primitive_type == IR.PrimitiveType.FLOAT
-            return "Float32(" * value.value * ")"
-        elseif primitive_type == IR.PrimitiveType.DOUBLE
-            return "Float64(" * value.value * ")"
-        end
         return value.value
     elseif primitive_type == IR.PrimitiveType.CHAR &&
-           value.representation == IR.PrimitiveValueRepresentation.LONG
-        if all(isdigit, value.value) || startswith(value.value, "0x")
-            return "UInt8(" * value.value * ")"
+           (value.representation == IR.PrimitiveValueRepresentation.LONG ||
+            value.representation == IR.PrimitiveValueRepresentation.STRING)
+        if all(isdigit, value.value) || startswith(value.value, "0x") || startswith(value.value, "-")
+            return value.value
         end
         code = Int(codeunit(value.value, 1))
-        return "UInt8(0x" * lowercase(string(code, base=16, pad=2)) * ")"
-    end
-
-    if primitive_type == IR.PrimitiveType.CHAR
-        return "UInt8(" * value.value * ")"
-    elseif primitive_type == IR.PrimitiveType.UINT8
-        return "UInt8(" * value.value * ")"
-    elseif primitive_type == IR.PrimitiveType.UINT16
-        return "UInt16(" * value.value * ")"
-    elseif primitive_type == IR.PrimitiveType.UINT32
-        return "UInt32(" * value.value * ")"
-    elseif primitive_type == IR.PrimitiveType.UINT64
-        return "UInt64(" * value.value * ")"
-    elseif primitive_type == IR.PrimitiveType.INT8
-        return "Int8(" * value.value * ")"
-    elseif primitive_type == IR.PrimitiveType.INT16
-        return "Int16(" * value.value * ")"
-    elseif primitive_type == IR.PrimitiveType.INT32
-        return "Int32(" * value.value * ")"
-    elseif primitive_type == IR.PrimitiveType.INT64
-        return "Int64(" * value.value * ")"
-    elseif primitive_type == IR.PrimitiveType.FLOAT
-        return "Float32(" * value.value * ")"
-    elseif primitive_type == IR.PrimitiveType.DOUBLE
-        return "Float64(" * value.value * ")"
+        return "0x" * lowercase(string(code, base=16, pad=2))
     end
 
     return value.value
@@ -224,7 +203,7 @@ end
 
 function encoding_literal(value::Union{Nothing, IR.PrimitiveValue}, primitive_type::IR.PrimitiveType.T, default_fn::Function)
     actual = primitive_value_or_default(value, primitive_type, default_fn)
-    return primitive_value_literal(actual, primitive_type)
+    return Meta.parse(primitive_value_literal(actual, primitive_type))
 end
 
 function primitive_value_int(value::Union{Nothing, IR.PrimitiveValue}, primitive_type::IR.PrimitiveType.T, default_fn::Function)
@@ -385,6 +364,7 @@ function generate_composite_enum_accessor(
     julia_type = IR.primitive_type_julia(token.encoding.primitive_type)
     julia_type_symbol = Symbol(julia_type)
     offset = token.offset
+    encoding_size = IR.primitive_type_size(token.encoding.primitive_type)
 
     exprs = Expr[]
 
@@ -397,8 +377,8 @@ function generate_composite_enum_accessor(
 
         $(Symbol(member_name, :_encoding_offset))(::$base_type_name) = Int($offset)
         $(Symbol(member_name, :_encoding_offset))(::Type{<:$base_type_name}) = Int($offset)
-        $(Symbol(member_name, :_encoding_length))(::$base_type_name) = Int($(sizeof(julia_type)))
-        $(Symbol(member_name, :_encoding_length))(::Type{<:$base_type_name}) = Int($(sizeof(julia_type)))
+        $(Symbol(member_name, :_encoding_length))(::$base_type_name) = Int($encoding_size)
+        $(Symbol(member_name, :_encoding_length))(::Type{<:$base_type_name}) = Int($encoding_size)
     end)
 
     push!(exprs, quote
@@ -426,6 +406,7 @@ function generate_composite_set_accessor(
     set_module = composite_member_module_name(token)
     julia_type = IR.primitive_type_julia(token.encoding.primitive_type)
     offset = token.offset
+    encoding_size = IR.primitive_type_size(token.encoding.primitive_type)
 
     exprs = Expr[]
 
@@ -438,8 +419,8 @@ function generate_composite_set_accessor(
 
         $(Symbol(member_name, :_encoding_offset))(::$base_type_name) = Int($offset)
         $(Symbol(member_name, :_encoding_offset))(::Type{<:$base_type_name}) = Int($offset)
-        $(Symbol(member_name, :_encoding_length))(::$base_type_name) = Int($(sizeof(julia_type)))
-        $(Symbol(member_name, :_encoding_length))(::Type{<:$base_type_name}) = Int($(sizeof(julia_type)))
+        $(Symbol(member_name, :_encoding_length))(::$base_type_name) = Int($encoding_size)
+        $(Symbol(member_name, :_encoding_length))(::Type{<:$base_type_name}) = Int($encoding_size)
     end)
 
     push!(exprs, quote
@@ -535,6 +516,8 @@ function generate_composite_expr(composite_def::IrCompositeDef, ir::IR.Ir)
             using SBE: AbstractSbeCompositeType, AbstractSbeEncodedType
             import SBE: id, since_version, encoding_offset, encoding_length, null_value, min_value, max_value
             import SBE: value, value!
+            import SBE: sbe_buffer, sbe_offset, sbe_acting_version, sbe_encoded_length
+            import SBE: sbe_schema_id, sbe_schema_version
             using MappedArrays: mappedarray
             $(needs_enumx ? :(using EnumX) : nothing)
 
@@ -568,11 +551,17 @@ function generate_composite_expr(composite_def::IrCompositeDef, ir::IR.Ir)
                 $encoder_name(buffer, Int64(0))
             end
 
+            sbe_buffer(m::$abstract_type_name) = m.buffer
+            sbe_offset(m::$abstract_type_name) = m.offset
             sbe_encoded_length(::$abstract_type_name) = $(block_length_expr(ir, composite_def.encoded_length))
             sbe_encoded_length(::Type{<:$abstract_type_name}) = $(block_length_expr(ir, composite_def.encoded_length))
 
             sbe_acting_version(m::$decoder_name) = m.acting_version
             sbe_acting_version(::$encoder_name) = $(version_expr(ir, ir.version))
+            sbe_schema_id(::$abstract_type_name) = $(schema_id_expr(ir, ir.id))
+            sbe_schema_id(::Type{<:$abstract_type_name}) = $(schema_id_expr(ir, ir.id))
+            sbe_schema_version(::$abstract_type_name) = $(version_expr(ir, ir.version))
+            sbe_schema_version(::Type{<:$abstract_type_name}) = $(version_expr(ir, ir.version))
 
             Base.sizeof(m::$abstract_type_name) = sbe_encoded_length(m)
 
@@ -720,57 +709,118 @@ function generate_encoded_field_expr(
     is_char_array = primitive_type == IR.PrimitiveType.CHAR
     if is_char_array
         push!(exprs, :(using StringViews: StringView))
+        if field_token.version > 0
+            null_val = encoding_literal(encoding_token.encoding.null_value, primitive_type, IR.primitive_type_null)
+            push!(exprs, quote
+                @inline function $field_name(m::$decoder_name)
+                    if m.acting_version < $(version_expr(ir, field_token.version))
+                        return StringView(rstrip_nul(fill($julia_type_symbol($(null_val)), $array_len)))
+                    end
+                    bytes = decode_array($julia_type, m.buffer, m.offset + $(field_token.offset), $array_len)
+                    pos = findfirst(iszero, bytes)
+                    len = pos !== nothing ? pos - 1 : Base.length(bytes)
+                    return StringView(view(bytes, 1:len))
+                end
+
+                @inline function $(Symbol(field_name, :!))(m::$encoder_name)
+                    return encode_array($julia_type, m.buffer, m.offset + $(field_token.offset), $array_len)
+                end
+
+                @inline function $(Symbol(field_name, :!))(m::$encoder_name, value::AbstractString)
+                    bytes = codeunits(value)
+                    dest = encode_array($julia_type, m.buffer, m.offset + $(field_token.offset), $array_len)
+                    len = min(length(bytes), length(dest))
+                    copyto!(dest, 1, bytes, 1, len)
+                    if len < length(dest)
+                        fill!(view(dest, len+1:length(dest)), 0x00)
+                    end
+                end
+
+                @inline function $(Symbol(field_name, :!))(m::$encoder_name, value::AbstractVector{UInt8})
+                    dest = encode_array($julia_type, m.buffer, m.offset + $(field_token.offset), $array_len)
+                    len = min(length(value), length(dest))
+                    copyto!(dest, 1, value, 1, len)
+                    if len < length(dest)
+                        fill!(view(dest, len+1:length(dest)), 0x00)
+                    end
+                end
+
+                export $field_name, $(Symbol(field_name, :!))
+            end)
+        else
+            push!(exprs, quote
+                @inline function $field_name(m::$decoder_name)
+                    bytes = decode_array($julia_type, m.buffer, m.offset + $(field_token.offset), $array_len)
+                    pos = findfirst(iszero, bytes)
+                    len = pos !== nothing ? pos - 1 : Base.length(bytes)
+                    return StringView(view(bytes, 1:len))
+                end
+
+                @inline function $(Symbol(field_name, :!))(m::$encoder_name)
+                    return encode_array($julia_type, m.buffer, m.offset + $(field_token.offset), $array_len)
+                end
+
+                @inline function $(Symbol(field_name, :!))(m::$encoder_name, value::AbstractString)
+                    bytes = codeunits(value)
+                    dest = encode_array($julia_type, m.buffer, m.offset + $(field_token.offset), $array_len)
+                    len = min(length(bytes), length(dest))
+                    copyto!(dest, 1, bytes, 1, len)
+                    if len < length(dest)
+                        fill!(view(dest, len+1:length(dest)), 0x00)
+                    end
+                end
+
+                @inline function $(Symbol(field_name, :!))(m::$encoder_name, value::AbstractVector{UInt8})
+                    dest = encode_array($julia_type, m.buffer, m.offset + $(field_token.offset), $array_len)
+                    len = min(length(value), length(dest))
+                    copyto!(dest, 1, value, 1, len)
+                    if len < length(dest)
+                        fill!(view(dest, len+1:length(dest)), 0x00)
+                    end
+                end
+
+                export $field_name, $(Symbol(field_name, :!))
+            end)
+        end
+        return exprs
+    end
+    if field_token.version > 0
+        null_val = encoding_literal(encoding_token.encoding.null_value, primitive_type, IR.primitive_type_null)
         push!(exprs, quote
             @inline function $field_name(m::$decoder_name)
-                bytes = decode_array($julia_type, m.buffer, m.offset + $(field_token.offset), $array_len)
-                pos = findfirst(iszero, bytes)
-                len = pos !== nothing ? pos - 1 : Base.length(bytes)
-                return StringView(view(bytes, 1:len))
+                if m.acting_version < $(version_expr(ir, field_token.version))
+                    return fill($julia_type_symbol($(null_val)), $array_len)
+                end
+                return decode_array($julia_type, m.buffer, m.offset + $(field_token.offset), $array_len)
             end
 
             @inline function $(Symbol(field_name, :!))(m::$encoder_name)
                 return encode_array($julia_type, m.buffer, m.offset + $(field_token.offset), $array_len)
             end
 
-            @inline function $(Symbol(field_name, :!))(m::$encoder_name, value::AbstractString)
-                bytes = codeunits(value)
-                dest = encode_array($julia_type, m.buffer, m.offset + $(field_token.offset), $array_len)
-                len = min(length(bytes), length(dest))
-                copyto!(dest, 1, bytes, 1, len)
-                if len < length(dest)
-                    fill!(view(dest, len+1:length(dest)), 0x00)
-                end
-            end
-
-            @inline function $(Symbol(field_name, :!))(m::$encoder_name, value::AbstractVector{UInt8})
-                dest = encode_array($julia_type, m.buffer, m.offset + $(field_token.offset), $array_len)
-                len = min(length(value), length(dest))
-                copyto!(dest, 1, value, 1, len)
-                if len < length(dest)
-                    fill!(view(dest, len+1:length(dest)), 0x00)
-                end
+            @inline function $(Symbol(field_name, :!))(m::$encoder_name, val)
+                copyto!($(Symbol(field_name, :!))(m), val)
             end
 
             export $field_name, $(Symbol(field_name, :!))
         end)
-        return exprs
+    else
+        push!(exprs, quote
+            @inline function $field_name(m::$decoder_name)
+                return decode_array($julia_type, m.buffer, m.offset + $(field_token.offset), $array_len)
+            end
+
+            @inline function $(Symbol(field_name, :!))(m::$encoder_name)
+                return encode_array($julia_type, m.buffer, m.offset + $(field_token.offset), $array_len)
+            end
+
+            @inline function $(Symbol(field_name, :!))(m::$encoder_name, val)
+                copyto!($(Symbol(field_name, :!))(m), val)
+            end
+
+            export $field_name, $(Symbol(field_name, :!))
+        end)
     end
-
-    push!(exprs, quote
-        @inline function $field_name(m::$decoder_name)
-            return decode_array($julia_type, m.buffer, m.offset + $(field_token.offset), $array_len)
-        end
-
-        @inline function $(Symbol(field_name, :!))(m::$encoder_name)
-            return encode_array($julia_type, m.buffer, m.offset + $(field_token.offset), $array_len)
-        end
-
-        @inline function $(Symbol(field_name, :!))(m::$encoder_name, val)
-            copyto!($(Symbol(field_name, :!))(m), val)
-        end
-
-        export $field_name, $(Symbol(field_name, :!))
-    end)
 
     return exprs
 end
@@ -790,6 +840,7 @@ function generate_enum_field_expr(
     julia_type = IR.primitive_type_julia(encoding_type)
     julia_type_symbol = Symbol(julia_type)
     offset = field_token.offset
+    encoding_size = IR.primitive_type_size(encoding_type)
 
     exprs = Expr[]
     push!(exprs, quote
@@ -801,16 +852,23 @@ function generate_enum_field_expr(
 
         $(Symbol(field_name, :_encoding_offset))(::$abstract_type_name) = Int($offset)
         $(Symbol(field_name, :_encoding_offset))(::Type{<:$abstract_type_name}) = Int($offset)
-        $(Symbol(field_name, :_encoding_length))(::$abstract_type_name) = Int($(sizeof(julia_type)))
-        $(Symbol(field_name, :_encoding_length))(::Type{<:$abstract_type_name}) = Int($(sizeof(julia_type)))
+        $(Symbol(field_name, :_encoding_length))(::$abstract_type_name) = Int($encoding_size)
+        $(Symbol(field_name, :_encoding_length))(::Type{<:$abstract_type_name}) = Int($encoding_size)
+
+        $(Symbol(field_name, :_null_value))(::$abstract_type_name) = $julia_type_symbol($(encoding_literal(enum_token.encoding.null_value, encoding_type, IR.primitive_type_null)))
+        $(Symbol(field_name, :_null_value))(::Type{<:$abstract_type_name}) = $julia_type_symbol($(encoding_literal(enum_token.encoding.null_value, encoding_type, IR.primitive_type_null)))
+        $(Symbol(field_name, :_min_value))(::$abstract_type_name) = $julia_type_symbol($(encoding_literal(enum_token.encoding.min_value, encoding_type, IR.primitive_type_min)))
+        $(Symbol(field_name, :_min_value))(::Type{<:$abstract_type_name}) = $julia_type_symbol($(encoding_literal(enum_token.encoding.min_value, encoding_type, IR.primitive_type_min)))
+        $(Symbol(field_name, :_max_value))(::$abstract_type_name) = $julia_type_symbol($(encoding_literal(enum_token.encoding.max_value, encoding_type, IR.primitive_type_max)))
+        $(Symbol(field_name, :_max_value))(::Type{<:$abstract_type_name}) = $julia_type_symbol($(encoding_literal(enum_token.encoding.max_value, encoding_type, IR.primitive_type_max)))
     end)
     push!(exprs, field_meta_attribute_expr(field_name, abstract_type_name, field_token))
 
     if field_token.encoding.presence == IR.Presence.CONSTANT
-        literal = encoding_literal(field_token.encoding.const_value, encoding_type, IR.primitive_type_null)
+        literal = encoding_literal(enum_token.encoding.const_value, encoding_type, IR.primitive_type_null)
         push!(exprs, quote
             @inline function $field_name(::$decoder_name)
-                return $enum_module.SbeEnum($(Meta.parse(literal)))
+                return $enum_module.SbeEnum($literal)
             end
             export $field_name
         end)
@@ -877,6 +935,7 @@ function generate_set_field_expr(
     set_module = composite_member_module_name(set_token)
     julia_type = IR.primitive_type_julia(set_token.encoding.primitive_type)
     offset = field_token.offset
+    encoding_size = IR.primitive_type_size(set_token.encoding.primitive_type)
 
     exprs = Expr[]
     push!(exprs, quote
@@ -888,8 +947,8 @@ function generate_set_field_expr(
 
         $(Symbol(field_name, :_encoding_offset))(::$abstract_type_name) = Int($offset)
         $(Symbol(field_name, :_encoding_offset))(::Type{<:$abstract_type_name}) = Int($offset)
-        $(Symbol(field_name, :_encoding_length))(::$abstract_type_name) = Int($(sizeof(julia_type)))
-        $(Symbol(field_name, :_encoding_length))(::Type{<:$abstract_type_name}) = Int($(sizeof(julia_type)))
+        $(Symbol(field_name, :_encoding_length))(::$abstract_type_name) = Int($encoding_size)
+        $(Symbol(field_name, :_encoding_length))(::Type{<:$abstract_type_name}) = Int($encoding_size)
     end)
     push!(exprs, field_meta_attribute_expr(field_name, abstract_type_name, field_token))
 
@@ -974,6 +1033,8 @@ function generate_var_data_expr(
     length_type_symbol = Symbol(length_type)
     header_length = length_token.encoded_length
     max_literal = encoding_literal(length_token.encoding.max_value, length_token.encoding.primitive_type, IR.primitive_type_max)
+    returns_string = var_data_token.encoding.primitive_type == IR.PrimitiveType.CHAR
+    bytes_accessor = Symbol(string(accessor_name, "_bytes"))
 
     exprs = Expr[]
 
@@ -987,11 +1048,10 @@ function generate_var_data_expr(
     end
 
     push!(exprs, quote
+        const $(Symbol(accessor_name, :_id)) = $(template_id_expr(ir, field_token.id))
+        const $(Symbol(accessor_name, :_since_version)) = $(version_expr(ir, since_version))
+        const $(Symbol(accessor_name, :_header_length)) = $header_length
         $(Symbol(accessor_name, :_in_acting_version))(m::$abstract_type_name) = sbe_acting_version(m) >= $(version_expr(ir, since_version))
-        $(Symbol(accessor_name, :_id))(::$abstract_type_name) = $(template_id_expr(ir, field_token.id))
-        $(Symbol(accessor_name, :_id))(::Type{<:$abstract_type_name}) = $(template_id_expr(ir, field_token.id))
-        $(Symbol(accessor_name, :_header_length))(::$abstract_type_name) = $header_length
-        $(Symbol(accessor_name, :_header_length))(::Type{<:$abstract_type_name}) = $header_length
     end)
 
     if since_version > 0
@@ -1013,7 +1073,7 @@ function generate_var_data_expr(
 
     push!(exprs, quote
         @inline function $length_name_setter(m::$encoder_name, n)
-            @boundscheck n > $(Meta.parse(max_literal)) && throw(ArgumentError("length exceeds schema limit"))
+            @boundscheck n > $max_literal && throw(ArgumentError("length exceeds schema limit"))
             @boundscheck checkbounds(m.buffer, sbe_position(m) + $header_length + n)
             return encode_value($length_type, m.buffer, sbe_position(m), n)
         end
@@ -1028,14 +1088,30 @@ function generate_var_data_expr(
         end
     end)
 
-    push!(exprs, quote
-        @inline function $accessor_name(m::$decoder_name)
-            len = $length_name(m)
-            pos = sbe_position(m) + $header_length
-            sbe_position!(m, pos + len)
-            return view(m.buffer, pos+1:pos+len)
-        end
-    end)
+    if returns_string
+        push!(exprs, quote
+            @inline function $bytes_accessor(m::$decoder_name)
+                len = $length_name(m)
+                pos = sbe_position(m) + $header_length
+                sbe_position!(m, pos + len)
+                return view(m.buffer, pos+1:pos+len)
+            end
+        end)
+        push!(exprs, quote
+            @inline function $accessor_name(m::$decoder_name)
+                return StringView(rstrip_nul($bytes_accessor(m)))
+            end
+        end)
+    else
+        push!(exprs, quote
+            @inline function $accessor_name(m::$decoder_name)
+                len = $length_name(m)
+                pos = sbe_position(m) + $header_length
+                sbe_position!(m, pos + len)
+                return view(m.buffer, pos+1:pos+len)
+            end
+        end)
+    end
 
     push!(exprs, quote
         @inline function $buffer_name(m::$encoder_name, len)
@@ -1080,20 +1156,26 @@ function generate_var_data_expr(
     end)
 
     push!(exprs, quote
+        @inline $accessor_setter(m::$encoder_name, src::Symbol) = $accessor_setter(m, to_string(src))
+        @inline $accessor_setter(m::$encoder_name, src::Real) = $accessor_setter(m, Tuple(src))
+        @inline $accessor_setter(m::$encoder_name, ::Nothing) = $buffer_name(m, 0)
+    end)
+
+    push!(exprs, quote
         @inline function $accessor_name(m::$decoder_name, ::Type{T}) where {T<:AbstractString}
-            return StringView(rstrip_nul($accessor_name(m)))
+            return T(StringView(rstrip_nul($(returns_string ? bytes_accessor : accessor_name)(m))))
         end
         @inline function $accessor_name(m::$decoder_name, ::Type{T}) where {T<:Symbol}
             return Symbol($accessor_name(m, StringView))
         end
         @inline function $accessor_name(m::$decoder_name, ::Type{T}) where {T<:Real}
-            return reinterpret(T, $accessor_name(m))[]
+            return reinterpret(T, $(returns_string ? bytes_accessor : accessor_name)(m))[]
         end
         @inline function $accessor_name(m::$decoder_name, ::Type{AbstractArray{T}}) where {T<:Real}
-            return reinterpret(T, $accessor_name(m))
+            return reinterpret(T, $(returns_string ? bytes_accessor : accessor_name)(m))
         end
         @inline function $accessor_name(m::$decoder_name, ::Type{NTuple{N,T}}) where {N,T<:Real}
-            x = reinterpret(T, $accessor_name(m))
+            x = reinterpret(T, $(returns_string ? bytes_accessor : accessor_name)(m))
             return ntuple(i -> x[i], Val(N))
         end
         @inline function $accessor_name(m::$decoder_name, ::Type{T}) where {T<:Nothing}
@@ -1195,6 +1277,9 @@ function generate_group_expr(
 
     group_quoted = quote
         module $group_module_name
+        using SBE: AbstractSbeGroup, to_string
+        import SBE: sbe_header_size, sbe_block_length, sbe_acting_block_length, sbe_acting_version
+        import SBE: sbe_position, sbe_position!, sbe_position_ptr, next!
         using StringViews: StringView
         $([relative_using_expr(module_depth, enum_name) for enum_name in enum_imports]...)
         $([relative_using_expr(module_depth, composite_name) for composite_name in composite_imports]...)
@@ -1207,33 +1292,33 @@ function generate_group_expr(
             return view(a, 1:len)
         end
 
-        abstract type $abstract_type_name{T} end
+        abstract type $abstract_type_name{T} <: AbstractSbeGroup end
 
-        mutable struct $decoder_name{T<:AbstractArray{UInt8}} <: $abstract_type_name{T}
+        mutable struct $decoder_name{T<:AbstractArray{UInt8},P} <: $abstract_type_name{T}
             const buffer::T
             offset::Int64
-            const position_ptr::Base.RefValue{Int64}
+            const position_ptr::P
             const block_length::UInt16
             const acting_version::UInt16
             const count::UInt16
             index::UInt16
-            function $decoder_name(buffer::T, offset::Integer, position_ptr::Ref{Int64},
+            function $decoder_name(buffer::T, offset::Integer, position_ptr::P,
                 block_length::Integer, acting_version::Integer,
-                count::Integer, index::Integer) where {T}
-                new{T}(buffer, offset, position_ptr, block_length, acting_version, count, index)
+                count::Integer, index::Integer) where {T,P}
+                new{T,P}(buffer, offset, position_ptr, block_length, acting_version, count, index)
             end
         end
 
-        mutable struct $encoder_name{T<:AbstractArray{UInt8}} <: $abstract_type_name{T}
+        mutable struct $encoder_name{T<:AbstractArray{UInt8},P} <: $abstract_type_name{T}
             const buffer::T
             offset::Int64
-            const position_ptr::Base.RefValue{Int64}
+            const position_ptr::P
             const initial_position::Int64
             count::UInt16
             index::UInt16
-            function $encoder_name(buffer::T, offset::Integer, position_ptr::Ref{Int64},
-                initial_position::Int64, count::Integer, index::Integer) where {T}
-                new{T}(buffer, offset, position_ptr, initial_position, count, index)
+            function $encoder_name(buffer::T, offset::Integer, position_ptr::P,
+                initial_position::Int64, count::Integer, index::Integer) where {T,P}
+                new{T,P}(buffer, offset, position_ptr, initial_position, count, index)
             end
         end
 
@@ -1284,8 +1369,8 @@ function generate_group_expr(
                 return nothing
             end
         end
-        Base.eltype(::Type{$decoder_name}) = $decoder_name
-        Base.eltype(::Type{$encoder_name}) = $encoder_name
+        Base.eltype(::Type{<:$decoder_name}) = $decoder_name
+        Base.eltype(::Type{<:$encoder_name}) = $encoder_name
         Base.isdone(g::$abstract_type_name, state=nothing) = g.index >= g.count
         Base.length(g::$abstract_type_name) = g.count
 
@@ -1420,7 +1505,12 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
     message_quoted = quote
         module $message_name
         export $abstract_type_name, $decoder_name, $encoder_name
-        abstract type $abstract_type_name{T} end
+        using SBE: AbstractSbeMessage, PositionPointer, to_string
+        import SBE: sbe_buffer, sbe_offset, sbe_position_ptr, sbe_position, sbe_position!
+        import SBE: sbe_block_length, sbe_template_id, sbe_schema_id, sbe_schema_version
+        import SBE: sbe_acting_block_length, sbe_acting_version, sbe_rewind!
+        import SBE: sbe_encoded_length, sbe_decoded_length, sbe_semantic_type
+        abstract type $abstract_type_name{T} <: AbstractSbeMessage{T} end
 
         using ..$header_module
         using StringViews: StringView
@@ -1435,32 +1525,32 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
             return view(a, 1:len)
         end
 
-        struct $decoder_name{T<:AbstractArray{UInt8}} <: $abstract_type_name{T}
+        struct $decoder_name{T<:AbstractArray{UInt8},P} <: $abstract_type_name{T}
             buffer::T
             offset::Int64
-            position_ptr::Base.RefValue{Int64}
+            position_ptr::P
             acting_block_length::UInt16
             acting_version::UInt16
-            function $decoder_name(buffer::T, offset::Integer, position_ptr::Ref{Int64},
-                acting_block_length::Integer, acting_version::Integer) where {T}
+            function $decoder_name(buffer::T, offset::Integer, position_ptr::P,
+                acting_block_length::Integer, acting_version::Integer) where {T,P}
                 position_ptr[] = offset + acting_block_length
-                new{T}(buffer, offset, position_ptr, acting_block_length, acting_version)
+                new{T,P}(buffer, offset, position_ptr, acting_block_length, acting_version)
             end
         end
 
-        struct $encoder_name{T<:AbstractArray{UInt8},HasSbeHeader} <: $abstract_type_name{T}
+        struct $encoder_name{T<:AbstractArray{UInt8},P,HasSbeHeader} <: $abstract_type_name{T}
             buffer::T
             offset::Int64
-            position_ptr::Base.RefValue{Int64}
+            position_ptr::P
             function $encoder_name(buffer::T, offset::Integer,
-                position_ptr::Ref{Int64}, hasSbeHeader::Bool=false) where {T}
+                position_ptr::P, hasSbeHeader::Bool=false) where {T,P}
                 position_ptr[] = offset + $(block_length_expr(ir, msg_token.encoded_length))
-                new{T,hasSbeHeader}(buffer, offset, position_ptr)
+                new{T,P,hasSbeHeader}(buffer, offset, position_ptr)
             end
         end
 
         @inline function $decoder_name(buffer::AbstractArray, offset::Integer=0;
-            position_ptr::Base.RefValue{Int64}=Ref(0),
+            position_ptr=Ref(0),
             header=$header_module.Decoder(buffer, offset))
             if $header_module.templateId(header) != $(template_id_expr(ir, msg_token.id)) ||
                $header_module.schemaId(header) != $(schema_id_expr(ir, ir.id))
@@ -1471,13 +1561,21 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
         end
 
         @inline function $encoder_name(buffer::AbstractArray, offset::Integer=0;
-            position_ptr::Base.RefValue{Int64}=Ref(0),
+            position_ptr=Ref(0),
             header=$header_module.Encoder(buffer, offset))
             $header_module.blockLength!(header, $(block_length_expr(ir, msg_token.encoded_length)))
             $header_module.templateId!(header, $(template_id_expr(ir, msg_token.id)))
             $header_module.schemaId!(header, $(schema_id_expr(ir, ir.id)))
             $header_module.version!(header, $(version_expr(ir, ir.version)))
             $encoder_name(buffer, offset + sbe_encoded_length(header), position_ptr, true)
+        end
+
+        @inline function $decoder_name(buffer::AbstractArray, offset::Integer, position_ptr::PositionPointer)
+            return $decoder_name(buffer, offset; position_ptr=position_ptr)
+        end
+
+        @inline function $encoder_name(buffer::AbstractArray, offset::Integer, position_ptr::PositionPointer)
+            return $encoder_name(buffer, offset, position_ptr, false)
         end
 
         sbe_buffer(m::$abstract_type_name) = m.buffer
@@ -1625,7 +1723,7 @@ function generate_set_expr(set_def::IrSetDef, ir::IR.Ir)
 
     choice_exprs = Expr[]
     for choice in set_def.choices
-        choice_func_name = Symbol(format_property_name(choice.name))
+        choice_func_name = Symbol(format_choice_name(choice.name))
         choice_func_name_set = Symbol(string(choice_func_name, "!"))
         bit_position = choice.bit_position
 
@@ -1652,6 +1750,7 @@ function generate_set_expr(set_def::IrSetDef, ir::IR.Ir)
     set_quoted = quote
         module $set_name
             using SBE: AbstractSbeEncodedType
+            import SBE: id, since_version, encoding_offset, encoding_length, sbe_acting_version
 
             $endian_imports
 
@@ -1735,6 +1834,7 @@ end
 
 function generate_ir_module_expr(ir::IR.Ir)
     module_name = module_name_from_package(ir.package_name)
+    alias_name = Symbol(uppercasefirst(replace(ir.package_name, "." => "_")))
     type_exprs = Expr[]
     message_exprs = Expr[]
 
@@ -1813,5 +1913,9 @@ function generate_ir_module_expr(ir::IR.Ir)
     module_expr = extract_expr_from_quote(module_quoted, :module)
     strip_interpolations!(module_expr)
     normalize_dotted_exprs!(module_expr)
+
+    if alias_name != module_name
+        return Expr(:block, module_expr, :(const $alias_name = $module_name))
+    end
     return module_expr
 end

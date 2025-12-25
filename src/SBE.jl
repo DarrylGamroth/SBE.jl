@@ -272,10 +272,13 @@ macro load_schema(xml_path)
     end
 end
 
+# Backwards-compatible alias for schema parsing.
+parse_sbe_schema(xml_content::AbstractString) = parse_xml_schema(xml_content)
+
 # Re-export important types and functions that users need
 export Schema  # Users can access Schema.MessageDefinition, etc.
 export SBECodec, SBEFlyweight, SBEMessage
-export @load_schema, create_codec_from_schema, create_message, parse_xml_schema
+export @load_schema, create_codec_from_schema, create_message, parse_xml_schema, parse_sbe_schema
 export generate  # Main code generation API
 
 # Export position pointer type
