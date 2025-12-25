@@ -104,6 +104,11 @@ module GeneratedFixedSizedPrimitiveArray
 end
 const FixedSizedPrimitiveArray = GeneratedFixedSizedPrimitiveArray.FixedSizedPrimitiveArray
 
+module GeneratedEncodingTypes
+    include("generated/EncodingTypes.jl")
+end
+const EncodingTypes = GeneratedEncodingTypes.SBETests
+
 @testset "SBE.jl Tests" begin
     # Core functionality tests
     include("test_metaprogramming.jl")
@@ -139,4 +144,5 @@ const FixedSizedPrimitiveArray = GeneratedFixedSizedPrimitiveArray.FixedSizedPri
     include("test_embedded_length_and_count.jl")  # Embedded length/count parity tests
     include("test_lower_case_bitset.jl")  # Lower-case bitset parity tests
     include("test_fixed_sized_primitive_array.jl")  # Fixed sized primitive array parity tests
+    include("test_encoding_types.jl")  # Encoding types parity tests
 end
