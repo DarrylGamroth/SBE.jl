@@ -49,6 +49,21 @@ module GeneratedIssue889
 end
 const Issue889 = GeneratedIssue889.Issue889
 
+module GeneratedSinceDeprecated
+    include("generated/SinceDeprecated.jl")
+end
+const SinceDeprecated = GeneratedSinceDeprecated.SinceDeprecated
+
+module GeneratedSinceVersionFilter
+    include("generated/SinceVersionFilter.jl")
+end
+const SinceVersionFilter = GeneratedSinceVersionFilter.SinceDeprecated
+
+module GeneratedDeprecatedMessage
+    include("generated/DeprecatedMessage.jl")
+end
+const DeprecatedMessage = GeneratedDeprecatedMessage.SinceDeprecated
+
 module GeneratedValueRefLowerCaseEnum
     include("generated/ValueRefLowerCaseEnum.jl")
 end
@@ -280,6 +295,9 @@ const Issue849 = GeneratedIssue849.Issue849
     include("test_issue1057.jl")  # Set + ref composite parity tests
     include("test_issue1066.jl")  # Optional field sinceVersion parity tests
     include("test_issue889.jl")  # Optional enum null value parity tests
+    include("test_since_deprecated.jl")  # Since/deprecated version gating tests
+    include("test_since_version_filter.jl")  # SinceVersion filter parity tests
+    include("test_deprecated_message.jl")  # Deprecated message parity tests
     include("test_issue483.jl")  # Required/optional/constant parity tests
     include("test_issue435.jl")  # Enum/set reference parity tests
     include("test_issue496.jl")  # Nested composite refs parity tests
