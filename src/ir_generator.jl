@@ -278,20 +278,34 @@ end
 function parse_enum_type(
     node,
     package_name::Union{Nothing, String},
+    type_nodes_by_name::Union{Nothing, Dict{String, EzXML.Node}}=nothing,
     given_name::Union{Nothing, String}=nothing,
     referenced_name::Union{Nothing, String}=nothing
 )
     name = given_name === nothing ? node["name"] : given_name
-    encoding_type = parse_primitive_type(node["encodingType"])
+    encoding_type_name = node["encodingType"]
+    encoding_type = parse_primitive_type(encoding_type_name)
+    ref_null_value = nothing
+    if encoding_type == IR.PrimitiveType.NONE && type_nodes_by_name !== nothing
+        ref_node = get(type_nodes_by_name, encoding_type_name, nothing)
+        if ref_node !== nothing && nodename(ref_node) == "type"
+            encoding_type = parse_primitive_type(ref_node["primitiveType"])
+            ref_null_value = haskey(ref_node, "nullValue") ? ref_node["nullValue"] : nothing
+        end
+    end
     presence = parse_presence(haskey(node, "presence") ? node["presence"] : nothing)
     description = haskey(node, "description") ? node["description"] : ""
     semantic_type = haskey(node, "semanticType") ? node["semanticType"] : nothing
     offset_attribute = parse(Int, haskey(node, "offset") ? node["offset"] : "-1")
     since_version = parse(Int, haskey(node, "sinceVersion") ? node["sinceVersion"] : "0")
     deprecated = parse(Int, haskey(node, "deprecated") ? node["deprecated"] : "0")
-    null_value = haskey(node, "nullValue") ?
-        primitive_value_from_text(node["nullValue"], encoding_type, 1, nothing) :
+    null_value = if haskey(node, "nullValue")
+        primitive_value_from_text(node["nullValue"], encoding_type, 1, nothing)
+    elseif ref_null_value !== nothing
+        primitive_value_from_text(ref_null_value, encoding_type, 1, nothing)
+    else
         IR.primitive_type_null(encoding_type)
+    end
 
     values = XmlValidValue[]
     for value_node in findall("validValue", node)
@@ -323,11 +337,19 @@ end
 function parse_set_type(
     node,
     package_name::Union{Nothing, String},
+    type_nodes_by_name::Union{Nothing, Dict{String, EzXML.Node}}=nothing,
     given_name::Union{Nothing, String}=nothing,
     referenced_name::Union{Nothing, String}=nothing
 )
     name = given_name === nothing ? node["name"] : given_name
-    encoding_type = parse_primitive_type(node["encodingType"])
+    encoding_type_name = node["encodingType"]
+    encoding_type = parse_primitive_type(encoding_type_name)
+    if encoding_type == IR.PrimitiveType.NONE && type_nodes_by_name !== nothing
+        ref_node = get(type_nodes_by_name, encoding_type_name, nothing)
+        if ref_node !== nothing && nodename(ref_node) == "type"
+            encoding_type = parse_primitive_type(ref_node["primitiveType"])
+        end
+    end
     presence = parse_presence(haskey(node, "presence") ? node["presence"] : nothing)
     description = haskey(node, "description") ? node["description"] : ""
     semantic_type = haskey(node, "semanticType") ? node["semanticType"] : nothing
@@ -385,9 +407,9 @@ function parse_composite_type(
         if child_name == "type"
             member = parse_encoded_type(child, package_name)
         elseif child_name == "enum"
-            member = parse_enum_type(child, package_name)
+            member = parse_enum_type(child, package_name, type_nodes_by_name)
         elseif child_name == "set"
-            member = parse_set_type(child, package_name)
+            member = parse_set_type(child, package_name, type_nodes_by_name)
         elseif child_name == "composite"
             member = parse_composite_type(child, package_name, type_nodes_by_name, nothing, nothing, [composites_path; name])
         elseif child_name == "ref"
@@ -449,9 +471,9 @@ function parse_type_node(
     if child_name == "type"
         return parse_encoded_type(node, package_name, given_name, referenced_name)
     elseif child_name == "enum"
-        return parse_enum_type(node, package_name, given_name, referenced_name)
+        return parse_enum_type(node, package_name, type_nodes_by_name, given_name, referenced_name)
     elseif child_name == "set"
-        return parse_set_type(node, package_name, given_name, referenced_name)
+        return parse_set_type(node, package_name, type_nodes_by_name, given_name, referenced_name)
     elseif child_name == "composite"
         return parse_composite_type(node, package_name, type_nodes_by_name, given_name, referenced_name, composites_path)
     end
@@ -1262,12 +1284,17 @@ function add_encoded_type!(state::IrGeneratorState, type_def::XmlEncodedType, of
     version = max(field.since_version, type_def.since_version)
     semantic = type_def.semantic_type === nothing ? field.semantic_type : type_def.semantic_type
 
+    effective_presence = field.presence
+    if field.presence == IR.Presence.REQUIRED && type_def.presence != IR.Presence.REQUIRED
+        effective_presence = type_def.presence
+    end
+
     size = encoded_length(type_def)
-    if field.presence == IR.Presence.CONSTANT
+    if effective_presence == IR.Presence.CONSTANT
         size = 0
     end
 
-    if field.presence == IR.Presence.CONSTANT
+    if effective_presence == IR.Presence.CONSTANT
         const_value = field.value_ref === nothing ? type_def.const_value : lookup_value_ref(state.schema, field.value_ref)
         encoding = IR.Encoding(
             IR.Presence.CONSTANT,
@@ -1282,7 +1309,7 @@ function add_encoded_type!(state::IrGeneratorState, type_def::XmlEncodedType, of
             field.time_unit,
             semantic
         )
-    elseif field.presence == IR.Presence.OPTIONAL
+    elseif effective_presence == IR.Presence.OPTIONAL
         encoding = IR.Encoding(
             IR.Presence.OPTIONAL,
             type_def.primitive_type,

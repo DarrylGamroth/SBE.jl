@@ -11,6 +11,9 @@ include("generated/Versioned.jl")
 include("generated/CodeGenerationTest.jl")
 include("generated/OrderCheck.jl")
 include("generated/CompositeElements.jl")
+include("generated/Issue505.jl")
+include("generated/Issue889.jl")
+include("generated/ValueRefLowerCaseEnum.jl")
 
 @testset "SBE.jl Tests" begin
     # Core functionality tests
@@ -37,4 +40,5 @@ include("generated/CompositeElements.jl")
     include("test_interop.jl")  # Binary compatibility with sbe-tool Java generator
     include("test_java_fixtures.jl")  # Java-generator binary fixtures
     include("test_java_mirror.jl")  # Mirror Java generator tests
+    include("test_java_generation_parity.jl")  # Java generator schema parity
 end

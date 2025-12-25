@@ -30,6 +30,9 @@ schemas = [
     (joinpath("resources", "java-code-generation-schema.xml"), "CodeGenerationTest.jl", "CodeGenerationTest"),
     (joinpath("resources", "field-order-check-schema.xml"), "OrderCheck.jl", "OrderCheck"),
     (joinpath("resources", "composite-elements-schema.xml"), "CompositeElements.jl", "CompositeElements"),
+    (joinpath("resources", "issue505.xml"), "Issue505.jl", "Issue505"),
+    (joinpath("resources", "issue889.xml"), "Issue889.jl", "Issue889"),
+    (joinpath("resources", "value-ref-with-lower-case-enum.xml"), "ValueRefLowerCaseEnum.jl", "ValueRefLowerCaseEnum"),
 ]
 
 for (schema_file, output_file, module_name) in schemas

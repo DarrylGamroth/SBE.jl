@@ -15,6 +15,7 @@ end
 struct IrEnumDef
     name::String
     encoding_type::IR.PrimitiveType.T
+    null_value::Union{Nothing, IR.PrimitiveValue}
     values::Vector{IrEnumValue}
 end
 
@@ -213,6 +214,7 @@ function enum_def_from_tokens(tokens::Vector{IR.Token})
     begin_token = tokens[1]
     enum_name = begin_token.referenced_name === nothing ? begin_token.name : begin_token.referenced_name
     encoding_type = begin_token.encoding.primitive_type
+    null_value = begin_token.encoding.null_value
     values = IrEnumValue[]
     for token in tokens
         if token.signal == IR.Signal.VALID_VALUE
@@ -220,7 +222,7 @@ function enum_def_from_tokens(tokens::Vector{IR.Token})
             push!(values, IrEnumValue(token.name, literal, token.description, token.version, token.deprecated))
         end
     end
-    return IrEnumDef(enum_name, encoding_type, values)
+    return IrEnumDef(enum_name, encoding_type, null_value, values)
 end
 
 function composite_def_from_tokens(tokens::Vector{IR.Token})
@@ -1746,7 +1748,9 @@ function generate_enum_expr(enum_def::IrEnumDef)
         push!(enum_values, :($value_name = $(Meta.parse(value.literal))))
     end
 
-    null_value = if enum_def.encoding_type == IR.PrimitiveType.CHAR
+    null_value = if enum_def.null_value !== nothing
+        Meta.parse(primitive_value_literal(enum_def.null_value, enum_def.encoding_type))
+    elseif enum_def.encoding_type == IR.PrimitiveType.CHAR
         UInt8(0x0)
     else
         encoding_type <: Unsigned ? typemax(encoding_type) : typemin(encoding_type)
