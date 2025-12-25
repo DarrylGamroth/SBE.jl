@@ -26,6 +26,7 @@ schemas = [
     ("example-extension-schema.xml", "Extension.jl", "Extension"),
     ("example-optional-schema.xml", "Optional.jl", "Optional"),
     ("example-versioned-schema.xml", "Versioned.jl", "Versioned"),
+    (joinpath("resources", "java-json-printer-test-schema.xml"), "JsonPrinterBaseline.jl", "JsonPrinterBaseline"),
     (joinpath("resources", "field-order-check-schema.xml"), "OrderCheck.jl", "OrderCheck"),
     (joinpath("resources", "composite-elements-schema.xml"), "CompositeElements.jl", "CompositeElements"),
 ]

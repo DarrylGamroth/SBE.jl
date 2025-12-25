@@ -35,4 +35,5 @@ include("generated/CompositeElements.jl")
     include("test_allocations.jl")
     include("test_interop.jl")  # Binary compatibility with sbe-tool Java generator
     include("test_java_fixtures.jl")  # Java-generator binary fixtures
+    include("test_java_mirror.jl")  # Mirror Java generator tests
 end

@@ -6,6 +6,142 @@ module FixtureGenerated
     using .Baseline
 end
 
+@testset "Java Extension Fixture Parity" begin
+    fixture_path = joinpath(@__DIR__, "java-fixtures", "car-extension.bin")
+    @test isfile(fixture_path)
+    bytes = read(fixture_path)
+
+    dec = Extension.Car.Decoder(bytes, 0)
+
+    @test Extension.Car.serialNumber(dec) == UInt64(1234)
+    @test Extension.Car.modelYear(dec) == UInt16(2013)
+    @test Extension.Car.available(dec) == Extension.BooleanType.T
+    @test Extension.Car.code(dec) == Extension.Model.A
+
+    uuid = Extension.Car.uuid(dec)
+    @test uuid[1] == Int64(7)
+    @test uuid[2] == Int64(3)
+    @test Extension.Car.cupHolderCount(dec) == UInt8(5)
+
+    fuel = Extension.Car.fuelFigures(dec)
+    Extension.Car.FuelFigures.next!(fuel)
+    Extension.Car.FuelFigures.usageDescription(fuel)
+    Extension.Car.FuelFigures.next!(fuel)
+    Extension.Car.FuelFigures.usageDescription(fuel)
+    Extension.Car.FuelFigures.next!(fuel)
+    Extension.Car.FuelFigures.usageDescription(fuel)
+
+    perf = Extension.Car.performanceFigures(dec)
+    Extension.Car.PerformanceFigures.next!(perf)
+    accel = Extension.Car.PerformanceFigures.acceleration(perf)
+    Extension.Car.PerformanceFigures.Acceleration.next!(accel)
+    Extension.Car.PerformanceFigures.Acceleration.seconds(accel)
+    Extension.Car.PerformanceFigures.Acceleration.next!(accel)
+    Extension.Car.PerformanceFigures.Acceleration.seconds(accel)
+    Extension.Car.PerformanceFigures.Acceleration.next!(accel)
+    Extension.Car.PerformanceFigures.Acceleration.seconds(accel)
+
+    Extension.Car.PerformanceFigures.next!(perf)
+    accel = Extension.Car.PerformanceFigures.acceleration(perf)
+    Extension.Car.PerformanceFigures.Acceleration.next!(accel)
+    Extension.Car.PerformanceFigures.Acceleration.seconds(accel)
+    Extension.Car.PerformanceFigures.Acceleration.next!(accel)
+    Extension.Car.PerformanceFigures.Acceleration.seconds(accel)
+    Extension.Car.PerformanceFigures.Acceleration.next!(accel)
+    Extension.Car.PerformanceFigures.Acceleration.seconds(accel)
+
+    @test String(Extension.Car.manufacturer(dec)) == "Honda"
+    @test String(Extension.Car.model(dec)) == "Civic VTi"
+    @test String(Extension.Car.activationCode(dec)) == "abcdef"
+
+    buffer = zeros(UInt8, 4096)
+    enc = Extension.Car.Encoder(buffer, 0)
+
+    Extension.Car.serialNumber!(enc, UInt64(1234))
+    Extension.Car.modelYear!(enc, UInt16(2013))
+    Extension.Car.available!(enc, Extension.BooleanType.T)
+    Extension.Car.code!(enc, Extension.Model.A)
+
+    nums = Extension.Car.someNumbers!(enc)
+    nums[1] = UInt32(1)
+    nums[2] = UInt32(2)
+    nums[3] = UInt32(3)
+    nums[4] = UInt32(4)
+
+    Extension.Car.vehicleCode!(enc, "abcdef")
+
+    extras_enc = Extension.Car.extras(enc)
+    Extension.OptionalExtras.cruiseControl!(extras_enc, true)
+    Extension.OptionalExtras.sportsPack!(extras_enc, true)
+    Extension.OptionalExtras.sunRoof!(extras_enc, false)
+
+    engine_enc = Extension.Car.engine(enc)
+    Extension.Engine.capacity!(engine_enc, UInt16(2000))
+    Extension.Engine.numCylinders!(engine_enc, UInt8(4))
+    Extension.Engine.manufacturerCode!(engine_enc, "123")
+    Extension.Engine.efficiency!(engine_enc, Int8(35))
+    Extension.Engine.boosterEnabled!(engine_enc, Extension.BooleanType.T)
+
+    booster_enc = Extension.Engine.booster(engine_enc)
+    Extension.Booster.boostType!(booster_enc, Extension.Booster.BoostType.NITROUS)
+    Extension.Booster.horsePower!(booster_enc, UInt8(200))
+
+    uuid_enc = Extension.Car.uuid!(enc)
+    uuid_enc[1] = Int64(7)
+    uuid_enc[2] = Int64(3)
+    Extension.Car.cupHolderCount!(enc, UInt8(5))
+
+    fuel_enc = Extension.Car.fuelFigures!(enc, 3)
+    Extension.Car.FuelFigures.next!(fuel_enc)
+    Extension.Car.FuelFigures.speed!(fuel_enc, UInt16(30))
+    Extension.Car.FuelFigures.mpg!(fuel_enc, Float32(35.9))
+    Extension.Car.FuelFigures.usageDescription!(fuel_enc, "Urban Cycle")
+    Extension.Car.FuelFigures.next!(fuel_enc)
+    Extension.Car.FuelFigures.speed!(fuel_enc, UInt16(55))
+    Extension.Car.FuelFigures.mpg!(fuel_enc, Float32(49.0))
+    Extension.Car.FuelFigures.usageDescription!(fuel_enc, "Combined Cycle")
+    Extension.Car.FuelFigures.next!(fuel_enc)
+    Extension.Car.FuelFigures.speed!(fuel_enc, UInt16(75))
+    Extension.Car.FuelFigures.mpg!(fuel_enc, Float32(40.0))
+    Extension.Car.FuelFigures.usageDescription!(fuel_enc, "Highway Cycle")
+
+    perf_enc = Extension.Car.performanceFigures!(enc, 2)
+    Extension.Car.PerformanceFigures.next!(perf_enc)
+    Extension.Car.PerformanceFigures.octaneRating!(perf_enc, UInt8(95))
+    accel_enc = Extension.Car.PerformanceFigures.acceleration!(perf_enc, 3)
+    Extension.Car.PerformanceFigures.Acceleration.next!(accel_enc)
+    Extension.Car.PerformanceFigures.Acceleration.mph!(accel_enc, UInt16(30))
+    Extension.Car.PerformanceFigures.Acceleration.seconds!(accel_enc, Float32(4.0))
+    Extension.Car.PerformanceFigures.Acceleration.next!(accel_enc)
+    Extension.Car.PerformanceFigures.Acceleration.mph!(accel_enc, UInt16(60))
+    Extension.Car.PerformanceFigures.Acceleration.seconds!(accel_enc, Float32(7.5))
+    Extension.Car.PerformanceFigures.Acceleration.next!(accel_enc)
+    Extension.Car.PerformanceFigures.Acceleration.mph!(accel_enc, UInt16(100))
+    Extension.Car.PerformanceFigures.Acceleration.seconds!(accel_enc, Float32(12.2))
+
+    Extension.Car.PerformanceFigures.next!(perf_enc)
+    Extension.Car.PerformanceFigures.octaneRating!(perf_enc, UInt8(99))
+    accel_enc = Extension.Car.PerformanceFigures.acceleration!(perf_enc, 3)
+    Extension.Car.PerformanceFigures.Acceleration.next!(accel_enc)
+    Extension.Car.PerformanceFigures.Acceleration.mph!(accel_enc, UInt16(30))
+    Extension.Car.PerformanceFigures.Acceleration.seconds!(accel_enc, Float32(3.8))
+    Extension.Car.PerformanceFigures.Acceleration.next!(accel_enc)
+    Extension.Car.PerformanceFigures.Acceleration.mph!(accel_enc, UInt16(60))
+    Extension.Car.PerformanceFigures.Acceleration.seconds!(accel_enc, Float32(7.1))
+    Extension.Car.PerformanceFigures.Acceleration.next!(accel_enc)
+    Extension.Car.PerformanceFigures.Acceleration.mph!(accel_enc, UInt16(100))
+    Extension.Car.PerformanceFigures.Acceleration.seconds!(accel_enc, Float32(11.8))
+
+    Extension.Car.manufacturer!(enc, "Honda")
+    Extension.Car.model!(enc, "Civic VTi")
+    Extension.Car.activationCode!(enc, "abcdef")
+
+    header_len = Int(Extension.MessageHeader.sbe_encoded_length(Extension.MessageHeader.Decoder))
+    total_len = header_len + Extension.Car.sbe_encoded_length(enc)
+    @test total_len == length(bytes)
+    @test buffer[1:total_len] == bytes
+end
+
 const FixtureBaseline = FixtureGenerated.Baseline
 
 @testset "Java Fixture Parity" begin
