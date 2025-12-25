@@ -33,7 +33,6 @@ module GeneratedOrderCheck
     include("generated/OrderCheck.jl")
 end
 const OrderCheck = GeneratedOrderCheck.OrderCheck
-const Order_check = OrderCheck
 
 module GeneratedCompositeElements
     include("generated/CompositeElements.jl")
