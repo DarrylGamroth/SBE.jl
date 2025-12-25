@@ -38,10 +38,17 @@ Refactor SBE.jl to follow the reference SBE tool pipeline: parse XML into the SB
    - Run existing test suite to ensure no regressions; add new tests for nested messages/composites that previously failed.
    - Optional: generate Java codecs from the same schema and validate binary interoperability (round-trip encode/decode between Java and Julia).
 
+7. **Dogfood sbe-ir.xml decoding**
+   - Use the existing hand-written `ir_decoder.jl` as a bootstrap to parse `sbe-ir.xml` once.
+   - Generate Julia codecs for `sbe-ir.xml` into `src/generated/` and add a second IR decoding path that uses the generated codecs.
+   - Add tests asserting both paths yield identical `IR.Ir` for `.sbeir` files.
+   - Keep the hand-written decoder as a bootstrap/fallback or remove it once generation is a required build step.
+
 ## Deliverables
 - New IR model and IR generator in Julia.
 - Codegen path that consumes IR tokens (with fallback or migration from current schema-based generator).
 - Expanded tests that cover nested composites/groups and IR generation.
+- Dogfooded `sbe-ir.xml` decoding via generated codecs, with parity tests against the bootstrap decoder.
 
 ## Notes / Constraints
 - Generated Julia code must remain zero-allocation and type stable.
