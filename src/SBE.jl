@@ -182,6 +182,10 @@ function sbe_description end
 include("Schema.jl")
 import .Schema
 
+# Intermediate Representation (IR)
+include("IR.jl")
+import .IR
+
 # XML parsing
 include("xml_parser.jl")
 
