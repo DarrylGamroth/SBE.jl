@@ -33,6 +33,8 @@ schemas = [
     (joinpath("resources", "issue505.xml"), "Issue505.jl", "Issue505"),
     (joinpath("resources", "issue889.xml"), "Issue889.jl", "Issue889"),
     (joinpath("resources", "value-ref-with-lower-case-enum.xml"), "ValueRefLowerCaseEnum.jl", "ValueRefLowerCaseEnum"),
+    (joinpath("resources", "extension-schema.xml"), "ExtensionSchema.jl", "ExtensionSchema"),
+    (joinpath("resources", "constant-enum-fields.xml"), "ConstantEnumFields.jl", "ConstantEnumFields"),
 ]
 
 for (schema_file, output_file, module_name) in schemas

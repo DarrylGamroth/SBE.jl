@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <sbe:messageSchema xmlns:sbe="http://fixprotocol.io/2016/sbe"
-                   package="code.generation.test"
+                   package="extensionSchema"
                    id="1"
                    version="6"
                    description="Unit Test">

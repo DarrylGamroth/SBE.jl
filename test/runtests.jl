@@ -14,6 +14,8 @@ include("generated/CompositeElements.jl")
 include("generated/Issue505.jl")
 include("generated/Issue889.jl")
 include("generated/ValueRefLowerCaseEnum.jl")
+include("generated/ExtensionSchema.jl")
+include("generated/ConstantEnumFields.jl")
 
 @testset "SBE.jl Tests" begin
     # Core functionality tests
@@ -41,4 +43,6 @@ include("generated/ValueRefLowerCaseEnum.jl")
     include("test_java_fixtures.jl")  # Java-generator binary fixtures
     include("test_java_mirror.jl")  # Mirror Java generator tests
     include("test_java_generation_parity.jl")  # Java generator schema parity
+    include("test_fixed_size_blob.jl")  # Fixed-length blob parity tests
+    include("test_constant_enum_fields.jl")  # Constant enum field parity tests
 end
