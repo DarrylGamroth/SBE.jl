@@ -421,6 +421,8 @@ function generate_composite_expr(composite_def::IrCompositeDef, ir::IR.Ir)
     encoder_name = :Encoder
 
     field_exprs = Expr[]
+    var_data_exprs = Expr[]
+    skip_calls = Expr[]
     enum_imports = Set{Symbol}()
     composite_imports = Set{Symbol}()
 
@@ -868,6 +870,160 @@ function generate_composite_field_expr(
     return exprs
 end
 
+function generate_var_data_expr(
+    var_data_tokens::Vector{IR.Token},
+    abstract_type_name::Symbol,
+    decoder_name::Symbol,
+    encoder_name::Symbol,
+    ir::IR.Ir
+)
+    field_token = var_data_tokens[1]
+    accessor_name = Symbol(format_property_name(field_token.name))
+    length_name = Symbol(string(accessor_name, "_length"))
+    length_name_setter = Symbol(string(accessor_name, "_length!"))
+    skip_name = Symbol(string("skip_", accessor_name, "!"))
+    buffer_name = Symbol(string(accessor_name, "_buffer!"))
+    accessor_setter = Symbol(string(accessor_name, "!"))
+    since_version = field_token.version
+
+    length_token = find_first_token("length", var_data_tokens, 1)
+    var_data_token = find_first_token("varData", var_data_tokens, 1)
+
+    length_type = IR.primitive_type_julia(length_token.encoding.primitive_type)
+    length_type_symbol = Symbol(length_type)
+    header_length = length_token.encoded_length
+    max_literal = encoding_literal(length_token.encoding.max_value, length_token.encoding.primitive_type, IR.primitive_type_max)
+
+    exprs = Expr[]
+
+    push!(exprs, field_meta_attribute_expr(accessor_name, abstract_type_name, field_token))
+
+    if var_data_token.encoding.character_encoding !== nothing
+        push!(exprs, quote
+            $(Symbol(accessor_name, :_character_encoding))(::$abstract_type_name) = $(var_data_token.encoding.character_encoding)
+            $(Symbol(accessor_name, :_character_encoding))(::Type{<:$abstract_type_name}) = $(var_data_token.encoding.character_encoding)
+        end)
+    end
+
+    push!(exprs, quote
+        $(Symbol(accessor_name, :_in_acting_version))(m::$abstract_type_name) = sbe_acting_version(m) >= $(version_expr(ir, since_version))
+        $(Symbol(accessor_name, :_id))(::$abstract_type_name) = $(template_id_expr(ir, field_token.id))
+        $(Symbol(accessor_name, :_id))(::Type{<:$abstract_type_name}) = $(template_id_expr(ir, field_token.id))
+        $(Symbol(accessor_name, :_header_length))(::$abstract_type_name) = $header_length
+        $(Symbol(accessor_name, :_header_length))(::Type{<:$abstract_type_name}) = $header_length
+    end)
+
+    if since_version > 0
+        push!(exprs, quote
+            @inline function $length_name(m::$abstract_type_name)
+                if sbe_acting_version(m) < $(version_expr(ir, since_version))
+                    return $length_type_symbol(0)
+                end
+                return decode_value($length_type, m.buffer, sbe_position(m))
+            end
+        end)
+    else
+        push!(exprs, quote
+            @inline function $length_name(m::$abstract_type_name)
+                return decode_value($length_type, m.buffer, sbe_position(m))
+            end
+        end)
+    end
+
+    push!(exprs, quote
+        @inline function $length_name_setter(m::$encoder_name, n)
+            @boundscheck n > $(Meta.parse(max_literal)) && throw(ArgumentError("length exceeds schema limit"))
+            @boundscheck checkbounds(m.buffer, sbe_position(m) + $header_length + n)
+            return encode_value($length_type, m.buffer, sbe_position(m), n)
+        end
+    end)
+
+    push!(exprs, quote
+        @inline function $skip_name(m::$decoder_name)
+            len = $length_name(m)
+            pos = sbe_position(m) + $header_length
+            sbe_position!(m, pos + len)
+            return len
+        end
+    end)
+
+    push!(exprs, quote
+        @inline function $accessor_name(m::$decoder_name)
+            len = $length_name(m)
+            pos = sbe_position(m) + $header_length
+            sbe_position!(m, pos + len)
+            return view(m.buffer, pos+1:pos+len)
+        end
+    end)
+
+    push!(exprs, quote
+        @inline function $buffer_name(m::$encoder_name, len)
+            $length_name_setter(m, len)
+            pos = sbe_position(m) + $header_length
+            sbe_position!(m, pos + len)
+            return view(m.buffer, pos+1:pos+len)
+        end
+    end)
+
+    push!(exprs, quote
+        @inline function $accessor_setter(m::$encoder_name, src::AbstractArray)
+            len = sizeof(eltype(src)) * length(src)
+            $length_name_setter(m, len)
+            pos = sbe_position(m) + $header_length
+            sbe_position!(m, pos + len)
+            dest = view(m.buffer, pos+1:pos+len)
+            copyto!(dest, reinterpret(UInt8, src))
+        end
+    end)
+
+    push!(exprs, quote
+        @inline function $accessor_setter(m::$encoder_name, src::NTuple)
+            len = sizeof(src)
+            $length_name_setter(m, len)
+            pos = sbe_position(m) + $header_length
+            sbe_position!(m, pos + len)
+            dest = view(m.buffer, pos+1:pos+len)
+            copyto!(dest, reinterpret(NTuple{len,UInt8}, src))
+        end
+    end)
+
+    push!(exprs, quote
+        @inline function $accessor_setter(m::$encoder_name, src::AbstractString)
+            len = sizeof(src)
+            $length_name_setter(m, len)
+            pos = sbe_position(m) + $header_length
+            sbe_position!(m, pos + len)
+            dest = view(m.buffer, pos+1:pos+len)
+            copyto!(dest, codeunits(src))
+        end
+    end)
+
+    push!(exprs, quote
+        @inline function $accessor_name(m::$decoder_name, ::Type{T}) where {T<:AbstractString}
+            return StringView(rstrip_nul($accessor_name(m)))
+        end
+        @inline function $accessor_name(m::$decoder_name, ::Type{T}) where {T<:Symbol}
+            return Symbol($accessor_name(m, StringView))
+        end
+        @inline function $accessor_name(m::$decoder_name, ::Type{T}) where {T<:Real}
+            return reinterpret(T, $accessor_name(m))[]
+        end
+        @inline function $accessor_name(m::$decoder_name, ::Type{AbstractArray{T}}) where {T<:Real}
+            return reinterpret(T, $accessor_name(m))
+        end
+        @inline function $accessor_name(m::$decoder_name, ::Type{NTuple{N,T}}) where {N,T<:Real}
+            x = reinterpret(T, $accessor_name(m))
+            return ntuple(i -> x[i], Val(N))
+        end
+        @inline function $accessor_name(m::$decoder_name, ::Type{T}) where {T<:Nothing}
+            $skip_name(m)
+            return nothing
+        end
+    end)
+
+    return exprs
+end
+
 function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
     msg_token = message_tokens[1]
     message_name = Symbol(format_struct_name(msg_token.name))
@@ -903,12 +1059,20 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
         end
     end
 
+    for var_data_tokens in var_data
+        name_symbol = Symbol(format_property_name(var_data_tokens[1].name))
+        push!(skip_calls, :(skip_$(name_symbol)!(m)))
+        append!(var_data_exprs, generate_var_data_expr(var_data_tokens, abstract_type_name, decoder_name, encoder_name, ir))
+    end
+
     message_quoted = quote
         module $message_name
         export $abstract_type_name, $decoder_name, $encoder_name
         abstract type $abstract_type_name{T} end
 
         using ..$header_module
+        using ..: rstrip_nul
+        using StringViews: StringView
         $([:($using_stmt) for using_stmt in [:(using ..$enum_name) for enum_name in enum_imports]]...)
         $([:($using_stmt) for using_stmt in [:(using ..$composite_name) for composite_name in composite_imports]]...)
 
@@ -983,7 +1147,21 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
         Base.sizeof(m::$abstract_type_name) = sbe_encoded_length(m)
 
         $(field_exprs...)
+        $(var_data_exprs...)
+
+        @inline function sbe_decoded_length(m::$abstract_type_name)
+            skipper = $decoder_name(sbe_buffer(m), sbe_offset(m), Ref(0),
+                sbe_acting_block_length(m), sbe_acting_version(m))
+            sbe_skip!(skipper)
+            return sbe_encoded_length(skipper)
         end
+
+        @inline function sbe_skip!(m::$decoder_name)
+            sbe_rewind!(m)
+            $(isempty(skip_calls) ? :(return) : Expr(:block, skip_calls...))
+            return
+        end
+    end
     end
 
     return extract_expr_from_quote(message_quoted, :module)
@@ -1223,6 +1401,14 @@ function generate_ir_module_expr(ir::IR.Ir)
     module_quoted = quote
         module $module_name
             using EnumX
+            using StringViews
+
+            @inline function rstrip_nul(a::Union{AbstractString,AbstractArray})
+                pos = findfirst(iszero, a)
+                len = pos !== nothing ? pos - 1 : Base.length(a)
+                return view(a, 1:len)
+            end
+
             $(enum_exprs...)
             $(set_exprs...)
             $(composite_exprs...)
