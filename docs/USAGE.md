@@ -153,6 +153,23 @@ len = SBE.sbe_encoded_length(car)
 decoded_len = SBE.sbe_decoded_length(dec)
 ```
 
+### Reusing PositionPointer
+
+Use a shared `PositionPointer` to avoid allocating a new pointer for each encoder/decoder.
+
+```julia
+buffer = zeros(UInt8, 512)
+pos = SBE.PositionPointer(0)
+
+enc = Baseline.Car.Encoder(buffer, 0, pos)
+Baseline.Car.serialNumber!(enc, 12345)
+Baseline.Car.modelYear!(enc, 2024)
+
+dec = Baseline.Car.Decoder(buffer, 0, pos)
+serial = Baseline.Car.serialNumber(dec)
+year = Baseline.Car.modelYear(dec)
+```
+
 ## Versioning
 
 The generated code respects `sinceVersion` and `deprecated` attributes. You can
