@@ -137,3 +137,12 @@ function generate_enum_expr(enum_def::IrEnumDef)
 
     return extract_expr_from_quote(enum_quoted, :macrocall)
 end
+
+function find_first_token(name::String, tokens::Vector{IR.Token}, start_index::Int=1)
+    for i in start_index:length(tokens)
+        if tokens[i].name == name
+            return tokens[i]
+        end
+    end
+    error("token not found: $(name)")
+end
