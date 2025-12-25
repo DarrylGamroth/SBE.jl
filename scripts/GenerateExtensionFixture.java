@@ -85,6 +85,57 @@ public class GenerateExtensionFixture
             .putModel(model, 0, model.length)
             .putActivationCode(activationCode, 0, activationCode.length);
 
-        return MessageHeaderEncoder.ENCODED_LENGTH + car.encodedLength();
+        final int encodedLength = MessageHeaderEncoder.ENCODED_LENGTH + car.encodedLength();
+        validateDecode(directBuffer, encodedLength);
+        return encodedLength;
+    }
+
+    private static void validateDecode(final UnsafeBuffer buffer, final int encodedLength)
+    {
+        final MessageHeaderDecoder headerDecoder = new MessageHeaderDecoder();
+        final CarDecoder decoder = new CarDecoder();
+
+        headerDecoder.wrap(buffer, 0);
+        decoder.wrapAndApplyHeader(buffer, 0, headerDecoder);
+
+        if (decoder.serialNumber() != 1234L)
+        {
+            throw new IllegalStateException("serialNumber mismatch");
+        }
+        if (decoder.uuid(0) != 7L || decoder.uuid(1) != 3L)
+        {
+            throw new IllegalStateException("uuid mismatch");
+        }
+        if (decoder.cupHolderCount() != 5)
+        {
+            throw new IllegalStateException("cupHolderCount mismatch");
+        }
+
+        final CarDecoder.FuelFiguresDecoder fuelFigures = decoder.fuelFigures();
+        while (fuelFigures.hasNext())
+        {
+            fuelFigures.next();
+            fuelFigures.usageDescription();
+        }
+
+        final CarDecoder.PerformanceFiguresDecoder perfFigures = decoder.performanceFigures();
+        while (perfFigures.hasNext())
+        {
+            perfFigures.next();
+            final CarDecoder.PerformanceFiguresDecoder.AccelerationDecoder accel = perfFigures.acceleration();
+            while (accel.hasNext())
+            {
+                accel.next();
+                accel.seconds();
+            }
+        }
+
+        final String manufacturer = decoder.manufacturer();
+        final String model = decoder.model();
+        final String activation = decoder.activationCode();
+        if (!"Honda".equals(manufacturer) || !"Civic VTi".equals(model) || !"abcdef".equals(activation))
+        {
+            throw new IllegalStateException("varData mismatch");
+        }
     }
 }
