@@ -38,6 +38,10 @@ schemas = [
     (joinpath("resources", "value-ref-schema.xml"), "ValueRefSchema.jl", "ValueRefSchema"),
     (joinpath("resources", "group-with-data-schema.xml"), "GroupWithData.jl", "GroupWithData"),
     (joinpath("resources", "message-block-length-test.xml"), "MessageBlockLengthTest.jl", "MessageBlockLengthTest"),
+    (joinpath("resources", "composite-offsets-schema.xml"), "CompositeOffsets.jl", "CompositeOffsets"),
+    (joinpath("resources", "embedded-length-and-count-schema.xml"), "EmbeddedLengthAndCount.jl", "EmbeddedLengthAndCount"),
+    (joinpath("resources", "message-with-lower-case-bitset.xml"), "LowerCaseBitset.jl", "LowerCaseBitset"),
+    (joinpath("resources", "fixed-sized-primitive-array-types.xml"), "FixedSizedPrimitiveArray.jl", "FixedSizedPrimitiveArray"),
 ]
 
 for (schema_file, output_file, module_name) in schemas

@@ -19,6 +19,10 @@ include("generated/ConstantEnumFields.jl")
 include("generated/ValueRefSchema.jl")
 include("generated/GroupWithData.jl")
 include("generated/MessageBlockLengthTest.jl")
+include("generated/CompositeOffsets.jl")
+include("generated/EmbeddedLengthAndCount.jl")
+include("generated/LowerCaseBitset.jl")
+include("generated/FixedSizedPrimitiveArray.jl")
 
 @testset "SBE.jl Tests" begin
     # Core functionality tests
@@ -51,4 +55,8 @@ include("generated/MessageBlockLengthTest.jl")
     include("test_value_ref_schema.jl")  # ValueRef schema parity tests
     include("test_group_with_data.jl")  # Group-with-data parity tests
     include("test_message_block_length.jl")  # Block length parity tests
+    include("test_composite_offsets.jl")  # Composite offset parity tests
+    include("test_embedded_length_and_count.jl")  # Embedded length/count parity tests
+    include("test_lower_case_bitset.jl")  # Lower-case bitset parity tests
+    include("test_fixed_sized_primitive_array.jl")  # Fixed sized primitive array parity tests
 end
