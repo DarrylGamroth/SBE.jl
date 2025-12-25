@@ -43,6 +43,7 @@ schemas = [
     (joinpath("resources", "message-with-lower-case-bitset.xml"), "LowerCaseBitset.jl", "LowerCaseBitset"),
     (joinpath("resources", "fixed-sized-primitive-array-types.xml"), "FixedSizedPrimitiveArray.jl", "FixedSizedPrimitiveArray"),
     (joinpath("resources", "encoding-types-schema.xml"), "EncodingTypes.jl", "EncodingTypes"),
+    (joinpath("resources", "group-with-constant-fields.xml"), "GroupWithConstantFields.jl", "GroupWithConstantFields"),
 ]
 
 for (schema_file, output_file, module_name) in schemas

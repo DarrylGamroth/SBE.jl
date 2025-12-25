@@ -109,6 +109,11 @@ module GeneratedEncodingTypes
 end
 const EncodingTypes = GeneratedEncodingTypes.SBETests
 
+module GeneratedGroupWithConstantFields
+    include("generated/GroupWithConstantFields.jl")
+end
+const GroupWithConstantFields = GeneratedGroupWithConstantFields.Baseline
+
 @testset "SBE.jl Tests" begin
     # Core functionality tests
     include("test_metaprogramming.jl")
@@ -145,4 +150,5 @@ const EncodingTypes = GeneratedEncodingTypes.SBETests
     include("test_lower_case_bitset.jl")  # Lower-case bitset parity tests
     include("test_fixed_sized_primitive_array.jl")  # Fixed sized primitive array parity tests
     include("test_encoding_types.jl")  # Encoding types parity tests
+    include("test_group_with_constant_fields.jl")  # Group constants parity tests
 end
