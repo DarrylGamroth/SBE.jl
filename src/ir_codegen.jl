@@ -1134,7 +1134,7 @@ function generate_group_expr(
                 offset::Int64
                 const position_ptr::Base.RefValue{Int64}
                 const initial_position::Int64
-                const count::UInt16
+                count::UInt16
                 index::UInt16
                 function $encoder_name(buffer::T, offset::Integer, position_ptr::Ref{Int64},
                     initial_position::Int64, count::Integer, index::Integer) where {T}
