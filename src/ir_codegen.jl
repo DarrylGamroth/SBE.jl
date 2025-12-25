@@ -18,6 +18,18 @@ struct IrEnumDef
     values::Vector{IrEnumValue}
 end
 
+struct IrCompositeMember
+    signal::IR.Signal.T
+    tokens::Vector{IR.Token}
+end
+
+struct IrCompositeDef
+    name::String
+    members::Vector{IrCompositeMember}
+    encoded_length::Int
+    semantic_type::Union{Nothing, String}
+end
+
 struct IrSetChoice
     name::String
     bit_position::Int
@@ -97,6 +109,34 @@ function enum_def_from_tokens(tokens::Vector{IR.Token})
         end
     end
     return IrEnumDef(begin_token.name, encoding_type, values)
+end
+
+function composite_def_from_tokens(tokens::Vector{IR.Token})
+    begin_token = tokens[1]
+    members = IrCompositeMember[]
+    i = 2
+    while i < length(tokens)
+        token = tokens[i]
+        if token.signal == IR.Signal.ENCODING
+            push!(members, IrCompositeMember(token.signal, [token]))
+            i += 1
+        elseif token.signal == IR.Signal.BEGIN_ENUM ||
+               token.signal == IR.Signal.BEGIN_SET ||
+               token.signal == IR.Signal.BEGIN_COMPOSITE
+            count = token.component_token_count
+            push!(members, IrCompositeMember(token.signal, tokens[i:(i + count - 1)]))
+            i += count
+        else
+            i += 1
+        end
+    end
+
+    return IrCompositeDef(
+        begin_token.name,
+        members,
+        begin_token.encoded_length,
+        begin_token.encoding.semantic_type
+    )
 end
 
 function set_def_from_tokens(tokens::Vector{IR.Token})
