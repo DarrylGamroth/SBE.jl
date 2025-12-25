@@ -46,17 +46,74 @@ struct IrSetDef
     offset::Int
 end
 
+const JULIA_KEYWORDS = Set([
+    "abstract",
+    "baremodule",
+    "begin",
+    "break",
+    "catch",
+    "const",
+    "continue",
+    "do",
+    "else",
+    "elseif",
+    "end",
+    "export",
+    "false",
+    "finally",
+    "for",
+    "function",
+    "global",
+    "if",
+    "import",
+    "let",
+    "local",
+    "macro",
+    "module",
+    "mutable",
+    "new",
+    "primitive",
+    "quote",
+    "return",
+    "struct",
+    "true",
+    "try",
+    "using",
+    "where",
+    "while",
+    "_",
+])
+
+function sanitize_identifier(name::String)
+    candidate = name
+    while true
+        if all(==('_'), candidate)
+            candidate *= "field"
+            continue
+        end
+        if !Base.isidentifier(candidate) || (candidate in JULIA_KEYWORDS)
+            candidate *= "_"
+            continue
+        end
+        break
+    end
+    return candidate
+end
+
 function format_struct_name(name::String)
     parts = split(name, r"[_\\-]")
-    return join([uppercasefirst(part) for part in parts])
+    raw = join([uppercasefirst(part) for part in parts])
+    return sanitize_identifier(raw)
 end
 
 function format_property_name(name::String)
     parts = split(name, r"[_\\-]")
-    if length(parts) == 1
-        return lowercasefirst(parts[1])
+    raw = if length(parts) == 1
+        lowercasefirst(parts[1])
+    else
+        lowercasefirst(parts[1]) * join([uppercasefirst(part) for part in parts[2:end]])
     end
-    return lowercasefirst(parts[1]) * join([uppercasefirst(part) for part in parts[2:end]])
+    return sanitize_identifier(raw)
 end
 
 function format_choice_name(name::String)
@@ -154,6 +211,7 @@ end
 
 function enum_def_from_tokens(tokens::Vector{IR.Token})
     begin_token = tokens[1]
+    enum_name = begin_token.referenced_name === nothing ? begin_token.name : begin_token.referenced_name
     encoding_type = begin_token.encoding.primitive_type
     values = IrEnumValue[]
     for token in tokens
@@ -162,11 +220,12 @@ function enum_def_from_tokens(tokens::Vector{IR.Token})
             push!(values, IrEnumValue(token.name, literal, token.description, token.version, token.deprecated))
         end
     end
-    return IrEnumDef(begin_token.name, encoding_type, values)
+    return IrEnumDef(enum_name, encoding_type, values)
 end
 
 function composite_def_from_tokens(tokens::Vector{IR.Token})
     begin_token = tokens[1]
+    composite_name = begin_token.referenced_name === nothing ? begin_token.name : begin_token.referenced_name
     members = IrCompositeMember[]
     i = 2
     while i < length(tokens)
@@ -186,7 +245,7 @@ function composite_def_from_tokens(tokens::Vector{IR.Token})
     end
 
     return IrCompositeDef(
-        begin_token.name,
+        composite_name,
         members,
         begin_token.encoded_length,
         begin_token.encoding.semantic_type
@@ -312,19 +371,19 @@ function generate_composite_member_expr(
             @inline function $(Symbol(member_name, :!))(m::$encoder_name, value::AbstractString)
                 bytes = codeunits(value)
                 dest = encode_array($julia_type, m.buffer, m.offset + $(token.offset), $array_len)
-                len = min(length(bytes), length(dest))
+                len = min(Base.length(bytes), Base.length(dest))
                 copyto!(dest, 1, bytes, 1, len)
-                if len < length(dest)
-                    fill!(view(dest, len+1:length(dest)), 0x00)
+                if len < Base.length(dest)
+                    fill!(view(dest, len+1:Base.length(dest)), 0x00)
                 end
             end
 
             @inline function $(Symbol(member_name, :!))(m::$encoder_name, value::AbstractVector{UInt8})
                 dest = encode_array($julia_type, m.buffer, m.offset + $(token.offset), $array_len)
-                len = min(length(value), length(dest))
+                len = min(Base.length(value), Base.length(dest))
                 copyto!(dest, 1, value, 1, len)
-                if len < length(dest)
-                    fill!(view(dest, len+1:length(dest)), 0x00)
+                if len < Base.length(dest)
+                    fill!(view(dest, len+1:Base.length(dest)), 0x00)
                 end
             end
 
@@ -729,19 +788,19 @@ function generate_encoded_field_expr(
                 @inline function $(Symbol(field_name, :!))(m::$encoder_name, value::AbstractString)
                     bytes = codeunits(value)
                     dest = encode_array($julia_type, m.buffer, m.offset + $(field_token.offset), $array_len)
-                    len = min(length(bytes), length(dest))
+                    len = min(Base.length(bytes), Base.length(dest))
                     copyto!(dest, 1, bytes, 1, len)
-                    if len < length(dest)
-                        fill!(view(dest, len+1:length(dest)), 0x00)
+                    if len < Base.length(dest)
+                        fill!(view(dest, len+1:Base.length(dest)), 0x00)
                     end
                 end
 
                 @inline function $(Symbol(field_name, :!))(m::$encoder_name, value::AbstractVector{UInt8})
                     dest = encode_array($julia_type, m.buffer, m.offset + $(field_token.offset), $array_len)
-                    len = min(length(value), length(dest))
+                    len = min(Base.length(value), Base.length(dest))
                     copyto!(dest, 1, value, 1, len)
-                    if len < length(dest)
-                        fill!(view(dest, len+1:length(dest)), 0x00)
+                    if len < Base.length(dest)
+                        fill!(view(dest, len+1:Base.length(dest)), 0x00)
                     end
                 end
 
@@ -763,19 +822,19 @@ function generate_encoded_field_expr(
                 @inline function $(Symbol(field_name, :!))(m::$encoder_name, value::AbstractString)
                     bytes = codeunits(value)
                     dest = encode_array($julia_type, m.buffer, m.offset + $(field_token.offset), $array_len)
-                    len = min(length(bytes), length(dest))
+                    len = min(Base.length(bytes), Base.length(dest))
                     copyto!(dest, 1, bytes, 1, len)
-                    if len < length(dest)
-                        fill!(view(dest, len+1:length(dest)), 0x00)
+                    if len < Base.length(dest)
+                        fill!(view(dest, len+1:Base.length(dest)), 0x00)
                     end
                 end
 
                 @inline function $(Symbol(field_name, :!))(m::$encoder_name, value::AbstractVector{UInt8})
                     dest = encode_array($julia_type, m.buffer, m.offset + $(field_token.offset), $array_len)
-                    len = min(length(value), length(dest))
+                    len = min(Base.length(value), Base.length(dest))
                     copyto!(dest, 1, value, 1, len)
-                    if len < length(dest)
-                        fill!(view(dest, len+1:length(dest)), 0x00)
+                    if len < Base.length(dest)
+                        fill!(view(dest, len+1:Base.length(dest)), 0x00)
                     end
                 end
 
@@ -1161,7 +1220,7 @@ function generate_var_data_expr(
 
     push!(exprs, quote
         @inline function $accessor_setter(m::$encoder_name, src::AbstractArray)
-            len = sizeof(eltype(src)) * length(src)
+            len = sizeof(eltype(src)) * Base.length(src)
             $length_name_setter(m, len)
             pos = sbe_position(m) + $header_length
             sbe_position!(m, pos + len)
@@ -1663,6 +1722,7 @@ end
 
 function set_def_from_tokens(tokens::Vector{IR.Token})
     begin_token = tokens[1]
+    set_name = begin_token.referenced_name === nothing ? begin_token.name : begin_token.referenced_name
     encoding_type = begin_token.encoding.primitive_type
     choices = IrSetChoice[]
     for token in tokens
@@ -1671,7 +1731,7 @@ function set_def_from_tokens(tokens::Vector{IR.Token})
             push!(choices, IrSetChoice(token.name, bit_position, token.description, token.version, token.deprecated))
         end
     end
-    return IrSetDef(begin_token.name, encoding_type, choices, begin_token.version, begin_token.offset)
+    return IrSetDef(set_name, encoding_type, choices, begin_token.version, begin_token.offset)
 end
 
 function generate_enum_expr(enum_def::IrEnumDef)
@@ -1682,7 +1742,7 @@ function generate_enum_expr(enum_def::IrEnumDef)
     enum_values = Expr[]
 
     for value in enum_def.values
-        value_name = Symbol(value.name)
+        value_name = Symbol(sanitize_identifier(value.name))
         push!(enum_values, :($value_name = $(Meta.parse(value.literal))))
     end
 

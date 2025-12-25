@@ -1436,7 +1436,7 @@ begin
 end
 begin
     @inline function name!(m::Encoder, src::AbstractArray)
-            len = sizeof(eltype(src)) * length(src)
+            len = sizeof(eltype(src)) * Base.length(src)
             name_length!(m, len)
             pos = sbe_position(m) + 2
             sbe_position!(m, pos + len)
@@ -1565,7 +1565,7 @@ begin
 end
 begin
     @inline function constValue!(m::Encoder, src::AbstractArray)
-            len = sizeof(eltype(src)) * length(src)
+            len = sizeof(eltype(src)) * Base.length(src)
             constValue_length!(m, len)
             pos = sbe_position(m) + 2
             sbe_position!(m, pos + len)
@@ -1694,7 +1694,7 @@ begin
 end
 begin
     @inline function minValue!(m::Encoder, src::AbstractArray)
-            len = sizeof(eltype(src)) * length(src)
+            len = sizeof(eltype(src)) * Base.length(src)
             minValue_length!(m, len)
             pos = sbe_position(m) + 2
             sbe_position!(m, pos + len)
@@ -1823,7 +1823,7 @@ begin
 end
 begin
     @inline function maxValue!(m::Encoder, src::AbstractArray)
-            len = sizeof(eltype(src)) * length(src)
+            len = sizeof(eltype(src)) * Base.length(src)
             maxValue_length!(m, len)
             pos = sbe_position(m) + 2
             sbe_position!(m, pos + len)
@@ -1952,7 +1952,7 @@ begin
 end
 begin
     @inline function nullValue!(m::Encoder, src::AbstractArray)
-            len = sizeof(eltype(src)) * length(src)
+            len = sizeof(eltype(src)) * Base.length(src)
             nullValue_length!(m, len)
             pos = sbe_position(m) + 2
             sbe_position!(m, pos + len)
@@ -2081,7 +2081,7 @@ begin
 end
 begin
     @inline function characterEncoding!(m::Encoder, src::AbstractArray)
-            len = sizeof(eltype(src)) * length(src)
+            len = sizeof(eltype(src)) * Base.length(src)
             characterEncoding_length!(m, len)
             pos = sbe_position(m) + 2
             sbe_position!(m, pos + len)
@@ -2210,7 +2210,7 @@ begin
 end
 begin
     @inline function epoch!(m::Encoder, src::AbstractArray)
-            len = sizeof(eltype(src)) * length(src)
+            len = sizeof(eltype(src)) * Base.length(src)
             epoch_length!(m, len)
             pos = sbe_position(m) + 2
             sbe_position!(m, pos + len)
@@ -2339,7 +2339,7 @@ begin
 end
 begin
     @inline function timeUnit!(m::Encoder, src::AbstractArray)
-            len = sizeof(eltype(src)) * length(src)
+            len = sizeof(eltype(src)) * Base.length(src)
             timeUnit_length!(m, len)
             pos = sbe_position(m) + 2
             sbe_position!(m, pos + len)
@@ -2468,7 +2468,7 @@ begin
 end
 begin
     @inline function semanticType!(m::Encoder, src::AbstractArray)
-            len = sizeof(eltype(src)) * length(src)
+            len = sizeof(eltype(src)) * Base.length(src)
             semanticType_length!(m, len)
             pos = sbe_position(m) + 2
             sbe_position!(m, pos + len)
@@ -2597,7 +2597,7 @@ begin
 end
 begin
     @inline function description!(m::Encoder, src::AbstractArray)
-            len = sizeof(eltype(src)) * length(src)
+            len = sizeof(eltype(src)) * Base.length(src)
             description_length!(m, len)
             pos = sbe_position(m) + 2
             sbe_position!(m, pos + len)
@@ -2726,7 +2726,7 @@ begin
 end
 begin
     @inline function referencedName!(m::Encoder, src::AbstractArray)
-            len = sizeof(eltype(src)) * length(src)
+            len = sizeof(eltype(src)) * Base.length(src)
             referencedName_length!(m, len)
             pos = sbe_position(m) + 2
             sbe_position!(m, pos + len)
@@ -2855,7 +2855,7 @@ begin
 end
 begin
     @inline function packageName!(m::Encoder, src::AbstractArray)
-            len = sizeof(eltype(src)) * length(src)
+            len = sizeof(eltype(src)) * Base.length(src)
             packageName_length!(m, len)
             pos = sbe_position(m) + 2
             sbe_position!(m, pos + len)
@@ -3340,7 +3340,7 @@ begin
 end
 begin
     @inline function packageName!(m::Encoder, src::AbstractArray)
-            len = sizeof(eltype(src)) * length(src)
+            len = sizeof(eltype(src)) * Base.length(src)
             packageName_length!(m, len)
             pos = sbe_position(m) + 2
             sbe_position!(m, pos + len)
@@ -3469,7 +3469,7 @@ begin
 end
 begin
     @inline function namespaceName!(m::Encoder, src::AbstractArray)
-            len = sizeof(eltype(src)) * length(src)
+            len = sizeof(eltype(src)) * Base.length(src)
             namespaceName_length!(m, len)
             pos = sbe_position(m) + 2
             sbe_position!(m, pos + len)
@@ -3598,7 +3598,7 @@ begin
 end
 begin
     @inline function semanticVersion!(m::Encoder, src::AbstractArray)
-            len = sizeof(eltype(src)) * length(src)
+            len = sizeof(eltype(src)) * Base.length(src)
             semanticVersion_length!(m, len)
             pos = sbe_position(m) + 2
             sbe_position!(m, pos + len)

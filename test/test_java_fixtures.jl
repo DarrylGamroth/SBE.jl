@@ -6,6 +6,62 @@ module FixtureGenerated
     using .Baseline
 end
 
+@testset "Java Codegen Keyword Fixture Parity" begin
+    fixture_path = joinpath(@__DIR__, "java-fixtures", "codegen-global-keywords.bin")
+    @test isfile(fixture_path)
+    bytes = read(fixture_path)
+
+    dec = CodeGenerationTest.GlobalKeywords.Decoder(bytes, 0)
+    @test CodeGenerationTest.GlobalKeywords.abstract_(dec) == Int8(1)
+    @test CodeGenerationTest.GlobalKeywords.break_(dec) == Int8(2)
+    @test CodeGenerationTest.GlobalKeywords.const_(dec) == Int8(3)
+    @test CodeGenerationTest.GlobalKeywords.continue_(dec) == Int8(4)
+    @test CodeGenerationTest.GlobalKeywords.do_(dec) == Int8(5)
+    @test CodeGenerationTest.GlobalKeywords.else_(dec) == Int8(6)
+    @test CodeGenerationTest.GlobalKeywords.for_(dec) == Int8(7)
+    @test CodeGenerationTest.GlobalKeywords.if_(dec) == Int8(8)
+    @test CodeGenerationTest.GlobalKeywords.false_(dec) == Int8(9)
+    @test CodeGenerationTest.GlobalKeywords.try_(dec) == Int8(10)
+    @test CodeGenerationTest.GlobalKeywords.struct_(dec) == Int8(11)
+    @test CodeGenerationTest.GlobalKeywords.new_(dec) == Int8(12)
+    @test String(CodeGenerationTest.GlobalKeywords.import_(dec)) == "IMPORT"
+    @test String(CodeGenerationTest.GlobalKeywords.strictfp(dec)) == "STRICTFP"
+
+    data_group = CodeGenerationTest.GlobalKeywords.data(dec)
+    @test length(data_group) == 0
+
+    @test String(CodeGenerationTest.GlobalKeywords.go(dec)) == "go-value"
+    @test String(CodeGenerationTest.GlobalKeywords.package(dec)) == "package-value"
+    @test String(CodeGenerationTest.GlobalKeywords.var(dec)) == "var-value"
+
+    buffer = zeros(UInt8, 4096)
+    enc = CodeGenerationTest.GlobalKeywords.Encoder(buffer, 0)
+    CodeGenerationTest.GlobalKeywords.abstract_!(enc, Int8(1))
+    CodeGenerationTest.GlobalKeywords.break_!(enc, Int8(2))
+    CodeGenerationTest.GlobalKeywords.const_!(enc, Int8(3))
+    CodeGenerationTest.GlobalKeywords.continue_!(enc, Int8(4))
+    CodeGenerationTest.GlobalKeywords.do_!(enc, Int8(5))
+    CodeGenerationTest.GlobalKeywords.else_!(enc, Int8(6))
+    CodeGenerationTest.GlobalKeywords.for_!(enc, Int8(7))
+    CodeGenerationTest.GlobalKeywords.if_!(enc, Int8(8))
+    CodeGenerationTest.GlobalKeywords.false_!(enc, Int8(9))
+    CodeGenerationTest.GlobalKeywords.try_!(enc, Int8(10))
+    CodeGenerationTest.GlobalKeywords.struct_!(enc, Int8(11))
+    CodeGenerationTest.GlobalKeywords.new_!(enc, Int8(12))
+    CodeGenerationTest.GlobalKeywords.import_!(enc, "IMPORT")
+    CodeGenerationTest.GlobalKeywords.strictfp!(enc, "STRICTFP")
+
+    CodeGenerationTest.GlobalKeywords.data!(enc, 0)
+    CodeGenerationTest.GlobalKeywords.go!(enc, "go-value")
+    CodeGenerationTest.GlobalKeywords.package!(enc, "package-value")
+    CodeGenerationTest.GlobalKeywords.var!(enc, "var-value")
+
+    header_len = Int(CodeGenerationTest.MessageHeader.sbe_encoded_length(CodeGenerationTest.MessageHeader.Decoder))
+    total_len = header_len + CodeGenerationTest.GlobalKeywords.sbe_encoded_length(enc)
+    @test total_len == length(bytes)
+    @test buffer[1:total_len] == bytes
+end
+
 @testset "Java Extension Fixture Parity" begin
     fixture_path = joinpath(@__DIR__, "java-fixtures", "car-extension.bin")
     @test isfile(fixture_path)

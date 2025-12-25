@@ -8,6 +8,7 @@ include("generated/Baseline.jl")
 include("generated/Extension.jl")
 include("generated/Optional.jl")
 include("generated/Versioned.jl")
+include("generated/CodeGenerationTest.jl")
 include("generated/OrderCheck.jl")
 include("generated/CompositeElements.jl")
 
