@@ -47,6 +47,7 @@ schemas = [
     (joinpath("resources", "since-version-filter-schema.xml"), "SinceVersionFilter.jl", "SinceVersionFilter"),
     (joinpath("resources", "deprecated-msg-test-schema.xml"), "DeprecatedMessage.jl", "DeprecatedMessage"),
     (joinpath("resources", "explicit-package-test-schema.xml"), "ExplicitPackage.jl", "ExplicitPackage"),
+    (joinpath("resources", "npe-small-header.xml"), "NpeSmallHeader.jl", "NpeSmallHeader"),
     (joinpath("resources", "value-ref-with-lower-case-enum.xml"), "ValueRefLowerCaseEnum.jl", "ValueRefLowerCaseEnum"),
     (joinpath("resources", "extension-schema.xml"), "ExtensionSchema.jl", "ExtensionSchema"),
     (joinpath("resources", "constant-enum-fields.xml"), "ConstantEnumFields.jl", "ConstantEnumFields"),

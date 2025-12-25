@@ -69,6 +69,11 @@ module GeneratedExplicitPackage
 end
 const ExplicitPackage = GeneratedExplicitPackage.TestMessageSchema
 
+module GeneratedNpeSmallHeader
+    include("generated/NpeSmallHeader.jl")
+end
+const NpeSmallHeader = GeneratedNpeSmallHeader.NOTUSED
+
 module GeneratedValueRefLowerCaseEnum
     include("generated/ValueRefLowerCaseEnum.jl")
 end
@@ -304,6 +309,7 @@ const Issue849 = GeneratedIssue849.Issue849
     include("test_since_version_filter.jl")  # SinceVersion filter parity tests
     include("test_deprecated_message.jl")  # Deprecated message parity tests
     include("test_explicit_package.jl")  # Explicit package type references
+    include("test_npe_small_header.jl")  # Small header layout test
     include("test_issue483.jl")  # Required/optional/constant parity tests
     include("test_issue435.jl")  # Enum/set reference parity tests
     include("test_issue496.jl")  # Nested composite refs parity tests

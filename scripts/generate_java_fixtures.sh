@@ -3,10 +3,11 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SBE_VERSION="${SBE_VERSION:-1.36.2}"
-SBE_GROUP="uk.co.real-logic"
+SBE_GROUP="uk/co/real-logic"
 SBE_ARTIFACT="sbe-all"
-M2_REPO="${M2_REPO:-${HOME}/.m2/repository}"
-SBE_JAR="${M2_REPO}/${SBE_GROUP//./\/}/${SBE_ARTIFACT}/${SBE_VERSION}/${SBE_ARTIFACT}-${SBE_VERSION}.jar"
+SBE_CACHE_DIR="${SBE_CACHE_DIR:-${HOME}/.cache/sbe}"
+SBE_JAR="${SBE_CACHE_DIR}/${SBE_ARTIFACT}-${SBE_VERSION}.jar"
+SBE_JAR_URL="https://repo1.maven.org/maven2/${SBE_GROUP}/${SBE_ARTIFACT}/${SBE_VERSION}/${SBE_ARTIFACT}-${SBE_VERSION}.jar"
 SCHEMA="${ROOT_DIR}/test/example-schema.xml"
 EXT_SCHEMA="${ROOT_DIR}/test/example-extension-schema.xml"
 CODEGEN_SCHEMA="${ROOT_DIR}/test/resources/java-code-generation-schema.xml"
@@ -18,18 +19,11 @@ CODEGEN_FIXTURE_OUT="${ROOT_DIR}/test/java-fixtures/codegen-global-keywords.bin"
 JAVA_OPTS=(--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED)
 
 rm -rf "${OUT_DIR}" "${CLASS_DIR}"
-mkdir -p "${OUT_DIR}" "${CLASS_DIR}" "${ROOT_DIR}/test/java-fixtures"
-
-if ! command -v mvn >/dev/null 2>&1; then
-  echo "mvn is required to download sbe-all from Maven (missing on PATH)." >&2
-  exit 1
-fi
-
-mvn -q dependency:get -Dartifact="${SBE_GROUP}:${SBE_ARTIFACT}:${SBE_VERSION}" -Dtransitive=false
+mkdir -p "${OUT_DIR}" "${CLASS_DIR}" "${ROOT_DIR}/test/java-fixtures" "${SBE_CACHE_DIR}"
 
 if [[ ! -f "${SBE_JAR}" ]]; then
-  echo "sbe-all jar not found at ${SBE_JAR} after Maven download." >&2
-  exit 1
+  echo "Downloading sbe-all ${SBE_VERSION}..." >&2
+  curl -fsSL "${SBE_JAR_URL}" -o "${SBE_JAR}"
 fi
 
 java "${JAVA_OPTS[@]}" -Dsbe.keyword.append.token=_ -Dsbe.target.language=java -Dsbe.output.dir="${OUT_DIR}" -jar "${SBE_JAR}" "${SCHEMA}"

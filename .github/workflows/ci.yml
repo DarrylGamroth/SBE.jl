@@ -64,13 +64,13 @@ jobs:
         with:
           distribution: 'zulu'
           java-version: '17'
-      - name: Cache Maven repository
+      - name: Cache SBE jar
         uses: actions/cache@v4
         with:
-          path: ~/.m2/repository
-          key: m2-${{ runner.os }}-sbe-${{ env.SBE_VERSION }}
+          path: ~/.cache/sbe
+          key: sbe-jar-${{ runner.os }}-${{ env.SBE_VERSION }}
           restore-keys: |
-            m2-${{ runner.os }}-sbe-
+            sbe-jar-${{ runner.os }}-
       - uses: julia-actions/setup-julia@v2
         with:
           version: ${{ matrix.version }}

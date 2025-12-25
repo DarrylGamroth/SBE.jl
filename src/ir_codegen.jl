@@ -543,6 +543,7 @@ function generate_composite_expr(composite_def::IrCompositeDef, ir::IR.Ir)
     abstract_type_name = Symbol(string("Abstract", composite_name))
     decoder_name = :Decoder
     encoder_name = :Encoder
+    version_type_symbol = header_field_type(ir, "version")
 
     field_exprs = Expr[]
     var_data_exprs = Expr[]
@@ -594,7 +595,7 @@ function generate_composite_expr(composite_def::IrCompositeDef, ir::IR.Ir)
             struct $decoder_name{T<:AbstractArray{UInt8}} <: $abstract_type_name
                 buffer::T
                 offset::Int64
-                acting_version::UInt16
+                acting_version::$version_type_symbol
             end
 
             struct $encoder_name{T<:AbstractArray{UInt8}} <: $abstract_type_name
@@ -1307,6 +1308,7 @@ function generate_group_expr(
     block_length = group_token.encoded_length
     group_id = group_token.id
     since_version = group_token.version
+    version_type_symbol = header_field_type(ir, "version")
 
     num_in_group_token = find_first_token("numInGroup", dimension_tokens, 1)
     max_count = primitive_value_int(num_in_group_token.encoding.max_value, num_in_group_token.encoding.primitive_type, IR.primitive_type_max)
@@ -1401,7 +1403,7 @@ function generate_group_expr(
             offset::Int64
             const position_ptr::P
             const block_length::UInt16
-            const acting_version::UInt16
+            const acting_version::$version_type_symbol
             const count::$count_type_symbol
             index::$count_type_symbol
             function $decoder_name(buffer::T, offset::Integer, position_ptr::P,
@@ -1550,6 +1552,7 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
     decoder_name = :Decoder
     encoder_name = :Encoder
     header_module = Symbol(format_struct_name(ir.header_structure.tokens[1].name))
+    version_type_symbol = header_field_type(ir, "version")
 
     body = IR.get_message_body(message_tokens)
     fields, idx = split_components(collect(body), IR.Signal.BEGIN_FIELD, 1)
@@ -1634,7 +1637,7 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
             offset::Int64
             position_ptr::P
             acting_block_length::UInt16
-            acting_version::UInt16
+            acting_version::$version_type_symbol
             function $decoder_name(buffer::T, offset::Integer, position_ptr::P,
                 acting_block_length::Integer, acting_version::Integer) where {T,P}
                 position_ptr[] = offset + acting_block_length
@@ -1822,6 +1825,7 @@ function generate_set_expr(set_def::IrSetDef, ir::IR.Ir)
     abstract_type_name = Symbol(string("Abstract", set_name))
     decoder_name = :Decoder
     encoder_name = :Encoder
+    version_type_symbol = header_field_type(ir, "version")
 
     encoding_julia_type = IR.primitive_type_julia(set_def.encoding_type)
     encoding_type_symbol = Symbol(encoding_julia_type)
@@ -1866,7 +1870,7 @@ function generate_set_expr(set_def::IrSetDef, ir::IR.Ir)
             struct $decoder_name{T<:AbstractVector{UInt8}} <: $abstract_type_name
                 buffer::T
                 offset::Int
-                acting_version::UInt16
+                acting_version::$version_type_symbol
             end
 
             struct $encoder_name{T<:AbstractVector{UInt8}} <: $abstract_type_name
