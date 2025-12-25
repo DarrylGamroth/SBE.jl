@@ -1,5 +1,4 @@
 #!/usr/bin/env julia
-using Downloads
 
 function java_executable(name)
     exe = Sys.which(name)
@@ -52,7 +51,7 @@ function main()
 
     if !isfile(sbe_jar)
         println("Downloading sbe-all $(sbe_version)...")
-        Downloads.download(sbe_url, sbe_jar)
+        Base.download(sbe_url, sbe_jar)
     end
 
     java = java_executable("java")
