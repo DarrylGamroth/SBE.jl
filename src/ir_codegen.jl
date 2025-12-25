@@ -1173,7 +1173,7 @@ function generate_var_data_expr(
         @inline function $length_name_setter(m::$encoder_name, n)
             @boundscheck n > $max_literal && throw(ArgumentError("length exceeds schema limit"))
             @boundscheck checkbounds(m.buffer, sbe_position(m) + $header_length + n)
-            return encode_value($length_type, m.buffer, sbe_position(m), n)
+            return encode_value($length_type, m.buffer, sbe_position(m), $length_type_symbol(n))
         end
     end)
 

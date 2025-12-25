@@ -139,6 +139,16 @@ module GeneratedIssue496
 end
 const Issue496 = GeneratedIssue496.Issue488
 
+module GeneratedIssue488
+    include("generated/Issue488.jl")
+end
+const Issue488Schema = GeneratedIssue488.Issue488
+
+module GeneratedIssue472
+    include("generated/Issue472.jl")
+end
+const Issue472 = GeneratedIssue472.Issue472
+
 @testset "SBE.jl Tests" begin
     # Core functionality tests
     include("test_metaprogramming.jl")
@@ -181,4 +191,6 @@ const Issue496 = GeneratedIssue496.Issue488
     include("test_issue483.jl")  # Required/optional/constant parity tests
     include("test_issue435.jl")  # Enum/set reference parity tests
     include("test_issue496.jl")  # Nested composite refs parity tests
+    include("test_issue488.jl")  # Var-data length parity tests
+    include("test_issue472.jl")  # Optional uint64 parity tests
 end
