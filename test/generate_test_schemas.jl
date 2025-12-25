@@ -51,6 +51,7 @@ schemas = [
     (joinpath("resources", "issue496.xml"), "Issue496.jl", "Issue496"),
     (joinpath("resources", "issue488.xml"), "Issue488.jl", "Issue488"),
     (joinpath("resources", "issue472.xml"), "Issue472.jl", "Issue472"),
+    (joinpath("resources", "issue661.xml"), "Issue661.jl", "Issue661"),
 ]
 
 for (schema_file, output_file, module_name) in schemas

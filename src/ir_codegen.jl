@@ -83,6 +83,7 @@ const JULIA_KEYWORDS = Set([
     "where",
     "while",
     "_",
+    "Set",
 ])
 
 function sanitize_identifier(name::String)
