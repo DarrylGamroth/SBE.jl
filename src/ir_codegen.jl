@@ -146,3 +146,32 @@ function find_first_token(name::String, tokens::Vector{IR.Token}, start_index::I
     end
     error("token not found: $(name)")
 end
+
+function module_name_from_package(package_name::String)
+    parts = split(replace(package_name, "." => "_"), "_")
+    return Symbol(join([uppercasefirst(part) for part in parts]))
+end
+
+function generate_ir_module_expr(ir::IR.Ir)
+    module_name = module_name_from_package(ir.package_name)
+    enum_exprs = Expr[]
+
+    for tokens in values(ir.types_by_name)
+        if isempty(tokens)
+            continue
+        end
+        if tokens[1].signal == IR.Signal.BEGIN_ENUM
+            enum_def = enum_def_from_tokens(tokens)
+            push!(enum_exprs, generate_enum_expr(enum_def))
+        end
+    end
+
+    module_quoted = quote
+        module $module_name
+            using EnumX
+            $(enum_exprs...)
+        end
+    end
+
+    return extract_expr_from_quote(module_quoted, :module)
+end
