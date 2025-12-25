@@ -22,6 +22,7 @@ mutable struct XmlEncodedType <: XmlType
     max_value::Union{Nothing, IR.PrimitiveValue}
     null_value::Union{Nothing, IR.PrimitiveValue}
     const_value::Union{Nothing, IR.PrimitiveValue}
+    value_ref::Union{Nothing, String}
     character_encoding::Union{Nothing, String}
     offset_attribute::Int
     since_version::Int
@@ -240,6 +241,7 @@ function parse_encoded_type(
     variable_length = haskey(node, "variableLength") ? (node["variableLength"] == "true") : false
 
     const_value = nothing
+    value_ref = haskey(node, "valueRef") ? node["valueRef"] : nothing
     if presence == IR.Presence.CONSTANT
         text = strip(nodecontent(node))
         if !isempty(text)
@@ -268,6 +270,7 @@ function parse_encoded_type(
         max_value,
         null_value,
         const_value,
+        value_ref,
         character_encoding,
         offset_attribute,
         since_version,
@@ -603,17 +606,18 @@ function parse_field(node, types_by_name::Dict{String, XmlType})
             IR.Presence.REQUIRED,
             "",
             nothing,
-            primitive_type,
-            1,
-            false,
-            nothing,
-            nothing,
-            nothing,
-            nothing,
-            nothing,
-            0,
-            0,
-            0
+        primitive_type,
+        1,
+        false,
+        nothing,
+        nothing,
+        nothing,
+        nothing,
+        nothing,
+        nothing,
+        0,
+        0,
+        0
         )
     end
     return XmlField(
@@ -1220,6 +1224,10 @@ function add_encoded_type!(state::IrGeneratorState, type_def::XmlEncodedType, of
     end
 
     if type_def.presence == IR.Presence.CONSTANT
+        const_value = type_def.const_value
+        if const_value === nothing && type_def.value_ref !== nothing
+            const_value = lookup_value_ref(state.schema, type_def.value_ref)
+        end
         encoding = IR.Encoding(
             IR.Presence.CONSTANT,
             type_def.primitive_type,
@@ -1227,7 +1235,7 @@ function add_encoded_type!(state::IrGeneratorState, type_def::XmlEncodedType, of
             nothing,
             nothing,
             nothing,
-            type_def.const_value,
+            const_value,
             type_def.character_encoding,
             nothing,
             nothing,
@@ -1296,6 +1304,9 @@ function add_encoded_type!(state::IrGeneratorState, type_def::XmlEncodedType, of
 
     if effective_presence == IR.Presence.CONSTANT
         const_value = field.value_ref === nothing ? type_def.const_value : lookup_value_ref(state.schema, field.value_ref)
+        if const_value === nothing && type_def.value_ref !== nothing
+            const_value = lookup_value_ref(state.schema, type_def.value_ref)
+        end
         encoding = IR.Encoding(
             IR.Presence.CONSTANT,
             type_def.primitive_type,

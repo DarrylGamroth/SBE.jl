@@ -16,6 +16,9 @@ include("generated/Issue889.jl")
 include("generated/ValueRefLowerCaseEnum.jl")
 include("generated/ExtensionSchema.jl")
 include("generated/ConstantEnumFields.jl")
+include("generated/ValueRefSchema.jl")
+include("generated/GroupWithData.jl")
+include("generated/MessageBlockLengthTest.jl")
 
 @testset "SBE.jl Tests" begin
     # Core functionality tests
@@ -45,4 +48,7 @@ include("generated/ConstantEnumFields.jl")
     include("test_java_generation_parity.jl")  # Java generator schema parity
     include("test_fixed_size_blob.jl")  # Fixed-length blob parity tests
     include("test_constant_enum_fields.jl")  # Constant enum field parity tests
+    include("test_value_ref_schema.jl")  # ValueRef schema parity tests
+    include("test_group_with_data.jl")  # Group-with-data parity tests
+    include("test_message_block_length.jl")  # Block length parity tests
 end

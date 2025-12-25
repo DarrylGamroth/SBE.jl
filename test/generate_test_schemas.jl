@@ -35,6 +35,9 @@ schemas = [
     (joinpath("resources", "value-ref-with-lower-case-enum.xml"), "ValueRefLowerCaseEnum.jl", "ValueRefLowerCaseEnum"),
     (joinpath("resources", "extension-schema.xml"), "ExtensionSchema.jl", "ExtensionSchema"),
     (joinpath("resources", "constant-enum-fields.xml"), "ConstantEnumFields.jl", "ConstantEnumFields"),
+    (joinpath("resources", "value-ref-schema.xml"), "ValueRefSchema.jl", "ValueRefSchema"),
+    (joinpath("resources", "group-with-data-schema.xml"), "GroupWithData.jl", "GroupWithData"),
+    (joinpath("resources", "message-block-length-test.xml"), "MessageBlockLengthTest.jl", "MessageBlockLengthTest"),
 ]
 
 for (schema_file, output_file, module_name) in schemas
