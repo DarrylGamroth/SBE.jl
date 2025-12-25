@@ -34,4 +34,5 @@ include("generated/CompositeElements.jl")
     include("test_complex_patterns.jl")
     include("test_allocations.jl")
     include("test_interop.jl")  # Binary compatibility with sbe-tool Java generator
+    include("test_java_fixtures.jl")  # Java-generator binary fixtures
 end

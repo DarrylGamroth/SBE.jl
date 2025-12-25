@@ -1,2 +1,4 @@
 test/generated/
 Manifest.toml
+test/java-fixtures/generated/
+test/java-fixtures/classes/
