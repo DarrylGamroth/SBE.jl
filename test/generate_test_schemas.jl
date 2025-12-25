@@ -45,6 +45,7 @@ schemas = [
     (joinpath("resources", "encoding-types-schema.xml"), "EncodingTypes.jl", "EncodingTypes"),
     (joinpath("resources", "group-with-constant-fields.xml"), "GroupWithConstantFields.jl", "GroupWithConstantFields"),
     (joinpath("resources", "nested-composite-name.xml"), "NestedCompositeName.jl", "NestedCompositeName"),
+    (joinpath("resources", "issue1007.xml"), "Issue1007.jl", "Issue1007"),
 ]
 
 for (schema_file, output_file, module_name) in schemas

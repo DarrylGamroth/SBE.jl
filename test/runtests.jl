@@ -119,6 +119,11 @@ module GeneratedNestedCompositeName
 end
 const NestedCompositeName = GeneratedNestedCompositeName.NestedCompositeName
 
+module GeneratedIssue1007
+    include("generated/Issue1007.jl")
+end
+const Issue1007 = GeneratedIssue1007.Issue1007
+
 @testset "SBE.jl Tests" begin
     # Core functionality tests
     include("test_metaprogramming.jl")
@@ -157,4 +162,5 @@ const NestedCompositeName = GeneratedNestedCompositeName.NestedCompositeName
     include("test_encoding_types.jl")  # Encoding types parity tests
     include("test_group_with_constant_fields.jl")  # Group constants parity tests
     include("test_nested_composite_name.jl")  # Nested composite name parity tests
+    include("test_issue1007.jl")  # Keyword enum value parity tests
 end
