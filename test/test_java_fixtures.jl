@@ -9,7 +9,8 @@ end
 const FixtureBaseline = FixtureGenerated.Baseline
 
 function encode_baseline_car!(buffer::Vector{UInt8})
-    enc = FixtureBaseline.Car.Encoder(buffer, 0)
+    header = FixtureBaseline.MessageHeader.Encoder(buffer, 0)
+    enc = FixtureBaseline.Car.Encoder(buffer, 0; header=header)
 
     FixtureBaseline.Car.serialNumber!(enc, UInt64(1234))
     FixtureBaseline.Car.modelYear!(enc, UInt16(2013))
@@ -378,9 +379,12 @@ end
 end
 
 @testset "Java Decoder Round-Trip (Julia -> Java)" begin
-    jar_path = get(ENV, "SBE_JAR_PATH", joinpath(homedir(), ".cache", "sbe", "sbe-tool.jar"))
+    sbe_version = get(ENV, "SBE_VERSION", "1.36.2")
+    jar_default = joinpath(homedir(), ".cache", "sbe", "sbe-all-$(sbe_version).jar")
+    jar_path = get(ENV, "SBE_JAR_PATH", jar_default)
     class_dir = joinpath(@__DIR__, "java-fixtures", "classes")
     java = Sys.which("java")
+    java_opts = ["--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED"]
     classpath_sep = Sys.iswindows() ? ";" : ":"
 
     if java === nothing || !isfile(jar_path) || !isdir(class_dir)
@@ -397,6 +401,6 @@ end
     mktemp() do path, io
         write(io, buffer[1:total_len])
         close(io)
-        run(`$java -cp $jar_path$classpath_sep$class_dir VerifyCarFixture $path`)
+        run(`$java $(java_opts...) -cp $jar_path$classpath_sep$class_dir VerifyCarFixture $path`)
     end
 end

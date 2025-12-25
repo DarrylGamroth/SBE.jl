@@ -1,7 +1,36 @@
 using Test
 using SBE
 
-const SBE_JAR_PATH = get(ENV, "SBE_JAR_PATH", joinpath(homedir(), ".cache", "sbe", "sbe-tool.jar"))
+const SBE_VERSION = get(ENV, "SBE_VERSION", "1.36.2")
+const SBE_JAR_PATH = get(
+    ENV,
+    "SBE_JAR_PATH",
+    joinpath(homedir(), ".cache", "sbe", "sbe-all-$(SBE_VERSION).jar")
+)
+
+function normalize_primitive_value(
+    primitive_type::SBE.IR.PrimitiveType.T,
+    value::Union{Nothing, String}
+)
+    value === nothing && return nothing
+    if primitive_type == SBE.IR.PrimitiveType.CHAR
+        all(isdigit, value) && return value
+        if ncodeunits(value) == 1
+            return string(Int(codeunit(value, 1)))
+        end
+    end
+    return value
+end
+
+function normalize_character_encoding(
+    primitive_type::SBE.IR.PrimitiveType.T,
+    value::Union{Nothing, String}
+)
+    if primitive_type == SBE.IR.PrimitiveType.CHAR && value === nothing
+        return "US-ASCII"
+    end
+    return value
+end
 
 function token_signature(token::SBE.IR.Token)
     encoding = token.encoding
@@ -18,11 +47,23 @@ function token_signature(token::SBE.IR.Token)
         encoding.presence,
         encoding.primitive_type,
         encoding.byte_order,
-        encoding.min_value === nothing ? nothing : encoding.min_value.value,
-        encoding.max_value === nothing ? nothing : encoding.max_value.value,
-        encoding.null_value === nothing ? nothing : encoding.null_value.value,
-        encoding.const_value === nothing ? nothing : encoding.const_value.value,
-        encoding.character_encoding,
+        normalize_primitive_value(
+            encoding.primitive_type,
+            encoding.min_value === nothing ? nothing : encoding.min_value.value
+        ),
+        normalize_primitive_value(
+            encoding.primitive_type,
+            encoding.max_value === nothing ? nothing : encoding.max_value.value
+        ),
+        normalize_primitive_value(
+            encoding.primitive_type,
+            encoding.null_value === nothing ? nothing : encoding.null_value.value
+        ),
+        normalize_primitive_value(
+            encoding.primitive_type,
+            encoding.const_value === nothing ? nothing : encoding.const_value.value
+        ),
+        normalize_character_encoding(encoding.primitive_type, encoding.character_encoding),
         encoding.epoch,
         encoding.time_unit,
         encoding.semantic_type
@@ -54,6 +95,7 @@ end
 
 @testset "SBE IR Dogfooding" begin
     java = Sys.which("java")
+    java_opts = ["--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED"]
     if java === nothing || !isfile(SBE_JAR_PATH)
         reason = "Skipping SBE IR dogfooding: missing java=$(java === nothing ? "not found" : java), " *
                  "SBE_JAR_PATH=$(isfile(SBE_JAR_PATH) ? "found" : "missing")"
@@ -65,7 +107,7 @@ end
     schema_name = splitext(basename(schema_path))[1]
 
     mktempdir() do dir
-        run(`$java -Dsbe.generate.stubs=false -Dsbe.generate.ir=true -Dsbe.output.dir=$dir -jar $SBE_JAR_PATH $schema_path`)
+        run(`$java $(java_opts...) -Dsbe.generate.stubs=false -Dsbe.generate.ir=true -Dsbe.output.dir=$dir -jar $SBE_JAR_PATH $schema_path`)
         ir_path = joinpath(dir, schema_name * ".sbeir")
         @test isfile(ir_path)
 

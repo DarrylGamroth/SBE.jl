@@ -1,5 +1,25 @@
 using Test
 
+# Ensure Java fixtures are available when Java is installed.
+function ensure_java_fixtures!()
+    java = Sys.which("java")
+    java === nothing && return
+
+    fixture_dir = joinpath(@__DIR__, "java-fixtures")
+    class_dir = joinpath(fixture_dir, "classes")
+    sbe_version = get(ENV, "SBE_VERSION", "1.36.2")
+    jar_default = joinpath(homedir(), ".cache", "sbe", "sbe-all-$(sbe_version).jar")
+    jar_path = get(ENV, "SBE_JAR_PATH", jar_default)
+
+    if !isfile(jar_path) || !isdir(class_dir)
+        script_path = joinpath(@__DIR__, "..", "scripts", "generate_java_fixtures.sh")
+        isfile(script_path) || error("Missing Java fixture generator: $script_path")
+        run(`bash $script_path`)
+    end
+end
+
+ensure_java_fixtures!()
+
 # Generate schemas for file-based testing
 include("generate_test_schemas.jl")
 

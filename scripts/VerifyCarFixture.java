@@ -58,6 +58,25 @@ public class VerifyCarFixture
             throw new IllegalStateException("engine mismatch");
         }
 
+        final CarDecoder.FuelFiguresDecoder fuelFigures = car.fuelFigures();
+        while (fuelFigures.hasNext())
+        {
+            fuelFigures.next();
+            fuelFigures.usageDescription();
+        }
+
+        final CarDecoder.PerformanceFiguresDecoder perfFigures = car.performanceFigures();
+        while (perfFigures.hasNext())
+        {
+            perfFigures.next();
+            final CarDecoder.PerformanceFiguresDecoder.AccelerationDecoder accel = perfFigures.acceleration();
+            while (accel.hasNext())
+            {
+                accel.next();
+                accel.seconds();
+            }
+        }
+
         if (!"Honda".equals(car.manufacturer()))
         {
             throw new IllegalStateException("manufacturer mismatch");
