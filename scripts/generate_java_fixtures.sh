@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SBE_VERSION="${SBE_VERSION:-1.37.0}"
+SBE_VERSION="${SBE_VERSION:-1.36.2}"
 SBE_GROUP="uk.co.real-logic"
 SBE_ARTIFACT="sbe-all"
 M2_REPO="${M2_REPO:-${HOME}/.m2/repository}"
