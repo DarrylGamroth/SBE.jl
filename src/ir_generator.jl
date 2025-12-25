@@ -178,6 +178,59 @@ function primitive_value_from_text(
     end
 end
 
+function primitive_value_numeric(value::IR.PrimitiveValue, primitive_type::IR.PrimitiveType.T)
+    if value.representation == IR.PrimitiveValueRepresentation.DOUBLE
+        return parse(Float64, value.value)
+    end
+    if primitive_type == IR.PrimitiveType.CHAR
+        text = value.value
+        if isempty(text)
+            return 0
+        end
+        if all(isdigit, text) || startswith(text, "0x") || startswith(text, "-")
+            return parse(Int64, text)
+        end
+        return Int64(codeunit(text, 1))
+    end
+    return parse(Int64, value.value)
+end
+
+function validate_enum_values!(
+    enum_name::String,
+    encoding_type::IR.PrimitiveType.T,
+    min_value::Union{Nothing, IR.PrimitiveValue},
+    max_value::Union{Nothing, IR.PrimitiveValue},
+    null_value::Union{Nothing, IR.PrimitiveValue},
+    presence::IR.Presence.T,
+    values::Vector{XmlValidValue}
+)
+    if min_value !== nothing || max_value !== nothing
+        min_num = min_value === nothing ? -Inf : primitive_value_numeric(min_value, encoding_type)
+        max_num = max_value === nothing ? Inf : primitive_value_numeric(max_value, encoding_type)
+        for value in values
+            num = primitive_value_numeric(value.primitive_value, encoding_type)
+            if num < min_num || num > max_num
+                error("enum value out of range: $(enum_name).$(value.name)")
+            end
+        end
+        if null_value !== nothing
+            null_num = primitive_value_numeric(null_value, encoding_type)
+            if null_num < min_num || null_num > max_num
+                error("enum null value out of range: $(enum_name)")
+            end
+        end
+    end
+
+    if presence == IR.Presence.OPTIONAL && null_value !== nothing
+        null_num = primitive_value_numeric(null_value, encoding_type)
+        for value in values
+            if primitive_value_numeric(value.primitive_value, encoding_type) == null_num
+                error("enum null value collides with valid value: $(enum_name).$(value.name)")
+            end
+        end
+    end
+end
+
 function encoded_length(type_def::XmlType)
     if type_def isa XmlEncodedType
         type_def.presence == IR.Presence.CONSTANT && return 0
@@ -289,11 +342,15 @@ function parse_enum_type(
     encoding_type_name = node["encodingType"]
     encoding_type = parse_primitive_type(encoding_type_name)
     ref_null_value = nothing
+    ref_min_value = nothing
+    ref_max_value = nothing
     if encoding_type == IR.PrimitiveType.NONE && type_nodes_by_name !== nothing
         ref_node = get(type_nodes_by_name, encoding_type_name, nothing)
         if ref_node !== nothing && nodename(ref_node) == "type"
             encoding_type = parse_primitive_type(ref_node["primitiveType"])
             ref_null_value = haskey(ref_node, "nullValue") ? ref_node["nullValue"] : nothing
+            ref_min_value = haskey(ref_node, "minValue") ? ref_node["minValue"] : nothing
+            ref_max_value = haskey(ref_node, "maxValue") ? ref_node["maxValue"] : nothing
         end
     end
     presence = parse_presence(haskey(node, "presence") ? node["presence"] : nothing)
@@ -309,6 +366,20 @@ function parse_enum_type(
     else
         IR.primitive_type_null(encoding_type)
     end
+    min_value = if haskey(node, "minValue")
+        primitive_value_from_text(node["minValue"], encoding_type, 1, nothing)
+    elseif ref_min_value !== nothing
+        primitive_value_from_text(ref_min_value, encoding_type, 1, nothing)
+    else
+        nothing
+    end
+    max_value = if haskey(node, "maxValue")
+        primitive_value_from_text(node["maxValue"], encoding_type, 1, nothing)
+    elseif ref_max_value !== nothing
+        primitive_value_from_text(ref_max_value, encoding_type, 1, nothing)
+    else
+        nothing
+    end
 
     values = XmlValidValue[]
     for value_node in findall("validValue", node)
@@ -320,6 +391,8 @@ function parse_enum_type(
         primitive_value = primitive_value_from_text(value_text, encoding_type, 1, nothing)
         push!(values, XmlValidValue(value_name, value_desc, value_since, value_deprecated, primitive_value))
     end
+
+    validate_enum_values!(name, encoding_type, min_value, max_value, null_value, presence, values)
 
     return XmlEnumType(
         name,

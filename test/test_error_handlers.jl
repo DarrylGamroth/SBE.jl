@@ -9,5 +9,6 @@ using SBE
     @test_throws ErrorException SBE.generate(joinpath(base_dir, "error-handler-dup-message-schema.xml"))
     @test_throws ErrorException SBE.generate(joinpath(base_dir, "error-handler-types-dup-schema.xml"))
     @test_throws ErrorException SBE.generate(joinpath(base_dir, "error-handler-types-schema.xml"))
+    @test_throws ErrorException SBE.generate(joinpath(base_dir, "error-handler-enum-violates-min-max-value-range.xml"))
     @test_throws ErrorException SBE.generate(joinpath(base_dir, "cyclic-refs-schema.xml"))
 end
