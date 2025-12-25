@@ -187,13 +187,20 @@ include("ir_generator.jl")
 
 # IR decoding from .sbeir
 include("ir_decoder.jl")
-import .IrDecoder: decode_ir
+import .IrDecoder: decode_ir, decode_ir_generated
 
 # IR code generation utilities
 include("ir_codegen.jl")
 
 # Code generation utilities (includes abstract types and runtime support)
 include("codegen_utils.jl")
+
+# Generated SBE IR codecs (dogfooding bootstrap)
+const SBE_IR_SCHEMA_PATH = joinpath(@__DIR__, "resources", "sbe-ir.xml")
+const SBE_IR_GENERATED_PATH = joinpath(@__DIR__, "generated", "sbe_ir.jl")
+if isfile(SBE_IR_GENERATED_PATH)
+    include("generated/sbe_ir.jl")
+end
 
 # ============================================================================
 # @load_schema Macro - Primary User API
@@ -296,6 +303,6 @@ export to_string
 
 # Export utility functions for testing (with underscore prefix they're still internal)
 export generate_encoded_field_type
-export decode_ir
+export decode_ir, decode_ir_generated
 
 end # module SBE

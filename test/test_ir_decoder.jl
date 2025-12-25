@@ -134,6 +134,9 @@ end
     ir_from_xml = SBE.generate_ir(schema)
 
     ir_from_sbeir = decode_ir(sbeir_path)
+    ir_from_sbeir_generated = decode_ir_generated(sbeir_path)
 
     compare_ir(ir_from_xml, ir_from_sbeir)
+    compare_ir(ir_from_xml, ir_from_sbeir_generated)
+    compare_ir(ir_from_sbeir, ir_from_sbeir_generated)
 end

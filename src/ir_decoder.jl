@@ -8,6 +8,9 @@ module IrDecoder
 using ..IR
 import ..capture_types!
 
+const SBE_IR_MODULE_NAME = Symbol("UkCoRealLogicSbeIrGenerated")
+const SBE_IR_ALIAS_NAME = Symbol("Uk_co_real_logic_sbe_ir_generated")
+
 const SIGNAL_BY_CODE = Dict(
     UInt8(1) => IR.Signal.BEGIN_MESSAGE,
     UInt8(2) => IR.Signal.END_MESSAGE,
@@ -70,6 +73,16 @@ string_from_bytes(bytes::AbstractVector{UInt8}) = isempty(bytes) ? "" : String(V
 function optional_string_from_bytes(bytes::AbstractVector{UInt8})
     isempty(bytes) && return nothing
     return String(Vector{UInt8}(bytes))
+end
+
+function sbe_ir_module()
+    root = parentmodule(@__MODULE__)
+    for name in (SBE_IR_ALIAS_NAME, SBE_IR_MODULE_NAME)
+        if isdefined(root, name)
+            return getfield(root, name)
+        end
+    end
+    return nothing
 end
 
 function map_signal(code::UInt8)
@@ -302,6 +315,160 @@ end
 
 function decode_ir(path::AbstractString)
     return decode_ir(read(path))
+end
+
+function decode_ir_generated(buffer::AbstractVector{UInt8})
+    mod = sbe_ir_module()
+    mod === nothing && error("Generated SBE IR codecs not loaded. Run scripts/generate_sbe_ir.jl.")
+
+    pos = Ref(0)
+    frame_block_length = mod.FrameCodec.sbe_block_length(mod.FrameCodec.Decoder)
+    frame_schema_version = mod.FrameCodec.sbe_schema_version(mod.FrameCodec.Decoder)
+    frame = mod.FrameCodec.Decoder(buffer, 0, pos, frame_block_length, frame_schema_version)
+
+    ir_id = mod.FrameCodec.irId(frame)
+    ir_version = mod.FrameCodec.irVersion(frame)
+    schema_version = mod.FrameCodec.schemaVersion(frame)
+    ir_version == 0 || error("Unknown IR version: $ir_version")
+
+    package_bytes = mod.FrameCodec.packageName(frame)
+    namespace_bytes = mod.FrameCodec.namespaceName(frame)
+    semantic_bytes = mod.FrameCodec.semanticVersion(frame)
+
+    package_name = string_from_bytes(package_bytes)
+    namespace_name = optional_string_from_bytes(namespace_bytes)
+    semantic_version = optional_string_from_bytes(semantic_bytes)
+
+    tokens = IR.Token[]
+    offset = pos[]
+    token_block_length = mod.TokenCodec.sbe_block_length(mod.TokenCodec.Decoder)
+    token_schema_version = mod.TokenCodec.sbe_schema_version(mod.TokenCodec.Decoder)
+
+    while offset < length(buffer)
+        token_pos = Ref(offset)
+        token = mod.TokenCodec.Decoder(buffer, offset, token_pos, token_block_length, token_schema_version)
+
+        token_offset = mod.TokenCodec.tokenOffset(token)
+        token_size = mod.TokenCodec.tokenSize(token)
+        field_id = mod.TokenCodec.fieldId(token)
+        token_version = mod.TokenCodec.tokenVersion(token)
+        component_token_count = mod.TokenCodec.componentTokenCount(token)
+        signal = map_signal(UInt8(mod.TokenCodec.signal(token)))
+        primitive_type = map_primitive_type(UInt8(mod.TokenCodec.primitiveType(token)))
+        byte_order = map_byte_order(UInt8(mod.TokenCodec.byteOrder(token)))
+        presence = map_presence(UInt8(mod.TokenCodec.presence(token)))
+        deprecated = mod.TokenCodec.deprecated(token)
+
+        name_bytes = mod.TokenCodec.name(token)
+        const_bytes = mod.TokenCodec.constValue(token)
+        min_bytes = mod.TokenCodec.minValue(token)
+        max_bytes = mod.TokenCodec.maxValue(token)
+        null_bytes = mod.TokenCodec.nullValue(token)
+        char_enc_bytes = mod.TokenCodec.characterEncoding(token)
+        epoch_bytes = mod.TokenCodec.epoch(token)
+        time_unit_bytes = mod.TokenCodec.timeUnit(token)
+        semantic_type_bytes = mod.TokenCodec.semanticType(token)
+        description_bytes = mod.TokenCodec.description(token)
+        referenced_name_bytes = mod.TokenCodec.referencedName(token)
+        package_name_bytes = mod.TokenCodec.packageName(token)
+
+        encoding = IR.Encoding(
+            presence,
+            primitive_type,
+            byte_order,
+            primitive_value_from_bytes(min_bytes, primitive_type),
+            primitive_value_from_bytes(max_bytes, primitive_type),
+            primitive_value_from_bytes(null_bytes, primitive_type),
+            primitive_value_from_bytes(const_bytes, primitive_type),
+            optional_string_from_bytes(char_enc_bytes),
+            optional_string_from_bytes(epoch_bytes),
+            optional_string_from_bytes(time_unit_bytes),
+            optional_string_from_bytes(semantic_type_bytes)
+        )
+
+        push!(tokens, IR.Token(
+            signal,
+            string_from_bytes(name_bytes),
+            optional_string_from_bytes(referenced_name_bytes),
+            string_from_bytes(description_bytes),
+            optional_string_from_bytes(package_name_bytes),
+            field_id,
+            token_version,
+            deprecated,
+            token_size,
+            token_offset,
+            component_token_count,
+            encoding
+        ))
+
+        offset = token_pos[]
+    end
+
+    header_tokens = IR.Token[]
+    token_start = 1
+    if !isempty(tokens) && tokens[1].signal == IR.Signal.BEGIN_COMPOSITE
+        header_name = tokens[1].name
+        for i in eachindex(tokens)
+            push!(header_tokens, tokens[i])
+            if tokens[i].signal == IR.Signal.END_COMPOSITE && tokens[i].name == header_name
+                token_start = i + 1
+                break
+            end
+        end
+    end
+
+    byte_order = :littleEndian
+    for token in tokens
+        if token.signal == IR.Signal.ENCODING
+            byte_order = token.encoding.byte_order
+            break
+        end
+    end
+
+    header_structure = decode_header_structure(header_tokens)
+    namespace_source = namespace_name === nothing ? package_name : namespace_name
+    ir = IR.Ir(
+        package_name,
+        namespace_name,
+        ir_id,
+        schema_version,
+        "",
+        semantic_version === nothing ? "" : semantic_version,
+        byte_order,
+        header_structure,
+        Dict{Int, Vector{IR.Token}}(),
+        Dict{String, Vector{IR.Token}}(),
+        split(namespace_source, ".")
+    )
+
+    if !isempty(header_tokens)
+        capture_types!(ir, header_tokens)
+    end
+
+    i = token_start
+    while i <= length(tokens)
+        token = tokens[i]
+        if token.signal == IR.Signal.BEGIN_MESSAGE
+            message_tokens = IR.Token[token]
+            i += 1
+            while i <= length(tokens)
+                push!(message_tokens, tokens[i])
+                if tokens[i].signal == IR.Signal.END_MESSAGE
+                    break
+                end
+                i += 1
+            end
+            ir.messages_by_id[token.id] = message_tokens
+            capture_types!(ir, message_tokens)
+        end
+        i += 1
+    end
+
+    return ir
+end
+
+function decode_ir_generated(path::AbstractString)
+    return decode_ir_generated(read(path))
 end
 
 end # module IrDecoder
