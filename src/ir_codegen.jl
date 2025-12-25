@@ -1225,7 +1225,8 @@ function generate_group_expr(
         push!(parent_accessors, quote
             @inline function $accessor_name(m::$parent_abstract_type)
                 if sbe_acting_version(m) < $(version_expr(ir, since_version))
-                    return $decoder_name(m.buffer, sbe_position_ptr(m), sbe_acting_version(m), $(version_expr(ir, 0)), $(version_expr(ir, 0)))
+                    return $decoder_name(m.buffer, 0, sbe_position_ptr(m), $(version_expr(ir, 0)),
+                        sbe_acting_version(m), $(version_expr(ir, 0)), $(version_expr(ir, 0)))
                 end
                 return $decoder_name(m.buffer, sbe_position_ptr(m), sbe_acting_version(m))
             end
