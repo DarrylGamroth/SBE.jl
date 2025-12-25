@@ -253,9 +253,9 @@ macro load_schema(xml_path)
         let xml_file = $(esc(xml_path))
             # Parse to get module name
             xml_content = read(xml_file, String)
-            schema = SBE.parse_sbe_schema(xml_content)
+            schema = SBE.parse_xml_schema(xml_content)
             # Convert package name to PascalCase (e.g., "composite.elements" -> "CompositeElements")
-            package_parts = split(replace(schema.package, "." => "_"), "_")
+            package_parts = split(replace(schema.package_name, "." => "_"), "_")
             module_name = Symbol(join([uppercasefirst(part) for part in package_parts]))
             
             # Check if already exists
@@ -275,7 +275,7 @@ end
 # Re-export important types and functions that users need
 export Schema  # Users can access Schema.MessageDefinition, etc.
 export SBECodec, SBEFlyweight, SBEMessage
-export @load_schema, create_codec_from_schema, create_message, parse_sbe_schema
+export @load_schema, create_codec_from_schema, create_message, parse_xml_schema
 export generate  # Main code generation API
 
 # Export position pointer type

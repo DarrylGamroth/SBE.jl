@@ -3178,12 +3178,13 @@ function generate(xml_path::String, output_path::String)
         error("Schema file not found: $xml_path")
     end
     
-    # Parse the schema
+    # Parse XML and generate IR
     xml_content = read(xml_path, String)
-    schema = parse_sbe_schema(xml_content)
+    schema = parse_xml_schema(xml_content)
+    ir = generate_ir(schema)
     
-    # Generate the module expression
-    module_expr = generate_module_expr(schema)
+    # Generate the module expression from IR
+    module_expr = generate_ir_module_expr(ir)
     
     # Convert to code string
     module_code = expr_to_code_string(module_expr)
@@ -3244,12 +3245,13 @@ function generate(xml_path::String)
         error("Schema file not found: $xml_path")
     end
     
-    # Parse the schema
+    # Parse XML and generate IR
     xml_content = read(xml_path, String)
-    schema = parse_sbe_schema(xml_content)
+    schema = parse_xml_schema(xml_content)
+    ir = generate_ir(schema)
     
-    # Generate the complete module expression
-    module_expr = generate_module_expr(schema)
+    # Generate the complete module expression from IR
+    module_expr = generate_ir_module_expr(ir)
     
     # Convert to code string and return
     return expr_to_code_string(module_expr)
