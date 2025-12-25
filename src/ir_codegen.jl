@@ -1929,8 +1929,12 @@ function find_first_token(name::String, tokens::Vector{IR.Token}, start_index::I
 end
 
 function module_name_from_package(package_name::String)
-    parts = split(replace(package_name, "." => "_"), "_")
-    return Symbol(join([uppercasefirst(part) for part in parts]))
+    normalized = replace(package_name, r"[^A-Za-z0-9_]" => "_")
+    parts = split(normalized, "_")
+    parts = filter(!isempty, parts)
+    raw = join([uppercasefirst(part) for part in parts])
+    raw = isempty(raw) ? "Schema" : raw
+    return Symbol(sanitize_identifier(raw))
 end
 
 function generate_ir_module_expr(ir::IR.Ir)

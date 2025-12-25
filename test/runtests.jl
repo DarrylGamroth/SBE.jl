@@ -4,25 +4,106 @@ using Test
 include("generate_test_schemas.jl")
 
 # Load generated schemas for file-based testing
-include("generated/Baseline.jl")
-include("generated/Extension.jl")
-include("generated/Optional.jl")
-include("generated/Versioned.jl")
-include("generated/CodeGenerationTest.jl")
-include("generated/OrderCheck.jl")
-include("generated/CompositeElements.jl")
-include("generated/Issue505.jl")
-include("generated/Issue889.jl")
-include("generated/ValueRefLowerCaseEnum.jl")
-include("generated/ExtensionSchema.jl")
-include("generated/ConstantEnumFields.jl")
-include("generated/ValueRefSchema.jl")
-include("generated/GroupWithData.jl")
-include("generated/MessageBlockLengthTest.jl")
-include("generated/CompositeOffsets.jl")
-include("generated/EmbeddedLengthAndCount.jl")
-include("generated/LowerCaseBitset.jl")
-include("generated/FixedSizedPrimitiveArray.jl")
+module GeneratedBaseline
+    include("generated/Baseline.jl")
+end
+const Baseline = GeneratedBaseline.Baseline
+
+module GeneratedExtension
+    include("generated/Extension.jl")
+end
+const Extension = GeneratedExtension.Extension
+
+module GeneratedOptional
+    include("generated/Optional.jl")
+end
+const Optional = GeneratedOptional.Optional
+
+module GeneratedVersioned
+    include("generated/Versioned.jl")
+end
+const Versioned = GeneratedVersioned.Versioned
+
+module GeneratedCodeGenerationTest
+    include("generated/CodeGenerationTest.jl")
+end
+const CodeGenerationTest = GeneratedCodeGenerationTest.CodeGenerationTest
+
+module GeneratedOrderCheck
+    include("generated/OrderCheck.jl")
+end
+const OrderCheck = GeneratedOrderCheck.OrderCheck
+const Order_check = OrderCheck
+
+module GeneratedCompositeElements
+    include("generated/CompositeElements.jl")
+end
+const CompositeElements = GeneratedCompositeElements.CompositeElements
+
+module GeneratedIssue505
+    include("generated/Issue505.jl")
+end
+const Issue505 = GeneratedIssue505.Issue505
+
+module GeneratedIssue889
+    include("generated/Issue889.jl")
+end
+const Issue889 = GeneratedIssue889.Issue889
+
+module GeneratedValueRefLowerCaseEnum
+    include("generated/ValueRefLowerCaseEnum.jl")
+end
+const ValueRefLowerCaseEnum = GeneratedValueRefLowerCaseEnum.Issue505
+
+module GeneratedJsonPrinterBaseline
+    include("generated/JsonPrinterBaseline.jl")
+end
+const JsonPrinterBaseline = GeneratedJsonPrinterBaseline.Baseline
+
+module GeneratedExtensionSchema
+    include("generated/ExtensionSchema.jl")
+end
+const ExtensionSchema = GeneratedExtensionSchema.CodeGenerationTest
+
+module GeneratedConstantEnumFields
+    include("generated/ConstantEnumFields.jl")
+end
+const ConstantEnumFields = GeneratedConstantEnumFields.Baseline
+
+module GeneratedValueRefSchema
+    include("generated/ValueRefSchema.jl")
+end
+const ValueRefSchema = GeneratedValueRefSchema.CompositeElements
+
+module GeneratedGroupWithData
+    include("generated/GroupWithData.jl")
+end
+const GroupWithData = GeneratedGroupWithData.GroupWithData
+
+module GeneratedMessageBlockLengthTest
+    include("generated/MessageBlockLengthTest.jl")
+end
+const MessageBlockLengthTest = GeneratedMessageBlockLengthTest.MessageBlockLengthTest
+
+module GeneratedCompositeOffsets
+    include("generated/CompositeOffsets.jl")
+end
+const CompositeOffsets = GeneratedCompositeOffsets.CompositeOffsetsTest
+
+module GeneratedEmbeddedLengthAndCount
+    include("generated/EmbeddedLengthAndCount.jl")
+end
+const EmbeddedLengthAndCount = GeneratedEmbeddedLengthAndCount.SBETests
+
+module GeneratedLowerCaseBitset
+    include("generated/LowerCaseBitset.jl")
+end
+const LowerCaseBitset = GeneratedLowerCaseBitset.Test973
+
+module GeneratedFixedSizedPrimitiveArray
+    include("generated/FixedSizedPrimitiveArray.jl")
+end
+const FixedSizedPrimitiveArray = GeneratedFixedSizedPrimitiveArray.FixedSizedPrimitiveArray
 
 @testset "SBE.jl Tests" begin
     # Core functionality tests
