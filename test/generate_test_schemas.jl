@@ -44,6 +44,7 @@ schemas = [
     (joinpath("resources", "fixed-sized-primitive-array-types.xml"), "FixedSizedPrimitiveArray.jl", "FixedSizedPrimitiveArray"),
     (joinpath("resources", "encoding-types-schema.xml"), "EncodingTypes.jl", "EncodingTypes"),
     (joinpath("resources", "group-with-constant-fields.xml"), "GroupWithConstantFields.jl", "GroupWithConstantFields"),
+    (joinpath("resources", "nested-composite-name.xml"), "NestedCompositeName.jl", "NestedCompositeName"),
 ]
 
 for (schema_file, output_file, module_name) in schemas

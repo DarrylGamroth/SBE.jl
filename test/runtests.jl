@@ -114,6 +114,11 @@ module GeneratedGroupWithConstantFields
 end
 const GroupWithConstantFields = GeneratedGroupWithConstantFields.Baseline
 
+module GeneratedNestedCompositeName
+    include("generated/NestedCompositeName.jl")
+end
+const NestedCompositeName = GeneratedNestedCompositeName.NestedCompositeName
+
 @testset "SBE.jl Tests" begin
     # Core functionality tests
     include("test_metaprogramming.jl")
@@ -151,4 +156,5 @@ const GroupWithConstantFields = GeneratedGroupWithConstantFields.Baseline
     include("test_fixed_sized_primitive_array.jl")  # Fixed sized primitive array parity tests
     include("test_encoding_types.jl")  # Encoding types parity tests
     include("test_group_with_constant_fields.jl")  # Group constants parity tests
+    include("test_nested_composite_name.jl")  # Nested composite name parity tests
 end
