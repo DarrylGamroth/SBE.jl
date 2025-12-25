@@ -139,6 +139,376 @@ function composite_def_from_tokens(tokens::Vector{IR.Token})
     )
 end
 
+function primitive_value_or_default(
+    value::Union{Nothing, IR.PrimitiveValue},
+    primitive_type::IR.PrimitiveType.T,
+    default_fn::Function
+)
+    return value === nothing ? default_fn(primitive_type) : value
+end
+
+function encoding_literal(value::Union{Nothing, IR.PrimitiveValue}, primitive_type::IR.PrimitiveType.T, default_fn::Function)
+    actual = primitive_value_or_default(value, primitive_type, default_fn)
+    return primitive_value_literal(actual, primitive_type)
+end
+
+function composite_member_field_name(name::String)
+    return Symbol(toCamelCase(name))
+end
+
+function composite_member_module_name(token::IR.Token)
+    type_name = token.referenced_name === nothing ? token.name : token.referenced_name
+    return Symbol(format_struct_name(type_name))
+end
+
+function generate_composite_member_expr(
+    token::IR.Token,
+    base_type_name::Symbol,
+    decoder_name::Symbol,
+    encoder_name::Symbol,
+    ir::IR.Ir
+)
+    member_name = composite_member_field_name(token.name)
+    primitive_type = token.encoding.primitive_type
+    julia_type = IR.primitive_type_julia(primitive_type)
+    julia_type_symbol = Symbol(julia_type)
+    encoding_length = token.encoded_length
+    is_constant = token.encoding.presence == IR.Presence.CONSTANT
+
+    exprs = Expr[]
+
+    push!(exprs, quote
+        $(Symbol(member_name, :_id))(::$base_type_name) = $(template_id_expr(ir, 0xffff))
+        $(Symbol(member_name, :_id))(::Type{<:$base_type_name}) = $(template_id_expr(ir, 0xffff))
+        $(Symbol(member_name, :_since_version))(::$base_type_name) = $(version_expr(ir, token.version))
+        $(Symbol(member_name, :_since_version))(::Type{<:$base_type_name}) = $(version_expr(ir, token.version))
+        $(Symbol(member_name, :_in_acting_version))(m::$base_type_name) = m.acting_version >= $(version_expr(ir, token.version))
+
+        $(Symbol(member_name, :_encoding_offset))(::$base_type_name) = Int($(token.offset))
+        $(Symbol(member_name, :_encoding_offset))(::Type{<:$base_type_name}) = Int($(token.offset))
+        $(Symbol(member_name, :_encoding_length))(::$base_type_name) = Int($(encoding_length))
+        $(Symbol(member_name, :_encoding_length))(::Type{<:$base_type_name}) = Int($(encoding_length))
+
+        $(Symbol(member_name, :_null_value))(::$base_type_name) = $julia_type_symbol($(encoding_literal(token.encoding.null_value, primitive_type, IR.primitive_type_null)))
+        $(Symbol(member_name, :_null_value))(::Type{<:$base_type_name}) = $julia_type_symbol($(encoding_literal(token.encoding.null_value, primitive_type, IR.primitive_type_null)))
+        $(Symbol(member_name, :_min_value))(::$base_type_name) = $julia_type_symbol($(encoding_literal(token.encoding.min_value, primitive_type, IR.primitive_type_min)))
+        $(Symbol(member_name, :_min_value))(::Type{<:$base_type_name}) = $julia_type_symbol($(encoding_literal(token.encoding.min_value, primitive_type, IR.primitive_type_min)))
+        $(Symbol(member_name, :_max_value))(::$base_type_name) = $julia_type_symbol($(encoding_literal(token.encoding.max_value, primitive_type, IR.primitive_type_max)))
+        $(Symbol(member_name, :_max_value))(::Type{<:$base_type_name}) = $julia_type_symbol($(encoding_literal(token.encoding.max_value, primitive_type, IR.primitive_type_max)))
+    end)
+
+    if is_constant
+        const_val = token.encoding.const_value === nothing ? IR.primitive_type_null(primitive_type) : token.encoding.const_value
+        literal = primitive_value_literal(const_val, primitive_type)
+        if const_val.representation == IR.PrimitiveValueRepresentation.BYTE_ARRAY
+            push!(exprs, quote
+                @inline $member_name(::$base_type_name) = $(Meta.parse(literal))
+                @inline $member_name(::Type{<:$base_type_name}) = $(Meta.parse(literal))
+                export $member_name
+            end)
+        else
+            push!(exprs, quote
+                @inline $member_name(::$base_type_name) = $julia_type_symbol($(Meta.parse(literal)))
+                @inline $member_name(::Type{<:$base_type_name}) = $julia_type_symbol($(Meta.parse(literal)))
+                export $member_name
+            end)
+        end
+        return exprs
+    end
+
+    if encoding_length == 0 && token.name == "varData"
+        return exprs
+    end
+
+    array_len = encoding_length > 0 ? encoding_length ÷ IR.primitive_type_size(primitive_type) : 1
+
+    if array_len == 1
+        push!(exprs, quote
+            @inline function $member_name(m::$decoder_name)
+                return decode_value($julia_type, m.buffer, m.offset + $(token.offset))
+            end
+
+            @inline $(Symbol(member_name, :!))(m::$encoder_name, val) = encode_value($julia_type, m.buffer, m.offset + $(token.offset), val)
+
+            export $member_name, $(Symbol(member_name, :!))
+        end)
+        return exprs
+    end
+
+    is_char_array = primitive_type == IR.PrimitiveType.CHAR
+    if is_char_array
+        push!(exprs, :(using StringViews: StringView))
+        push!(exprs, quote
+            @inline function $member_name(m::$decoder_name)
+                bytes = decode_array($julia_type, m.buffer, m.offset + $(token.offset), $array_len)
+                pos = findfirst(iszero, bytes)
+                len = pos !== nothing ? pos - 1 : Base.length(bytes)
+                return StringView(view(bytes, 1:len))
+            end
+
+            @inline function $(Symbol(member_name, :!))(m::$encoder_name)
+                return encode_array($julia_type, m.buffer, m.offset + $(token.offset), $array_len)
+            end
+
+            @inline function $(Symbol(member_name, :!))(m::$encoder_name, value::AbstractString)
+                bytes = codeunits(value)
+                dest = encode_array($julia_type, m.buffer, m.offset + $(token.offset), $array_len)
+                len = min(length(bytes), length(dest))
+                copyto!(dest, 1, bytes, 1, len)
+                if len < length(dest)
+                    fill!(view(dest, len+1:length(dest)), 0x00)
+                end
+            end
+
+            @inline function $(Symbol(member_name, :!))(m::$encoder_name, value::AbstractVector{UInt8})
+                dest = encode_array($julia_type, m.buffer, m.offset + $(token.offset), $array_len)
+                len = min(length(value), length(dest))
+                copyto!(dest, 1, value, 1, len)
+                if len < length(dest)
+                    fill!(view(dest, len+1:length(dest)), 0x00)
+                end
+            end
+
+            export $member_name, $(Symbol(member_name, :!))
+        end)
+        return exprs
+    end
+
+    push!(exprs, quote
+        @inline function $member_name(m::$decoder_name)
+            return decode_array($julia_type, m.buffer, m.offset + $(token.offset), $array_len)
+        end
+
+        @inline function $(Symbol(member_name, :!))(m::$encoder_name)
+            return encode_array($julia_type, m.buffer, m.offset + $(token.offset), $array_len)
+        end
+
+        @inline function $(Symbol(member_name, :!))(m::$encoder_name, val)
+            copyto!($(Symbol(member_name, :!))(m), val)
+        end
+
+        export $member_name, $(Symbol(member_name, :!))
+    end)
+
+    return exprs
+end
+
+function generate_composite_enum_accessor(
+    token::IR.Token,
+    base_type_name::Symbol,
+    decoder_name::Symbol,
+    encoder_name::Symbol,
+    ir::IR.Ir
+)
+    member_name = composite_member_field_name(token.name)
+    enum_module = composite_member_module_name(token)
+    julia_type = IR.primitive_type_julia(token.encoding.primitive_type)
+    julia_type_symbol = Symbol(julia_type)
+    offset = token.offset
+
+    exprs = Expr[]
+
+    push!(exprs, quote
+        $(Symbol(member_name, :_id))(::$base_type_name) = $(template_id_expr(ir, 0xffff))
+        $(Symbol(member_name, :_id))(::Type{<:$base_type_name}) = $(template_id_expr(ir, 0xffff))
+        $(Symbol(member_name, :_since_version))(::$base_type_name) = $(version_expr(ir, token.version))
+        $(Symbol(member_name, :_since_version))(::Type{<:$base_type_name}) = $(version_expr(ir, token.version))
+        $(Symbol(member_name, :_in_acting_version))(m::$base_type_name) = m.acting_version >= $(version_expr(ir, token.version))
+
+        $(Symbol(member_name, :_encoding_offset))(::$base_type_name) = Int($offset)
+        $(Symbol(member_name, :_encoding_offset))(::Type{<:$base_type_name}) = Int($offset)
+        $(Symbol(member_name, :_encoding_length))(::$base_type_name) = Int($(sizeof(julia_type)))
+        $(Symbol(member_name, :_encoding_length))(::Type{<:$base_type_name}) = Int($(sizeof(julia_type)))
+    end)
+
+    push!(exprs, quote
+        @inline function $member_name(m::$decoder_name)
+            raw_value = decode_value($julia_type_symbol, m.buffer, m.offset + $offset)
+            return $enum_module.SbeEnum(raw_value)
+        end
+
+        @inline function $(Symbol(member_name, :!))(m::$encoder_name, val)
+            encode_value($julia_type_symbol, m.buffer, m.offset + $offset, $julia_type_symbol(val))
+        end
+    end)
+
+    return exprs
+end
+
+function generate_composite_set_accessor(
+    token::IR.Token,
+    base_type_name::Symbol,
+    decoder_name::Symbol,
+    encoder_name::Symbol,
+    ir::IR.Ir
+)
+    member_name = composite_member_field_name(token.name)
+    set_module = composite_member_module_name(token)
+    julia_type = IR.primitive_type_julia(token.encoding.primitive_type)
+    offset = token.offset
+
+    exprs = Expr[]
+
+    push!(exprs, quote
+        $(Symbol(member_name, :_id))(::$base_type_name) = $(template_id_expr(ir, 0xffff))
+        $(Symbol(member_name, :_id))(::Type{<:$base_type_name}) = $(template_id_expr(ir, 0xffff))
+        $(Symbol(member_name, :_since_version))(::$base_type_name) = $(version_expr(ir, token.version))
+        $(Symbol(member_name, :_since_version))(::Type{<:$base_type_name}) = $(version_expr(ir, token.version))
+        $(Symbol(member_name, :_in_acting_version))(m::$base_type_name) = m.acting_version >= $(version_expr(ir, token.version))
+
+        $(Symbol(member_name, :_encoding_offset))(::$base_type_name) = Int($offset)
+        $(Symbol(member_name, :_encoding_offset))(::Type{<:$base_type_name}) = Int($offset)
+        $(Symbol(member_name, :_encoding_length))(::$base_type_name) = Int($(sizeof(julia_type)))
+        $(Symbol(member_name, :_encoding_length))(::Type{<:$base_type_name}) = Int($(sizeof(julia_type)))
+    end)
+
+    push!(exprs, quote
+        @inline function $member_name(m::$decoder_name)
+            return $set_module.Decoder(m.buffer, m.offset + $offset, m.acting_version)
+        end
+
+        @inline function $member_name(m::$encoder_name)
+            return $set_module.Encoder(m.buffer, m.offset + $offset)
+        end
+    end)
+
+    return exprs
+end
+
+function generate_composite_composite_accessor(
+    token::IR.Token,
+    base_type_name::Symbol,
+    decoder_name::Symbol,
+    encoder_name::Symbol,
+    ir::IR.Ir
+)
+    member_name = composite_member_field_name(token.name)
+    composite_module = composite_member_module_name(token)
+    offset = token.offset
+
+    exprs = Expr[]
+
+    push!(exprs, quote
+        $(Symbol(member_name, :_id))(::$base_type_name) = $(template_id_expr(ir, 0xffff))
+        $(Symbol(member_name, :_id))(::Type{<:$base_type_name}) = $(template_id_expr(ir, 0xffff))
+        $(Symbol(member_name, :_since_version))(::$base_type_name) = $(version_expr(ir, token.version))
+        $(Symbol(member_name, :_since_version))(::Type{<:$base_type_name}) = $(version_expr(ir, token.version))
+        $(Symbol(member_name, :_in_acting_version))(m::$base_type_name) = m.acting_version >= $(version_expr(ir, token.version))
+
+        $(Symbol(member_name, :_encoding_offset))(::$base_type_name) = Int($offset)
+        $(Symbol(member_name, :_encoding_offset))(::Type{<:$base_type_name}) = Int($offset)
+        $(Symbol(member_name, :_encoding_length))(::$base_type_name) = Int($(token.encoded_length))
+        $(Symbol(member_name, :_encoding_length))(::Type{<:$base_type_name}) = Int($(token.encoded_length))
+    end)
+
+    push!(exprs, quote
+        @inline function $member_name(m::$decoder_name)
+            return $composite_module.Decoder(m.buffer, m.offset + $offset, m.acting_version)
+        end
+
+        @inline function $member_name(m::$encoder_name)
+            return $composite_module.Encoder(m.buffer, m.offset + $offset)
+        end
+    end)
+
+    return exprs
+end
+
+function generate_composite_expr(composite_def::IrCompositeDef, ir::IR.Ir)
+    composite_name = Symbol(format_struct_name(composite_def.name))
+    abstract_type_name = Symbol(string("Abstract", composite_name))
+    decoder_name = :Decoder
+    encoder_name = :Encoder
+
+    field_exprs = Expr[]
+    enum_imports = Set{Symbol}()
+    composite_imports = Set{Symbol}()
+
+    for member in composite_def.members
+        tokens = member.tokens
+        if member.signal == IR.Signal.ENCODING
+            append!(field_exprs, generate_composite_member_expr(tokens[1], abstract_type_name, decoder_name, encoder_name, ir))
+        elseif member.signal == IR.Signal.BEGIN_ENUM
+            module_name = composite_member_module_name(tokens[1])
+            push!(enum_imports, module_name)
+            append!(field_exprs, generate_composite_enum_accessor(tokens[1], abstract_type_name, decoder_name, encoder_name, ir))
+        elseif member.signal == IR.Signal.BEGIN_SET
+            module_name = composite_member_module_name(tokens[1])
+            push!(enum_imports, module_name)
+            append!(field_exprs, generate_composite_set_accessor(tokens[1], abstract_type_name, decoder_name, encoder_name, ir))
+        elseif member.signal == IR.Signal.BEGIN_COMPOSITE
+            module_name = composite_member_module_name(tokens[1])
+            push!(composite_imports, module_name)
+            append!(field_exprs, generate_composite_composite_accessor(tokens[1], abstract_type_name, decoder_name, encoder_name, ir))
+        end
+    end
+
+    endian_imports = generate_encoded_types_expr(ir.byte_order)
+    needs_enumx = !isempty(enum_imports)
+
+    composite_quoted = quote
+        module $composite_name
+            using SBE: AbstractSbeCompositeType, AbstractSbeEncodedType
+            import SBE: id, since_version, encoding_offset, encoding_length, null_value, min_value, max_value
+            import SBE: value, value!
+            using MappedArrays: mappedarray
+            $(needs_enumx ? :(using EnumX) : nothing)
+
+            $([:($using_stmt) for using_stmt in [:(using ..$enum_name) for enum_name in enum_imports]]...)
+            $([:($using_stmt) for using_stmt in [:(using ..$composite_name) for composite_name in composite_imports]]...)
+
+            $endian_imports
+
+            abstract type $abstract_type_name <: AbstractSbeCompositeType end
+
+            struct $decoder_name{T<:AbstractArray{UInt8}} <: $abstract_type_name
+                buffer::T
+                offset::Int64
+                acting_version::UInt16
+            end
+
+            struct $encoder_name{T<:AbstractArray{UInt8}} <: $abstract_type_name
+                buffer::T
+                offset::Int64
+            end
+
+            @inline function $decoder_name(buffer::AbstractArray{UInt8})
+                $decoder_name(buffer, Int64(0), $(version_expr(ir, ir.version)))
+            end
+
+            @inline function $decoder_name(buffer::AbstractArray{UInt8}, offset::Integer)
+                $decoder_name(buffer, Int64(offset), $(version_expr(ir, ir.version)))
+            end
+
+            @inline function $encoder_name(buffer::AbstractArray{UInt8})
+                $encoder_name(buffer, Int64(0))
+            end
+
+            sbe_encoded_length(::$abstract_type_name) = $(block_length_expr(ir, composite_def.encoded_length))
+            sbe_encoded_length(::Type{<:$abstract_type_name}) = $(block_length_expr(ir, composite_def.encoded_length))
+
+            sbe_acting_version(m::$decoder_name) = m.acting_version
+            sbe_acting_version(::$encoder_name) = $(version_expr(ir, ir.version))
+
+            Base.sizeof(m::$abstract_type_name) = sbe_encoded_length(m)
+
+            function Base.convert(::Type{<:AbstractArray{UInt8}}, m::$abstract_type_name)
+                return view(m.buffer, m.offset+1:m.offset+sbe_encoded_length(m))
+            end
+
+            function Base.show(io::IO, m::$abstract_type_name)
+                print(io, $(string(composite_name)), "(offset=", m.offset, ", size=", sbe_encoded_length(m), ")")
+            end
+
+            $(field_exprs...)
+
+            export $abstract_type_name, $decoder_name, $encoder_name
+        end
+    end
+
+    return extract_expr_from_quote(composite_quoted, :module)
+end
+
 function set_def_from_tokens(tokens::Vector{IR.Token})
     begin_token = tokens[1]
     encoding_type = begin_token.encoding.primitive_type
