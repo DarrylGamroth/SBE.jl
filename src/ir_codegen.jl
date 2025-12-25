@@ -54,9 +54,14 @@ end
 function format_property_name(name::String)
     parts = split(name, r"[_\\-]")
     if length(parts) == 1
-        return lowercase(name)
+        return lowercasefirst(parts[1])
     end
-    return lowercase(parts[1]) * join([uppercasefirst(part) for part in parts[2:end]])
+    return lowercasefirst(parts[1]) * join([uppercasefirst(part) for part in parts[2:end]])
+end
+
+function relative_using_expr(depth::Int, name::Symbol)
+    dots = repeat(".", depth + 1)
+    return Meta.parse("using " * dots * string(name))
 end
 
 function primitive_value_literal(value::IR.PrimitiveValue, primitive_type::IR.PrimitiveType.T)
@@ -1033,19 +1038,20 @@ end
 
 function generate_group_expr(
     group_tokens::Vector{IR.Token},
-    outer_name::Symbol,
     parent_abstract_type::Symbol,
-    ir::IR.Ir
+    parent_encoder_name::Symbol,
+    ir::IR.Ir,
+    module_depth::Int
 )
     group_token = group_tokens[1]
     group_name = group_token.name
-    group_struct_name = Symbol(string(outer_name, format_struct_name(group_name)))
-    abstract_type_name = group_struct_name
-    decoder_name = Symbol(string(group_struct_name, "Decoder"))
-    encoder_name = Symbol(string(group_struct_name, "Encoder"))
+    group_module_name = Symbol(format_struct_name(group_name))
+    abstract_type_name = Symbol(string("Abstract", group_module_name))
+    decoder_name = :Decoder
+    encoder_name = :Encoder
 
     dimension_tokens = group_tokens[2:1 + group_tokens[2].component_token_count]
-    dimension_struct_name = Symbol(format_struct_name(dimension_tokens[1].name))
+    dimension_module_name = Symbol(format_struct_name(dimension_tokens[1].name))
     dimension_header_length = dimension_tokens[1].encoded_length
     block_length = group_token.encoded_length
     group_id = group_token.id
@@ -1063,7 +1069,7 @@ function generate_group_expr(
 
     field_exprs = Expr[]
     enum_imports = Set{Symbol}()
-    composite_imports = Set{Symbol}([dimension_struct_name])
+    composite_imports = Set{Symbol}([dimension_module_name])
     group_exprs = Expr[]
     parent_accessors = Expr[]
     skip_calls = Expr[]
@@ -1085,17 +1091,18 @@ function generate_group_expr(
     end
 
     for nested_group_tokens in groups
-        nested_group_exprs, nested_accessors, nested_accessor_name = generate_group_expr(
+        nested_group_exprs, nested_accessors, nested_accessor_name, nested_group_module_name = generate_group_expr(
             nested_group_tokens,
-            group_struct_name,
             abstract_type_name,
-            ir
+            encoder_name,
+            ir,
+            module_depth + 1
         )
         append!(group_exprs, nested_group_exprs)
         append!(group_exprs, nested_accessors)
         push!(skip_calls, quote
             for group in $nested_accessor_name(m)
-                sbe_skip!(group)
+                $nested_group_module_name.sbe_skip!(group)
             end
         end)
     end
@@ -1107,115 +1114,129 @@ function generate_group_expr(
         append!(var_data_exprs, generate_var_data_expr(var_data_tokens, abstract_type_name, decoder_name, encoder_name, ir))
     end
 
-    group_body = Expr(:block,
-        :(export $group_struct_name, $decoder_name, $encoder_name),
-        :(abstract type $group_struct_name{T} end),
-        :($([:(using ..$enum_name) for enum_name in enum_imports]...)),
-        :($([:(using ..$composite_name) for composite_name in composite_imports]...)),
-        quote
-            mutable struct $decoder_name{T<:AbstractArray{UInt8}} <: $group_struct_name{T}
-                const buffer::T
-                offset::Int64
-                const position_ptr::Base.RefValue{Int64}
-                const block_length::UInt16
-                const acting_version::UInt16
-                const count::UInt16
-                index::UInt16
-                function $decoder_name(buffer::T, offset::Integer, position_ptr::Ref{Int64},
-                    block_length::Integer, acting_version::Integer,
-                    count::Integer, index::Integer) where {T}
-                    new{T}(buffer, offset, position_ptr, block_length, acting_version, count, index)
-                end
-            end
-        end,
-        quote
-            mutable struct $encoder_name{T<:AbstractArray{UInt8}} <: $group_struct_name{T}
-                const buffer::T
-                offset::Int64
-                const position_ptr::Base.RefValue{Int64}
-                const initial_position::Int64
-                count::UInt16
-                index::UInt16
-                function $encoder_name(buffer::T, offset::Integer, position_ptr::Ref{Int64},
-                    initial_position::Int64, count::Integer, index::Integer) where {T}
-                    new{T}(buffer, offset, position_ptr, initial_position, count, index)
-                end
-            end
-        end,
-        quote
-            @inline function $decoder_name(buffer, position_ptr, acting_version)
-                dimensions = $dimension_struct_name(buffer, position_ptr[])
-                position_ptr[] += $dimension_header_length
-                return $decoder_name(buffer, 0, position_ptr, blockLength(dimensions),
-                    acting_version, numInGroup(dimensions), 0)
-            end
+    endian_imports = generate_encoded_types_expr(ir.byte_order)
 
-            @inline function $encoder_name(buffer, count, position_ptr)
-                if $(min_check === nothing ? :(count > $max_count) : :($min_check || count > $max_count))
-                    error("count outside of allowed range")
-                end
-                dimensions = $dimension_struct_name(buffer, position_ptr[])
-                blockLength!(dimensions, $(block_length_expr(ir, block_length)))
-                numInGroup!(dimensions, count)
-                initial_position = position_ptr[]
-                position_ptr[] += $dimension_header_length
-                return $encoder_name(buffer, 0, position_ptr, initial_position, count, 0)
+    dimension_decoder = Expr(:., dimension_module_name, :Decoder)
+    dimension_encoder = Expr(:., dimension_module_name, :Encoder)
+    block_length_get = Expr(:., dimension_module_name, :blockLength)
+    block_length_set = Expr(:., dimension_module_name, :blockLength!)
+    num_in_group_get = Expr(:., dimension_module_name, :numInGroup)
+    num_in_group_set = Expr(:., dimension_module_name, :numInGroup!)
+
+    group_quoted = quote
+        module $group_module_name
+        using ..: rstrip_nul
+        using StringViews: StringView
+        $([relative_using_expr(module_depth, enum_name) for enum_name in enum_imports]...)
+        $([relative_using_expr(module_depth, composite_name) for composite_name in composite_imports]...)
+
+        $endian_imports
+
+        abstract type $abstract_type_name{T} end
+
+        mutable struct $decoder_name{T<:AbstractArray{UInt8}} <: $abstract_type_name{T}
+            const buffer::T
+            offset::Int64
+            const position_ptr::Base.RefValue{Int64}
+            const block_length::UInt16
+            const acting_version::UInt16
+            const count::UInt16
+            index::UInt16
+            function $decoder_name(buffer::T, offset::Integer, position_ptr::Ref{Int64},
+                block_length::Integer, acting_version::Integer,
+                count::Integer, index::Integer) where {T}
+                new{T}(buffer, offset, position_ptr, block_length, acting_version, count, index)
             end
-        end,
-        quote
-            sbe_header_size(::$group_struct_name) = $dimension_header_length
-            sbe_block_length(::$group_struct_name) = $(block_length_expr(ir, block_length))
-            sbe_acting_block_length(g::$decoder_name) = g.block_length
-            sbe_acting_block_length(g::$encoder_name) = $(block_length_expr(ir, block_length))
-            sbe_acting_version(g::$decoder_name) = g.acting_version
-            sbe_acting_version(::$encoder_name) = $(version_expr(ir, ir.version))
-            sbe_position(g::$group_struct_name) = g.position_ptr[]
-            @inline sbe_position!(g::$group_struct_name, position) = g.position_ptr[] = position
-            sbe_position_ptr(g::$group_struct_name) = g.position_ptr
-            @inline function next!(g::$group_struct_name)
-                if g.index >= g.count
-                    error("index >= count")
-                end
+        end
+
+        mutable struct $encoder_name{T<:AbstractArray{UInt8}} <: $abstract_type_name{T}
+            const buffer::T
+            offset::Int64
+            const position_ptr::Base.RefValue{Int64}
+            const initial_position::Int64
+            count::UInt16
+            index::UInt16
+            function $encoder_name(buffer::T, offset::Integer, position_ptr::Ref{Int64},
+                initial_position::Int64, count::Integer, index::Integer) where {T}
+                new{T}(buffer, offset, position_ptr, initial_position, count, index)
+            end
+        end
+
+        @inline function $decoder_name(buffer, position_ptr, acting_version)
+            dimensions = $dimension_decoder(buffer, position_ptr[])
+            position_ptr[] += $dimension_header_length
+            return $decoder_name(buffer, 0, position_ptr, $block_length_get(dimensions),
+                acting_version, $num_in_group_get(dimensions), 0)
+        end
+
+        @inline function $encoder_name(buffer, count, position_ptr)
+            if $(min_check === nothing ? :(count > $max_count) : :($min_check || count > $max_count))
+                error("count outside of allowed range")
+            end
+            dimensions = $dimension_encoder(buffer, position_ptr[])
+            $block_length_set(dimensions, $(block_length_expr(ir, block_length)))
+            $num_in_group_set(dimensions, count)
+            initial_position = position_ptr[]
+            position_ptr[] += $dimension_header_length
+            return $encoder_name(buffer, 0, position_ptr, initial_position, count, 0)
+        end
+
+        sbe_header_size(::$abstract_type_name) = $dimension_header_length
+        sbe_block_length(::$abstract_type_name) = $(block_length_expr(ir, block_length))
+        sbe_acting_block_length(g::$decoder_name) = g.block_length
+        sbe_acting_block_length(g::$encoder_name) = $(block_length_expr(ir, block_length))
+        sbe_acting_version(g::$decoder_name) = g.acting_version
+        sbe_acting_version(::$encoder_name) = $(version_expr(ir, ir.version))
+        sbe_position(g::$abstract_type_name) = g.position_ptr[]
+        @inline sbe_position!(g::$abstract_type_name, position) = g.position_ptr[] = position
+        sbe_position_ptr(g::$abstract_type_name) = g.position_ptr
+        @inline function next!(g::$abstract_type_name)
+            if g.index >= g.count
+                error("index >= count")
+            end
+            g.offset = sbe_position(g)
+            sbe_position!(g, g.offset + sbe_acting_block_length(g))
+            g.index += 1
+            return g
+        end
+        function Base.iterate(g::$abstract_type_name, state=nothing)
+            if g.index < g.count
                 g.offset = sbe_position(g)
                 sbe_position!(g, g.offset + sbe_acting_block_length(g))
                 g.index += 1
-                return g
-            end
-            function Base.iterate(g::$group_struct_name, state=nothing)
-                if g.index < g.count
-                    g.offset = sbe_position(g)
-                    sbe_position!(g, g.offset + sbe_acting_block_length(g))
-                    g.index += 1
-                    return g, state
-                else
-                    return nothing
-                end
-            end
-            Base.eltype(::Type{$decoder_name}) = $decoder_name
-            Base.eltype(::Type{$encoder_name}) = $encoder_name
-            Base.isdone(g::$group_struct_name, state=nothing) = g.index >= g.count
-            Base.length(g::$group_struct_name) = g.count
-        end,
-        quote
-            function reset_count_to_index!(g::$encoder_name)
-                g.count = g.index
-                dimensions = $dimension_struct_name(g.buffer, g.initial_position)
-                numInGroup!(dimensions, g.count)
-                return g.count
-            end
-
-            export reset_count_to_index!
-        end,
-        field_exprs...,
-        var_data_exprs...,
-        group_exprs...,
-        quote
-            @inline function sbe_skip!(m::$decoder_name)
-                $(isempty(skip_calls) ? :(return) : Expr(:block, skip_calls...))
-                return
+                return g, state
+            else
+                return nothing
             end
         end
-    )
+        Base.eltype(::Type{$decoder_name}) = $decoder_name
+        Base.eltype(::Type{$encoder_name}) = $encoder_name
+        Base.isdone(g::$abstract_type_name, state=nothing) = g.index >= g.count
+        Base.length(g::$abstract_type_name) = g.count
+
+        function reset_count_to_index!(g::$encoder_name)
+            g.count = g.index
+            dimensions = $dimension_encoder(g.buffer, g.initial_position)
+            $num_in_group_set(dimensions, g.count)
+            return g.count
+        end
+
+        export reset_count_to_index!
+
+        $(field_exprs...)
+        $(var_data_exprs...)
+        $(group_exprs...)
+
+        @inline function sbe_skip!(m::$decoder_name)
+            $(isempty(skip_calls) ? :(return) : Expr(:block, skip_calls...))
+            return
+        end
+
+        export $abstract_type_name, $decoder_name, $encoder_name
+        end
+    end
+
+    group_body = extract_expr_from_quote(group_quoted, :module)
 
     accessor_name = Symbol(format_property_name(group_name))
     accessor_name_encoder = Symbol(string(accessor_name, "!"))
@@ -1225,37 +1246,37 @@ function generate_group_expr(
         push!(parent_accessors, quote
             @inline function $accessor_name(m::$parent_abstract_type)
                 if sbe_acting_version(m) < $(version_expr(ir, since_version))
-                    return $decoder_name(m.buffer, 0, sbe_position_ptr(m), $(version_expr(ir, 0)),
+                    return $group_module_name.Decoder(m.buffer, 0, sbe_position_ptr(m), $(version_expr(ir, 0)),
                         sbe_acting_version(m), $(version_expr(ir, 0)), $(version_expr(ir, 0)))
                 end
-                return $decoder_name(m.buffer, sbe_position_ptr(m), sbe_acting_version(m))
+                return $group_module_name.Decoder(m.buffer, sbe_position_ptr(m), sbe_acting_version(m))
             end
             @inline function $accessor_name_encoder(m::$parent_abstract_type, count)
-                return $encoder_name(m.buffer, count, sbe_position_ptr(m))
+                return $group_module_name.Encoder(m.buffer, count, sbe_position_ptr(m))
             end
-            $accessor_group_count(m::$encoder_name, count) = $accessor_name_encoder(m, count)
+            $accessor_group_count(m::$parent_encoder_name, count) = $accessor_name_encoder(m, count)
             $(Symbol(accessor_name, :_id))(::$parent_abstract_type) = $(template_id_expr(ir, group_id))
             $(Symbol(accessor_name, :_since_version))(::$parent_abstract_type) = $(version_expr(ir, since_version))
             $(Symbol(accessor_name, :_in_acting_version))(m::$parent_abstract_type) = sbe_acting_version(m) >= $(version_expr(ir, since_version))
-            export $accessor_name, $accessor_name_encoder, $group_struct_name
+            export $accessor_name, $accessor_name_encoder, $group_module_name
         end)
     else
         push!(parent_accessors, quote
             @inline function $accessor_name(m::$parent_abstract_type)
-                return $decoder_name(m.buffer, sbe_position_ptr(m), sbe_acting_version(m))
+                return $group_module_name.Decoder(m.buffer, sbe_position_ptr(m), sbe_acting_version(m))
             end
             @inline function $accessor_name_encoder(m::$parent_abstract_type, count)
-                return $encoder_name(m.buffer, count, sbe_position_ptr(m))
+                return $group_module_name.Encoder(m.buffer, count, sbe_position_ptr(m))
             end
-            $accessor_group_count(m::$encoder_name, count) = $accessor_name_encoder(m, count)
+            $accessor_group_count(m::$parent_encoder_name, count) = $accessor_name_encoder(m, count)
             $(Symbol(accessor_name, :_id))(::$parent_abstract_type) = $(template_id_expr(ir, group_id))
             $(Symbol(accessor_name, :_since_version))(::$parent_abstract_type) = $(version_expr(ir, since_version))
             $(Symbol(accessor_name, :_in_acting_version))(m::$parent_abstract_type) = sbe_acting_version(m) >= $(version_expr(ir, since_version))
-            export $accessor_name, $accessor_name_encoder, $group_struct_name
+            export $accessor_name, $accessor_name_encoder, $group_module_name
         end)
     end
 
-    return [group_body], parent_accessors, accessor_name
+    return [group_body], parent_accessors, accessor_name, group_module_name
 end
 
 function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
@@ -1276,6 +1297,10 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
     field_exprs = Expr[]
     enum_imports = Set{Symbol}()
     composite_imports = Set{Symbol}()
+    group_exprs = Expr[]
+    group_accessors = Expr[]
+    skip_calls = Expr[]
+    var_data_exprs = Expr[]
 
     for field_tokens in fields
         inner = field_tokens[2]
@@ -1291,6 +1316,23 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
             push!(composite_imports, composite_member_module_name(inner))
             append!(field_exprs, generate_composite_field_expr(field_tokens, abstract_type_name, decoder_name, encoder_name, ir))
         end
+    end
+
+    for group_tokens in groups
+        group_defs, parent_accessors, accessor_name, group_module_name = generate_group_expr(
+            group_tokens,
+            abstract_type_name,
+            encoder_name,
+            ir,
+            2
+        )
+        append!(group_exprs, group_defs)
+        append!(group_accessors, parent_accessors)
+        push!(skip_calls, quote
+            for group in $accessor_name(m)
+                $group_module_name.sbe_skip!(group)
+            end
+        end)
     end
 
     for var_data_tokens in var_data
