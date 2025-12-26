@@ -368,5 +368,6 @@ const Issue849 = GeneratedIssue849.Issue849
     include("test_issue847.jl")  # Composite refs in message header
     include("test_issue848.jl")  # Composite refs in message and message header
     include("test_issue849.jl")  # Deep composite refs in message header and body
+    include("test_error_paths.jl")  # Error-path coverage
     include("test_error_handlers.jl")  # Error handler schema validations
 end
