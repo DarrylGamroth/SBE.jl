@@ -1,5 +1,7 @@
 #!/usr/bin/env julia
 
+using Downloads
+
 function java_executable(name)
     exe = Sys.which(name)
     exe === nothing && error("Missing $(name) executable in PATH.")
@@ -51,7 +53,7 @@ function main()
 
     if !isfile(sbe_jar)
         println("Downloading sbe-all $(sbe_version)...")
-        Base.download(sbe_url, sbe_jar)
+        Downloads.download(sbe_url, sbe_jar)
     end
 
     java = java_executable("java")
@@ -74,9 +76,12 @@ function main()
     compile_cmd = Cmd([javac, "-cp", sbe_jar, "-d", class_dir, java_sources..., generator_sources...])
     run(compile_cmd)
 
-    run(Cmd([java; java_opts; ["-cp", "$(sbe_jar):$(class_dir)", "GenerateCarFixture", fixture_out]...]))
-    run(Cmd([java; java_opts; ["-cp", "$(sbe_jar):$(class_dir)", "GenerateExtensionFixture", ext_fixture_out]...]))
-    run(Cmd([java; java_opts; ["-cp", "$(sbe_jar):$(class_dir)", "GenerateCodeGenFixture", codegen_fixture_out]...]))
+    classpath_sep = Sys.iswindows() ? ";" : ":"
+    classpath = string(sbe_jar, classpath_sep, class_dir)
+
+    run(Cmd([java; java_opts; ["-cp", classpath, "GenerateCarFixture", fixture_out]...]))
+    run(Cmd([java; java_opts; ["-cp", classpath, "GenerateExtensionFixture", ext_fixture_out]...]))
+    run(Cmd([java; java_opts; ["-cp", classpath, "GenerateCodeGenFixture", codegen_fixture_out]...]))
 
     println("Wrote fixture to $(fixture_out)")
     println("Wrote fixture to $(ext_fixture_out)")
