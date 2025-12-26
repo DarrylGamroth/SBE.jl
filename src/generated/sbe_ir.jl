@@ -13,13 +13,13 @@ using StringViews
 @enumx T = SbeEnum ByteOrderCodec::UInt8 begin
         SBE_LITTLE_ENDIAN = 0
         SBE_BIG_ENDIAN = 1
-        NULL_VALUE = UInt8(0xff)
+        NULL_VALUE = UInt8(255)
     end
 @enumx T = SbeEnum PresenceCodec::UInt8 begin
         SBE_REQUIRED = 0
         SBE_OPTIONAL = 1
         SBE_CONSTANT = 2
-        NULL_VALUE = UInt8(0xff)
+        NULL_VALUE = UInt8(255)
     end
 @enumx T = SbeEnum PrimitiveTypeCodec::UInt8 begin
         NONE = 0
@@ -34,7 +34,7 @@ using StringViews
         UINT64 = 9
         FLOAT = 10
         DOUBLE = 11
-        NULL_VALUE = UInt8(0xff)
+        NULL_VALUE = UInt8(255)
     end
 @enumx T = SbeEnum SignalCodec::UInt8 begin
         BEGIN_MESSAGE = 1
@@ -54,7 +54,7 @@ using StringViews
         BEGIN_VAR_DATA = 15
         END_VAR_DATA = 16
         ENCODING = 17
-        NULL_VALUE = UInt8(0xff)
+        NULL_VALUE = UInt8(255)
     end
 module MessageHeader
 using SBE: AbstractSbeCompositeType, AbstractSbeEncodedType
@@ -578,27 +578,27 @@ struct Decoder{T <: AbstractArray{UInt8}, P} <: AbstractTokenCodec{T}
     position_ptr::P
     acting_block_length::UInt16
     acting_version::UInt16
-    function Decoder(buffer::T, offset::Integer, position_ptr::P, acting_block_length::Integer, acting_version::Integer) where {T, P}
+    function Decoder(buffer::T, offset::Integer, position_ptr::PositionPointer, acting_block_length::Integer, acting_version::Integer) where T
         position_ptr[] = offset + acting_block_length
-        new{T, P}(buffer, offset, position_ptr, acting_block_length, acting_version)
+        new{T, PositionPointer}(buffer, offset, position_ptr, acting_block_length, acting_version)
     end
 end
 struct Encoder{T <: AbstractArray{UInt8}, P, HasSbeHeader} <: AbstractTokenCodec{T}
     buffer::T
     offset::Int64
     position_ptr::P
-    function Encoder(buffer::T, offset::Integer, position_ptr::P, hasSbeHeader::Bool = false) where {T, P}
+    function Encoder(buffer::T, offset::Integer, position_ptr::PositionPointer, hasSbeHeader::Bool = false) where T
         position_ptr[] = offset + UInt16(28)
-        new{T, P, hasSbeHeader}(buffer, offset, position_ptr)
+        new{T, PositionPointer, hasSbeHeader}(buffer, offset, position_ptr)
     end
 end
-@inline function Decoder(buffer::AbstractArray, offset::Integer = 0; position_ptr = Ref(0), header = MessageHeader.Decoder(buffer, offset))
+@inline function Decoder(buffer::AbstractArray, offset::Integer = 0; position_ptr::PositionPointer = PositionPointer(), header = MessageHeader.Decoder(buffer, offset))
         if MessageHeader.templateId(header) != UInt16(2) || MessageHeader.schemaId(header) != UInt16(1)
             throw(DomainError("Template id or schema id mismatch"))
         end
         Decoder(buffer, offset + sbe_encoded_length(header), position_ptr, MessageHeader.blockLength(header), MessageHeader.version(header))
     end
-@inline function Encoder(buffer::AbstractArray, offset::Integer = 0; position_ptr = Ref(0), header = MessageHeader.Encoder(buffer, offset))
+@inline function Encoder(buffer::AbstractArray, offset::Integer = 0; position_ptr::PositionPointer = PositionPointer(), header = MessageHeader.Encoder(buffer, offset))
         MessageHeader.blockLength!(header, UInt16(28))
         MessageHeader.templateId!(header, UInt16(2))
         MessageHeader.schemaId!(header, UInt16(1))
@@ -1331,10 +1331,10 @@ begin
             Int(4)
         end
     deprecated_null_value(::AbstractTokenCodec) = begin
-            Int32(-2147483648)
+            Int32(0)
         end
     deprecated_null_value(::Type{<:AbstractTokenCodec}) = begin
-            Int32(-2147483648)
+            Int32(0)
         end
     deprecated_min_value(::AbstractTokenCodec) = begin
             Int32(-2147483647)
@@ -1407,7 +1407,7 @@ begin
     @inline function name_length!(m::Encoder, n)
             @boundscheck n > 65534 && throw(ArgumentError("length exceeds schema limit"))
             @boundscheck checkbounds(m.buffer, sbe_position(m) + 2 + n)
-            return encode_value(UInt16, m.buffer, sbe_position(m), n)
+            return encode_value(UInt16, m.buffer, sbe_position(m), UInt16(n))
         end
 end
 begin
@@ -1536,7 +1536,7 @@ begin
     @inline function constValue_length!(m::Encoder, n)
             @boundscheck n > 65534 && throw(ArgumentError("length exceeds schema limit"))
             @boundscheck checkbounds(m.buffer, sbe_position(m) + 2 + n)
-            return encode_value(UInt16, m.buffer, sbe_position(m), n)
+            return encode_value(UInt16, m.buffer, sbe_position(m), UInt16(n))
         end
 end
 begin
@@ -1665,7 +1665,7 @@ begin
     @inline function minValue_length!(m::Encoder, n)
             @boundscheck n > 65534 && throw(ArgumentError("length exceeds schema limit"))
             @boundscheck checkbounds(m.buffer, sbe_position(m) + 2 + n)
-            return encode_value(UInt16, m.buffer, sbe_position(m), n)
+            return encode_value(UInt16, m.buffer, sbe_position(m), UInt16(n))
         end
 end
 begin
@@ -1794,7 +1794,7 @@ begin
     @inline function maxValue_length!(m::Encoder, n)
             @boundscheck n > 65534 && throw(ArgumentError("length exceeds schema limit"))
             @boundscheck checkbounds(m.buffer, sbe_position(m) + 2 + n)
-            return encode_value(UInt16, m.buffer, sbe_position(m), n)
+            return encode_value(UInt16, m.buffer, sbe_position(m), UInt16(n))
         end
 end
 begin
@@ -1923,7 +1923,7 @@ begin
     @inline function nullValue_length!(m::Encoder, n)
             @boundscheck n > 65534 && throw(ArgumentError("length exceeds schema limit"))
             @boundscheck checkbounds(m.buffer, sbe_position(m) + 2 + n)
-            return encode_value(UInt16, m.buffer, sbe_position(m), n)
+            return encode_value(UInt16, m.buffer, sbe_position(m), UInt16(n))
         end
 end
 begin
@@ -2052,7 +2052,7 @@ begin
     @inline function characterEncoding_length!(m::Encoder, n)
             @boundscheck n > 65534 && throw(ArgumentError("length exceeds schema limit"))
             @boundscheck checkbounds(m.buffer, sbe_position(m) + 2 + n)
-            return encode_value(UInt16, m.buffer, sbe_position(m), n)
+            return encode_value(UInt16, m.buffer, sbe_position(m), UInt16(n))
         end
 end
 begin
@@ -2181,7 +2181,7 @@ begin
     @inline function epoch_length!(m::Encoder, n)
             @boundscheck n > 65534 && throw(ArgumentError("length exceeds schema limit"))
             @boundscheck checkbounds(m.buffer, sbe_position(m) + 2 + n)
-            return encode_value(UInt16, m.buffer, sbe_position(m), n)
+            return encode_value(UInt16, m.buffer, sbe_position(m), UInt16(n))
         end
 end
 begin
@@ -2310,7 +2310,7 @@ begin
     @inline function timeUnit_length!(m::Encoder, n)
             @boundscheck n > 65534 && throw(ArgumentError("length exceeds schema limit"))
             @boundscheck checkbounds(m.buffer, sbe_position(m) + 2 + n)
-            return encode_value(UInt16, m.buffer, sbe_position(m), n)
+            return encode_value(UInt16, m.buffer, sbe_position(m), UInt16(n))
         end
 end
 begin
@@ -2439,7 +2439,7 @@ begin
     @inline function semanticType_length!(m::Encoder, n)
             @boundscheck n > 65534 && throw(ArgumentError("length exceeds schema limit"))
             @boundscheck checkbounds(m.buffer, sbe_position(m) + 2 + n)
-            return encode_value(UInt16, m.buffer, sbe_position(m), n)
+            return encode_value(UInt16, m.buffer, sbe_position(m), UInt16(n))
         end
 end
 begin
@@ -2568,7 +2568,7 @@ begin
     @inline function description_length!(m::Encoder, n)
             @boundscheck n > 65534 && throw(ArgumentError("length exceeds schema limit"))
             @boundscheck checkbounds(m.buffer, sbe_position(m) + 2 + n)
-            return encode_value(UInt16, m.buffer, sbe_position(m), n)
+            return encode_value(UInt16, m.buffer, sbe_position(m), UInt16(n))
         end
 end
 begin
@@ -2697,7 +2697,7 @@ begin
     @inline function referencedName_length!(m::Encoder, n)
             @boundscheck n > 65534 && throw(ArgumentError("length exceeds schema limit"))
             @boundscheck checkbounds(m.buffer, sbe_position(m) + 2 + n)
-            return encode_value(UInt16, m.buffer, sbe_position(m), n)
+            return encode_value(UInt16, m.buffer, sbe_position(m), UInt16(n))
         end
 end
 begin
@@ -2826,7 +2826,7 @@ begin
     @inline function packageName_length!(m::Encoder, n)
             @boundscheck n > 65534 && throw(ArgumentError("length exceeds schema limit"))
             @boundscheck checkbounds(m.buffer, sbe_position(m) + 2 + n)
-            return encode_value(UInt16, m.buffer, sbe_position(m), n)
+            return encode_value(UInt16, m.buffer, sbe_position(m), UInt16(n))
         end
 end
 begin
@@ -2919,7 +2919,7 @@ begin
         end
 end
 @inline function sbe_decoded_length(m::AbstractTokenCodec)
-        skipper = Decoder(sbe_buffer(m), sbe_offset(m), Ref(0), sbe_acting_block_length(m), sbe_acting_version(m))
+        skipper = Decoder(sbe_buffer(m), sbe_offset(m), PositionPointer(), sbe_acting_block_length(m), sbe_acting_version(m))
         sbe_skip!(skipper)
         return sbe_encoded_length(skipper)
     end
@@ -2974,27 +2974,27 @@ struct Decoder{T <: AbstractArray{UInt8}, P} <: AbstractFrameCodec{T}
     position_ptr::P
     acting_block_length::UInt16
     acting_version::UInt16
-    function Decoder(buffer::T, offset::Integer, position_ptr::P, acting_block_length::Integer, acting_version::Integer) where {T, P}
+    function Decoder(buffer::T, offset::Integer, position_ptr::PositionPointer, acting_block_length::Integer, acting_version::Integer) where T
         position_ptr[] = offset + acting_block_length
-        new{T, P}(buffer, offset, position_ptr, acting_block_length, acting_version)
+        new{T, PositionPointer}(buffer, offset, position_ptr, acting_block_length, acting_version)
     end
 end
 struct Encoder{T <: AbstractArray{UInt8}, P, HasSbeHeader} <: AbstractFrameCodec{T}
     buffer::T
     offset::Int64
     position_ptr::P
-    function Encoder(buffer::T, offset::Integer, position_ptr::P, hasSbeHeader::Bool = false) where {T, P}
+    function Encoder(buffer::T, offset::Integer, position_ptr::PositionPointer, hasSbeHeader::Bool = false) where T
         position_ptr[] = offset + UInt16(12)
-        new{T, P, hasSbeHeader}(buffer, offset, position_ptr)
+        new{T, PositionPointer, hasSbeHeader}(buffer, offset, position_ptr)
     end
 end
-@inline function Decoder(buffer::AbstractArray, offset::Integer = 0; position_ptr = Ref(0), header = MessageHeader.Decoder(buffer, offset))
+@inline function Decoder(buffer::AbstractArray, offset::Integer = 0; position_ptr::PositionPointer = PositionPointer(), header = MessageHeader.Decoder(buffer, offset))
         if MessageHeader.templateId(header) != UInt16(1) || MessageHeader.schemaId(header) != UInt16(1)
             throw(DomainError("Template id or schema id mismatch"))
         end
         Decoder(buffer, offset + sbe_encoded_length(header), position_ptr, MessageHeader.blockLength(header), MessageHeader.version(header))
     end
-@inline function Encoder(buffer::AbstractArray, offset::Integer = 0; position_ptr = Ref(0), header = MessageHeader.Encoder(buffer, offset))
+@inline function Encoder(buffer::AbstractArray, offset::Integer = 0; position_ptr::PositionPointer = PositionPointer(), header = MessageHeader.Encoder(buffer, offset))
         MessageHeader.blockLength!(header, UInt16(12))
         MessageHeader.templateId!(header, UInt16(1))
         MessageHeader.schemaId!(header, UInt16(1))
@@ -3311,7 +3311,7 @@ begin
     @inline function packageName_length!(m::Encoder, n)
             @boundscheck n > 65534 && throw(ArgumentError("length exceeds schema limit"))
             @boundscheck checkbounds(m.buffer, sbe_position(m) + 2 + n)
-            return encode_value(UInt16, m.buffer, sbe_position(m), n)
+            return encode_value(UInt16, m.buffer, sbe_position(m), UInt16(n))
         end
 end
 begin
@@ -3440,7 +3440,7 @@ begin
     @inline function namespaceName_length!(m::Encoder, n)
             @boundscheck n > 65534 && throw(ArgumentError("length exceeds schema limit"))
             @boundscheck checkbounds(m.buffer, sbe_position(m) + 2 + n)
-            return encode_value(UInt16, m.buffer, sbe_position(m), n)
+            return encode_value(UInt16, m.buffer, sbe_position(m), UInt16(n))
         end
 end
 begin
@@ -3569,7 +3569,7 @@ begin
     @inline function semanticVersion_length!(m::Encoder, n)
             @boundscheck n > 65534 && throw(ArgumentError("length exceeds schema limit"))
             @boundscheck checkbounds(m.buffer, sbe_position(m) + 2 + n)
-            return encode_value(UInt16, m.buffer, sbe_position(m), n)
+            return encode_value(UInt16, m.buffer, sbe_position(m), UInt16(n))
         end
 end
 begin
@@ -3662,7 +3662,7 @@ begin
         end
 end
 @inline function sbe_decoded_length(m::AbstractFrameCodec)
-        skipper = Decoder(sbe_buffer(m), sbe_offset(m), Ref(0), sbe_acting_block_length(m), sbe_acting_version(m))
+        skipper = Decoder(sbe_buffer(m), sbe_offset(m), PositionPointer(), sbe_acting_block_length(m), sbe_acting_version(m))
         sbe_skip!(skipper)
         return sbe_encoded_length(skipper)
     end

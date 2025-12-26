@@ -176,7 +176,7 @@ The generated code respects `sinceVersion` and `deprecated` attributes. You can
 override acting version and block length on decoders:
 
 ```julia
-dec = Baseline.Car.Decoder(buffer, 0, Ref(0), UInt16(45), UInt16(0))
+dec = Baseline.Car.Decoder(buffer, 0, SBE.PositionPointer(0), UInt16(45), UInt16(0))
 ```
 
 ## Endianness

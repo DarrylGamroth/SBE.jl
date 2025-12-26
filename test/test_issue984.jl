@@ -18,7 +18,7 @@ using Test
     @test String(Issue984.SimpleMessage.MyGroup.f2(item)) == "EFGHI"
     @test String(Issue984.SimpleMessage.MyGroup.f3(item)) == "JKLMNO"
 
-    dec1 = Issue984.SimpleMessage.Decoder(buffer, 0, Ref(0), UInt16(0), UInt16(1))
+    dec1 = Issue984.SimpleMessage.Decoder(buffer, 0, SBE.PositionPointer(), UInt16(0), UInt16(1))
     group_dec1 = Issue984.SimpleMessage.myGroup(dec1)
     @test !Issue984.SimpleMessage.MyGroup.f2_in_acting_version(group_dec1)
     @test !Issue984.SimpleMessage.MyGroup.f3_in_acting_version(group_dec1)

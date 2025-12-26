@@ -1381,7 +1381,7 @@ function generate_group_expr(
 
     group_quoted = quote
         module $group_module_name
-        using SBE: AbstractSbeGroup, to_string
+        using SBE: AbstractSbeGroup, PositionPointer, to_string
         import SBE: sbe_header_size, sbe_block_length, sbe_acting_block_length, sbe_acting_version
         import SBE: sbe_position, sbe_position!, sbe_position_ptr, next!
         using StringViews: StringView
@@ -1406,10 +1406,10 @@ function generate_group_expr(
             const acting_version::$version_type_symbol
             const count::$count_type_symbol
             index::$count_type_symbol
-            function $decoder_name(buffer::T, offset::Integer, position_ptr::P,
+            function $decoder_name(buffer::T, offset::Integer, position_ptr::PositionPointer,
                 block_length::Integer, acting_version::Integer,
-                count::Integer, index::Integer) where {T,P}
-                new{T,P}(buffer, offset, position_ptr, block_length, acting_version,
+                count::Integer, index::Integer) where {T}
+                new{T,PositionPointer}(buffer, offset, position_ptr, block_length, acting_version,
                     $count_type_symbol(count), $count_type_symbol(index))
             end
         end
@@ -1421,21 +1421,21 @@ function generate_group_expr(
             const initial_position::Int64
             count::$count_type_symbol
             index::$count_type_symbol
-            function $encoder_name(buffer::T, offset::Integer, position_ptr::P,
-                initial_position::Int64, count::Integer, index::Integer) where {T,P}
-                new{T,P}(buffer, offset, position_ptr, initial_position,
+            function $encoder_name(buffer::T, offset::Integer, position_ptr::PositionPointer,
+                initial_position::Int64, count::Integer, index::Integer) where {T}
+                new{T,PositionPointer}(buffer, offset, position_ptr, initial_position,
                     $count_type_symbol(count), $count_type_symbol(index))
             end
         end
 
-        @inline function $decoder_name(buffer, position_ptr, acting_version)
+        @inline function $decoder_name(buffer, position_ptr::PositionPointer, acting_version)
             dimensions = $dimension_decoder(buffer, position_ptr[])
             position_ptr[] += $dimension_header_length
             return $decoder_name(buffer, 0, position_ptr, $block_length_get(dimensions),
                 acting_version, $num_in_group_get(dimensions), $count_zero_expr)
         end
 
-        @inline function $encoder_name(buffer, count, position_ptr)
+        @inline function $encoder_name(buffer, count, position_ptr::PositionPointer)
             if $(min_check === nothing ? :(count > $max_count) : :($min_check || count > $max_count))
                 error("count outside of allowed range")
             end
@@ -1638,10 +1638,10 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
             position_ptr::P
             acting_block_length::UInt16
             acting_version::$version_type_symbol
-            function $decoder_name(buffer::T, offset::Integer, position_ptr::P,
-                acting_block_length::Integer, acting_version::Integer) where {T,P}
+            function $decoder_name(buffer::T, offset::Integer, position_ptr::PositionPointer,
+                acting_block_length::Integer, acting_version::Integer) where {T}
                 position_ptr[] = offset + acting_block_length
-                new{T,P}(buffer, offset, position_ptr, acting_block_length, acting_version)
+                new{T,PositionPointer}(buffer, offset, position_ptr, acting_block_length, acting_version)
             end
         end
 
@@ -1650,14 +1650,14 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
             offset::Int64
             position_ptr::P
             function $encoder_name(buffer::T, offset::Integer,
-                position_ptr::P, hasSbeHeader::Bool=false) where {T,P}
+                position_ptr::PositionPointer, hasSbeHeader::Bool=false) where {T}
                 position_ptr[] = offset + $(block_length_expr(ir, msg_token.encoded_length))
-                new{T,P,hasSbeHeader}(buffer, offset, position_ptr)
+                new{T,PositionPointer,hasSbeHeader}(buffer, offset, position_ptr)
             end
         end
 
         @inline function $decoder_name(buffer::AbstractArray, offset::Integer=0;
-            position_ptr=Ref(0),
+            position_ptr::PositionPointer=PositionPointer(),
             header=$header_module.Decoder(buffer, offset))
             if $header_module.templateId(header) != $(template_id_expr(ir, msg_token.id)) ||
                $header_module.schemaId(header) != $(schema_id_expr(ir, ir.id))
@@ -1668,7 +1668,7 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
         end
 
         @inline function $encoder_name(buffer::AbstractArray, offset::Integer=0;
-            position_ptr=Ref(0),
+            position_ptr::PositionPointer=PositionPointer(),
             header=$header_module.Encoder(buffer, offset))
             $header_module.blockLength!(header, $(block_length_expr(ir, msg_token.encoded_length)))
             $header_module.templateId!(header, $(template_id_expr(ir, msg_token.id)))
@@ -1714,7 +1714,7 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
         $(var_data_exprs...)
 
         @inline function sbe_decoded_length(m::$abstract_type_name)
-            skipper = $decoder_name(sbe_buffer(m), sbe_offset(m), Ref(0),
+            skipper = $decoder_name(sbe_buffer(m), sbe_offset(m), PositionPointer(),
                 sbe_acting_block_length(m), sbe_acting_version(m))
             sbe_skip!(skipper)
             return sbe_encoded_length(skipper)

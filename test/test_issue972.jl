@@ -14,9 +14,9 @@ using Test
     @test Issue972.NewComposite.f1(comp_dec) == UInt16(10)
     @test Issue972.NewComposite.f2(comp_dec) == UInt32(20)
 
-    dec0 = Issue972.Issue972.Decoder(buffer, 0, Ref(0), UInt16(0), UInt16(0))
+    dec0 = Issue972.Issue972.Decoder(buffer, 0, SBE.PositionPointer(), UInt16(0), UInt16(0))
     @test !Issue972.Issue972.newField_in_acting_version(dec0)
 
-    dec1 = Issue972.Issue972.Decoder(buffer, 0, Ref(0), UInt16(0), UInt16(1))
+    dec1 = Issue972.Issue972.Decoder(buffer, 0, SBE.PositionPointer(), UInt16(0), UInt16(1))
     @test Issue972.Issue972.newField_in_acting_version(dec1)
 end

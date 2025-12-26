@@ -95,7 +95,7 @@ end
 
     @testset "AbstractSbeGroup iterate" begin
         mutable struct TestGroup <: SBE.AbstractSbeGroup
-            position_ptr::Base.RefValue{Int}
+            position_ptr::SBE.PositionPointer
             count::Int
             index::Int
             offset::Int
@@ -103,7 +103,7 @@ end
 
         SBE.sbe_acting_block_length(::TestGroup) = 4
 
-        group = TestGroup(Ref(10), 2, 0, 0)
+        group = TestGroup(SBE.PositionPointer(10), 2, 0, 0)
         @test length(group) == 2
 
         item, _ = iterate(group)

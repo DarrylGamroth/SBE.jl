@@ -7,10 +7,10 @@ abstract type FrameCodec{T} end
 struct FrameCodecDecoder{T<:AbstractArray{UInt8}} <: FrameCodec{T}
     buffer::T
     offset::Int64
-    position_ptr::Base.RefValue{Int64}
+    position_ptr::SBE.PositionPointer
     acting_block_length::UInt16
     acting_version::UInt16
-    function FrameCodecDecoder(buffer::T, offset::Integer, position_ptr::Ref{Int64},
+    function FrameCodecDecoder(buffer::T, offset::Integer, position_ptr::SBE.PositionPointer,
         acting_block_length::Integer, acting_version::Integer) where {T}
         position_ptr[] = offset + acting_block_length
         new{T}(buffer, offset, position_ptr, acting_block_length, acting_version)
@@ -20,16 +20,16 @@ end
 struct FrameCodecEncoder{T<:AbstractArray{UInt8},HasSbeHeader} <: FrameCodec{T}
     buffer::T
     offset::Int64
-    position_ptr::Base.RefValue{Int64}
+    position_ptr::SBE.PositionPointer
     function FrameCodecEncoder(buffer::T, offset::Integer,
-        position_ptr::Ref{Int64}, hasSbeHeader::Bool=false) where {T}
+        position_ptr::SBE.PositionPointer, hasSbeHeader::Bool=false) where {T}
         position_ptr[] = offset + 12
         new{T,hasSbeHeader}(buffer, offset, position_ptr)
     end
 end
 
 @inline function FrameCodecDecoder(buffer::AbstractArray, offset::Integer=0;
-    position_ptr::Base.RefValue{Int64}=Ref(0),
+    position_ptr::SBE.PositionPointer=SBE.PositionPointer(),
     header::MessageHeader=MessageHeader(buffer, offset))
     if templateId(header) != UInt16(0x1) || schemaId(header) != UInt16(0x1)
         throw(DomainError("Template id or schema id mismatch"))
@@ -38,7 +38,7 @@ end
         blockLength(header), version(header))
 end
 @inline function FrameCodecEncoder(buffer::AbstractArray, offset::Integer=0;
-    position_ptr::Base.RefValue{Int64}=Ref(0),
+    position_ptr::SBE.PositionPointer=SBE.PositionPointer(),
     header::MessageHeader=MessageHeader(buffer, offset))
     blockLength!(header, UInt16(0xc))
     templateId!(header, UInt16(0x1))
@@ -68,7 +68,7 @@ sbe_acting_version(::FrameCodecEncoder) = UInt16(0x0)
 sbe_rewind!(m::FrameCodec) = sbe_position!(m, m.offset + sbe_acting_block_length(m))
 sbe_encoded_length(m::FrameCodec) = sbe_position(m) - m.offset
 @inline function sbe_decoded_length(m::FrameCodec)
-    skipper = FrameCodecDecoder(sbe_buffer(m), sbe_offset(m), Ref(0),
+    skipper = FrameCodecDecoder(sbe_buffer(m), sbe_offset(m), SBE.PositionPointer(),
         sbe_acting_block_length(m), sbe_acting_version(m))
     sbe_skip!(skipper)
     sbe_encoded_length(skipper)
@@ -413,7 +413,7 @@ function show(io::IO, m::FrameCodec{T}) where {T}
     println(io, "SbeSchemaId:    ", sbe_schema_id(m))
     println(io, "SbeSchemaVersion: ", sbe_schema_version(m))
 
-    writer = FrameCodecDecoder(sbe_buffer(m), sbe_offset(m), Ref(0),
+    writer = FrameCodecDecoder(sbe_buffer(m), sbe_offset(m), SBE.PositionPointer(),
         sbe_block_length(m), sbe_schema_version(m))
     print(io, "irId: ")
     print(io, irId(writer))

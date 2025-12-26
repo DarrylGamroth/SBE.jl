@@ -13,10 +13,10 @@ using Test
     @test Issue967.PRICENULL9.mantissa(comp_dec) == Int64(100)
     @test Issue967.PRICENULL9.exponent(comp_dec) == Int8(-9)
 
-    dec12 = Issue967.MDInstrumentDefinitionFX63.Decoder(buffer, 0, Ref(0), UInt16(0), UInt16(12))
+    dec12 = Issue967.MDInstrumentDefinitionFX63.Decoder(buffer, 0, SBE.PositionPointer(), UInt16(0), UInt16(12))
     @test Issue967.MDInstrumentDefinitionFX63.altMinPriceIncrement_in_acting_version(dec12)
     @test !Issue967.MDInstrumentDefinitionFX63.altPriceIncrementConstraint_in_acting_version(dec12)
 
-    dec13 = Issue967.MDInstrumentDefinitionFX63.Decoder(buffer, 0, Ref(0), UInt16(0), UInt16(13))
+    dec13 = Issue967.MDInstrumentDefinitionFX63.Decoder(buffer, 0, SBE.PositionPointer(), UInt16(0), UInt16(13))
     @test Issue967.MDInstrumentDefinitionFX63.altPriceIncrementConstraint_in_acting_version(dec13)
 end

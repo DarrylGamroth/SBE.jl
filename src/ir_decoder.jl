@@ -7,6 +7,7 @@ module IrDecoder
 
 using ..IR
 import ..capture_types!
+import ..PositionPointer
 
 const SBE_IR_MODULE_NAME = Symbol("UkCoRealLogicSbeIrGenerated")
 const SBE_IR_ALIAS_NAME = Symbol("Uk_co_real_logic_sbe_ir_generated")
@@ -321,7 +322,7 @@ function decode_ir_generated(buffer::AbstractVector{UInt8})
     mod = sbe_ir_module()
     mod === nothing && error("Generated SBE IR codecs not loaded. Run scripts/generate_sbe_ir.jl.")
 
-    pos = Ref(0)
+    pos = PositionPointer()
     frame_block_length = mod.FrameCodec.sbe_block_length(mod.FrameCodec.Decoder)
     frame_schema_version = mod.FrameCodec.sbe_schema_version(mod.FrameCodec.Decoder)
     frame = mod.FrameCodec.Decoder(buffer, 0, pos, frame_block_length, frame_schema_version)
@@ -345,7 +346,7 @@ function decode_ir_generated(buffer::AbstractVector{UInt8})
     token_schema_version = mod.TokenCodec.sbe_schema_version(mod.TokenCodec.Decoder)
 
     while offset < length(buffer)
-        token_pos = Ref(offset)
+        token_pos = PositionPointer(offset)
         token = mod.TokenCodec.Decoder(buffer, offset, token_pos, token_block_length, token_schema_version)
 
         token_offset = mod.TokenCodec.tokenOffset(token)
