@@ -302,7 +302,6 @@ export sbe_rewind!, sbe_decoded_length, sbe_semantic_type, sbe_description
 export to_string
 
 # Export utility functions for testing (with underscore prefix they're still internal)
-export generate_encoded_field_type
 export decode_ir, decode_ir_generated
 
 end # module SBE
