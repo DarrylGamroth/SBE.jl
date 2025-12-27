@@ -121,6 +121,34 @@ using SBE
         @test speeds_decoded == test_speeds
         @test all(mpgs_decoded .≈ Float32.(test_mpgs))
     end
+
+    @testset "Group Decoder Reuse" begin
+        function encode_fuel!(buffer, speeds, mpgs)
+            car_enc = Baseline.Car.Encoder(buffer)
+            fuel_enc = Baseline.Car.fuelFigures!(car_enc, length(speeds))
+            for (speed, mpg) in zip(speeds, mpgs)
+                Baseline.Car.FuelFigures.next!(fuel_enc)
+                Baseline.Car.FuelFigures.speed!(fuel_enc, speed)
+                Baseline.Car.FuelFigures.mpg!(fuel_enc, mpg)
+            end
+            return buffer
+        end
+
+        buffer1 = zeros(UInt8, 256)
+        encode_fuel!(buffer1, [100, 120], [35.5, 28.3])
+        dec1 = Baseline.Car.Decoder(buffer1)
+        fuel_dec = Baseline.Car.fuelFigures(dec1)
+        speeds1 = [Baseline.Car.FuelFigures.speed(item) for item in fuel_dec]
+        @test speeds1 == UInt16[100, 120]
+
+        buffer2 = zeros(UInt8, 256)
+        encode_fuel!(buffer2, [80, 90], [40.0, 41.0])
+        dec2 = Baseline.Car.Decoder(buffer2)
+        reused = Baseline.Car.fuelFigures!(dec2, fuel_dec)
+        @test reused === fuel_dec
+        speeds2 = [Baseline.Car.FuelFigures.speed(item) for item in reused]
+        @test speeds2 == UInt16[80, 90]
+    end
     
     @testset "Base.eltype" begin
         buffer = zeros(UInt8, 256)

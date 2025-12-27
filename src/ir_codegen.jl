@@ -1399,12 +1399,12 @@ function generate_group_expr(
         abstract type $abstract_type_name{T} <: AbstractSbeGroup end
 
         mutable struct $decoder_name{T<:AbstractArray{UInt8},P} <: $abstract_type_name{T}
-            const buffer::T
+            buffer::T
             offset::Int64
-            const position_ptr::P
-            const block_length::UInt16
-            const acting_version::$version_type_symbol
-            const count::$count_type_symbol
+            position_ptr::P
+            block_length::UInt16
+            acting_version::$version_type_symbol
+            count::$count_type_symbol
             index::$count_type_symbol
             function $decoder_name(buffer::T, offset::Integer, position_ptr::PositionPointer,
                 block_length::Integer, acting_version::Integer,
@@ -1433,6 +1433,30 @@ function generate_group_expr(
             position_ptr[] += $dimension_header_length
             return $decoder_name(buffer, 0, position_ptr, $block_length_get(dimensions),
                 acting_version, $num_in_group_get(dimensions), $count_zero_expr)
+        end
+
+        @inline function reset!(g::$decoder_name{T,P}, buffer::T, position_ptr::P, acting_version) where {T,P}
+            dimensions = $dimension_decoder(buffer, position_ptr[])
+            position_ptr[] += $dimension_header_length
+            g.buffer = buffer
+            g.offset = 0
+            g.position_ptr = position_ptr
+            g.block_length = $block_length_get(dimensions)
+            g.acting_version = acting_version
+            g.count = $num_in_group_get(dimensions)
+            g.index = $count_zero_expr
+            return g
+        end
+
+        @inline function reset_missing!(g::$decoder_name{T,P}, buffer::T, position_ptr::P, acting_version) where {T,P}
+            g.buffer = buffer
+            g.offset = 0
+            g.position_ptr = position_ptr
+            g.block_length = $(version_expr(ir, 0))
+            g.acting_version = acting_version
+            g.count = $count_zero_expr
+            g.index = $count_zero_expr
+            return g
         end
 
         @inline function $encoder_name(buffer, count, position_ptr::PositionPointer)
@@ -1517,6 +1541,12 @@ function generate_group_expr(
                 end
                 return $group_module_name.Decoder(m.buffer, sbe_position_ptr(m), sbe_acting_version(m))
             end
+            @inline function $(Symbol(accessor_name, "!"))(m::$parent_abstract_type, g::$group_module_name.Decoder)
+                if sbe_acting_version(m) < $(version_expr(ir, since_version))
+                    return $group_module_name.reset_missing!(g, m.buffer, sbe_position_ptr(m), sbe_acting_version(m))
+                end
+                return $group_module_name.reset!(g, m.buffer, sbe_position_ptr(m), sbe_acting_version(m))
+            end
             @inline function $accessor_name_encoder(m::$parent_abstract_type, count)
                 return $group_module_name.Encoder(m.buffer, count, sbe_position_ptr(m))
             end
@@ -1524,13 +1554,16 @@ function generate_group_expr(
             $(Symbol(accessor_name, :_id))(::$parent_abstract_type) = $(template_id_expr(ir, group_id))
             $(Symbol(accessor_name, :_since_version))(::$parent_abstract_type) = $(version_expr(ir, since_version))
             $(Symbol(accessor_name, :_in_acting_version))(m::$parent_abstract_type) = sbe_acting_version(m) >= $(version_expr(ir, since_version))
-            export $accessor_name, $accessor_name_encoder, $group_module_name
+            export $accessor_name, $(Symbol(accessor_name, "!")), $accessor_name_encoder, $group_module_name
         end)
     else
         push!(parent_accessors, quote
             @inline function $accessor_name(m::$parent_abstract_type)
                 return $group_module_name.Decoder(m.buffer, sbe_position_ptr(m), sbe_acting_version(m))
             end
+            @inline function $(Symbol(accessor_name, "!"))(m::$parent_abstract_type, g::$group_module_name.Decoder)
+                return $group_module_name.reset!(g, m.buffer, sbe_position_ptr(m), sbe_acting_version(m))
+            end
             @inline function $accessor_name_encoder(m::$parent_abstract_type, count)
                 return $group_module_name.Encoder(m.buffer, count, sbe_position_ptr(m))
             end
@@ -1538,7 +1571,7 @@ function generate_group_expr(
             $(Symbol(accessor_name, :_id))(::$parent_abstract_type) = $(template_id_expr(ir, group_id))
             $(Symbol(accessor_name, :_since_version))(::$parent_abstract_type) = $(version_expr(ir, since_version))
             $(Symbol(accessor_name, :_in_acting_version))(m::$parent_abstract_type) = sbe_acting_version(m) >= $(version_expr(ir, since_version))
-            export $accessor_name, $accessor_name_encoder, $group_module_name
+            export $accessor_name, $(Symbol(accessor_name, "!")), $accessor_name_encoder, $group_module_name
         end)
     end
 

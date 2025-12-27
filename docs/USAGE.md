@@ -91,6 +91,18 @@ Baseline.Car.FuelFigures.speed!(fig, 60)
 Baseline.Car.FuelFigures.mpg!(fig, 42.0f0)
 ```
 
+To reuse a group decoder without allocations, call the accessor with an existing decoder:
+
+```julia
+car_dec = Baseline.Car.Decoder(buffer)
+fuel_dec = Baseline.Car.fuelFigures(car_dec)
+for fig in fuel_dec
+    Baseline.Car.FuelFigures.speed(fig)
+end
+
+Baseline.Car.fuelFigures!(car_dec, fuel_dec)  # reset and reuse
+```
+
 ### Variable-Length Data
 
 Var-data accessors operate on the message position pointer. Writing advances the pointer.
