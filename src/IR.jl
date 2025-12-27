@@ -16,6 +16,8 @@ export applicable_type_name, array_length, is_constant_encoding, is_optional_enc
 export update_component_token_counts!
 export collect_fields, collect_groups, collect_var_data, collect_tokens
 export get_message_body, find_end_signal, find_sub_group_names, find_signal
+export ir_messages, ir_message, ir_types, ir_type
+export ir_byte_order, ir_id, ir_version, ir_package_name, ir_namespace_name
 
 const INVALID_ID = -1
 const VARIABLE_LENGTH = -1
@@ -129,6 +131,69 @@ struct Ir
     types_by_name::Dict{String, Vector{Token}}
     namespaces::Vector{String}
 end
+
+"""
+    ir_messages(ir::Ir) -> Vector{Vector{Token}}
+
+Return all message token lists.
+"""
+ir_messages(ir::Ir) = collect(values(ir.messages_by_id))
+
+"""
+    ir_message(ir::Ir, id::Integer) -> Union{Vector{Token}, Nothing}
+
+Return the message token list for a message id, or `nothing`.
+"""
+ir_message(ir::Ir, id::Integer) = get(ir.messages_by_id, Int(id), nothing)
+
+"""
+    ir_types(ir::Ir) -> Vector{Vector{Token}}
+
+Return all type token lists.
+"""
+ir_types(ir::Ir) = collect(values(ir.types_by_name))
+
+"""
+    ir_type(ir::Ir, name::AbstractString) -> Union{Vector{Token}, Nothing}
+
+Return the type token list for a type name, or `nothing`.
+"""
+ir_type(ir::Ir, name::AbstractString) = get(ir.types_by_name, String(name), nothing)
+
+"""
+    ir_byte_order(ir::Ir) -> Symbol
+
+Return the schema byte order.
+"""
+ir_byte_order(ir::Ir) = ir.byte_order
+
+"""
+    ir_id(ir::Ir) -> Int
+
+Return the schema id.
+"""
+ir_id(ir::Ir) = ir.id
+
+"""
+    ir_version(ir::Ir) -> Int
+
+Return the schema version.
+"""
+ir_version(ir::Ir) = ir.version
+
+"""
+    ir_package_name(ir::Ir) -> String
+
+Return the schema package name.
+"""
+ir_package_name(ir::Ir) = ir.package_name
+
+"""
+    ir_namespace_name(ir::Ir) -> Union{Nothing, String}
+
+Return the schema namespace name.
+"""
+ir_namespace_name(ir::Ir) = ir.namespace_name
 
 primitive_type_name(pt::PrimitiveType.T) = Dict(
     PrimitiveType.NONE => "none",

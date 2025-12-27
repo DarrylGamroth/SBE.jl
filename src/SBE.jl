@@ -207,7 +207,7 @@ end
 # ============================================================================
 
 """
-    @load_schema xml_path
+    @load_schema xml_path; module_name=nothing
 
 Macro to load an SBE schema at parse time, avoiding world age issues.
 
@@ -217,6 +217,7 @@ there are no world age issues when accessing the generated module.
 
 # Arguments
 - `xml_path`: Path to the SBE XML schema file (can be a string or expression)
+- `module_name`: Optional override for the generated module name (String or Symbol)
 
 # Returns
 The macro expands to code that loads the schema and returns the module name as a Symbol.
@@ -252,25 +253,48 @@ will detect that the module already exists and return its name without regenerat
 # See Also
 - `generate(xml_path)` - Generate code as string
 """
-macro load_schema(xml_path)
+macro load_schema(args...)
+    xml_path = nothing
+    module_name_expr = :(nothing)
+
+    for arg in args
+        if arg isa Expr && arg.head == :parameters
+            for kw in arg.args
+                if kw isa Expr && (kw.head == :(=) || kw.head == :kw) && kw.args[1] == :module_name
+                    module_name_expr = kw.args[2]
+                elseif kw isa Expr && (kw.head == :(=) || kw.head == :kw) && kw.args[1] == :module
+                    module_name_expr = kw.args[2]
+                else
+                    error("Unsupported @load_schema keyword argument: $(kw)")
+                end
+            end
+        else
+            xml_path = arg
+        end
+    end
+
+    xml_path === nothing && error("@load_schema requires an XML path")
+
     return quote
         let xml_file = $(esc(xml_path))
-            # Parse to get module name
             xml_content = read(xml_file, String)
             schema = SBE.parse_xml_schema(xml_content)
-            # Convert package name to PascalCase (e.g., "composite.elements" -> "CompositeElements")
-            package_parts = split(replace(schema.package_name, "." => "_"), "_")
-            module_name = Symbol(join([uppercasefirst(part) for part in package_parts]))
-            
+            module_name_override = $(esc(module_name_expr))
+            if module_name_override === nothing || module_name_override == "" || module_name_override == Symbol("")
+                module_name = SBE.module_name_from_package(schema.package_name)
+            else
+                module_name = Symbol(SBE.sanitize_identifier(String(module_name_override)))
+            end
+
             # Check if already exists
             if !isdefined(Main, module_name)
                 # Generate and load
-                code = SBE.generate(xml_file)
+                code = SBE.generate(xml_file; module_name=module_name)
                 Base.include_string(Main, code)
             end
             # If already exists, silently return the existing module name
             # (modules cannot be redefined without restarting Julia)
-            
+
             module_name
         end
     end
@@ -281,7 +305,8 @@ parse_sbe_schema(xml_content::AbstractString) = parse_xml_schema(xml_content)
 
 # Re-export important types and functions that users need
 export @load_schema, parse_xml_schema, parse_sbe_schema
-export generate  # Main code generation API
+export generate, generate_ir, generate_ir_xml, generate_ir_file
+export IR  # Stable IR module surface
 
 # Export position pointer type
 export PositionPointer

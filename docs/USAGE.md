@@ -186,6 +186,23 @@ declared in XML.
 
 ## IR Utilities
 
+SBE.jl exposes a stable IR API (mirroring the reference implementation) for tooling and
+code generation:
+
+```julia
+ir = SBE.generate_ir_file("schema.xml")
+msgs = SBE.IR.ir_messages(ir)
+first_msg = SBE.IR.ir_message(ir, 1)
+types = SBE.IR.ir_types(ir)
+schema_id = SBE.IR.ir_id(ir)
+```
+
+You can also build IR from XML content directly:
+
+```julia
+ir = SBE.generate_ir_xml(read("schema.xml", String))
+```
+
 SBE.jl can decode `.sbeir` files for tooling and debugging:
 
 ```julia

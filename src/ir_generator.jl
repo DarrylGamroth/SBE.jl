@@ -840,6 +840,11 @@ mutable struct IrGeneratorState
     tokens::Vector{IR.Token}
 end
 
+"""
+    generate_ir(schema::XmlMessageSchema) -> IR.Ir
+
+Generate the SBE Intermediate Representation (IR) for a parsed schema.
+"""
 function generate_ir(schema::XmlMessageSchema)
     header_type = get(schema.types_by_name, schema.header_type, nothing)
     header_type isa XmlCompositeType || error("headerType must be a composite: $(schema.header_type)")
@@ -877,6 +882,26 @@ function generate_ir(schema::XmlMessageSchema)
     end
 
     return ir
+end
+
+"""
+    generate_ir_xml(xml_content::AbstractString) -> IR.Ir
+
+Parse SBE XML content and generate the IR.
+"""
+function generate_ir_xml(xml_content::AbstractString)
+    schema = parse_xml_schema(xml_content)
+    return generate_ir(schema)
+end
+
+"""
+    generate_ir_file(path::AbstractString) -> IR.Ir
+
+Read an SBE XML schema file and generate the IR.
+"""
+function generate_ir_file(path::AbstractString)
+    xml_content = read(path, String)
+    return generate_ir_xml(xml_content)
 end
 
 function capture_types!(ir::IR.Ir, tokens::Vector{IR.Token}, begin_index::Int=1, end_index::Int=length(tokens))

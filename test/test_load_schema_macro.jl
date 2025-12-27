@@ -19,6 +19,27 @@ using SBE
         Baseline = getfield(Main, module_name)
         @test Baseline isa Module
     end
+
+    @testset "Module Naming" begin
+        schema_path = joinpath(@__DIR__, "example-schema.xml")
+        xml_content = read(schema_path, String)
+
+        sanitized_path, sanitized_io = mktemp()
+        write(sanitized_io, replace(xml_content, "package=\"baseline\"" => "package=\"SBE tests-1\""))
+        close(sanitized_io)
+
+        sanitized_name = SBE.@load_schema sanitized_path
+        @test sanitized_name == :SBETests1
+        @test isdefined(Main, sanitized_name)
+
+        override_path, override_io = mktemp()
+        write(override_io, replace(xml_content, "package=\"baseline\"" => "package=\"override-test\""))
+        close(override_io)
+
+        override_name = SBE.@load_schema(override_path; module_name="CustomSchemaOverride")
+        @test override_name == :CustomSchemaOverride
+        @test isdefined(Main, override_name)
+    end
     
     # All subsequent tests reuse the already-loaded Baseline module
     @testset "Direct Module Access" begin

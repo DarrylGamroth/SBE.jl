@@ -1,7 +1,7 @@
 # SBE.jl
 
 [![CI](https://github.com/DarrylGamroth/SBE.jl/actions/workflows/ci.yml/badge.svg)](https://github.com/DarrylGamroth/SBE.jl/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/DarrylGamroth/SBE.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/DarrylGamroth/SBE.jl)
+[![codecov](https://codecov.io/gh/DarrylGamroth/SBE.jl/branch/main/graph/badge.svg)](https://app.codecov.io/gh/DarrylGamroth/SBE.jl)
 
 A high-performance Julia implementation of the [Simple Binary Encoding (SBE)](https://github.com/aeron-io/simple-binary-encoding) protocol for low-latency financial messaging.
 
@@ -26,7 +26,15 @@ SBE.jl generates zero-allocation, type-stable Julia code from SBE XML schemas. T
 using SBE
 
 # Load schema and generate types at parse time
-Baseline = @load_schema "example-schema.xml"
+baseline_name = @load_schema "example-schema.xml"
+Baseline = getfield(Main, baseline_name)
+```
+
+You can override the generated module name:
+
+```julia
+custom_name = @load_schema("example-schema.xml"; module_name="CustomSchema")
+CustomSchema = getfield(Main, custom_name)
 ```
 
 ### Encoding a Message
@@ -144,6 +152,16 @@ for fig in perf_figures
 end
 ```
 
+## IR API
+
+SBE.jl exposes a stable Intermediate Representation (IR) surface for tooling:
+
+```julia
+ir = SBE.generate_ir_file("example-schema.xml")
+messages = SBE.IR.ir_messages(ir)
+schema_id = SBE.IR.ir_id(ir)
+```
+
 ## File-Based Generation
 
 For production use, generate standalone Julia files:
@@ -193,7 +211,7 @@ SBE.jl achieves **zero allocation** for message encoding/decoding:
 - Type-stable code generation
 - Optimal memory layout
 
-See [PERFORMANCE_INSIGHTS.md](docs/technical/PERFORMANCE_INSIGHTS.md) for detailed benchmarks.
+See `docs/USAGE.md` for usage notes and performance considerations.
 
 ## Binary Compatibility
 
@@ -202,7 +220,7 @@ SBE.jl is binary-compatible with the official sbe-tool:
 - sbe-tool can decode messages encoded by SBE.jl
 - Identical byte layouts for all types
 
-See [CODEGEN_COMPARISON.md](docs/technical/CODEGEN_COMPARISON.md) for API differences.
+See `docs/USAGE.md` for compatibility and generator details.
 
 ## References
 

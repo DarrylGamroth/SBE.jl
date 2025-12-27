@@ -1947,8 +1947,9 @@ function module_name_from_package(package_name::String)
     return Symbol(sanitize_identifier(raw))
 end
 
-function generate_ir_module_expr(ir::IR.Ir)
-    module_name = module_name_from_package(ir.package_name)
+function generate_ir_module_expr(ir::IR.Ir; module_name::Union{Nothing, Symbol, String}=nothing)
+    module_name = module_name === nothing ? module_name_from_package(ir.package_name) :
+        Symbol(sanitize_identifier(String(module_name)))
     alias_raw = replace(ir.package_name, r"[^A-Za-z0-9_]" => "_")
     alias_name = Symbol(sanitize_identifier(uppercasefirst(alias_raw)))
     type_exprs = Expr[]

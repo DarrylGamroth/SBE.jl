@@ -305,11 +305,11 @@ end
 # ============================================================================
 
 """
-    generate(xml_path::String, output_path::String) -> String
+    generate(xml_path::String, output_path::String; module_name=nothing) -> String
 
 Generate Julia code from an SBE schema XML file and write it to `output_path`.
 """
-function generate(xml_path::String, output_path::String)
+function generate(xml_path::String, output_path::String; module_name::Union{Nothing, Symbol, String}=nothing)
     # Verify input file exists
     if !isfile(xml_path)
         error("Schema file not found: $xml_path")
@@ -321,7 +321,7 @@ function generate(xml_path::String, output_path::String)
     ir = generate_ir(schema)
 
     # Generate the module expression from IR
-    module_expr = generate_ir_module_expr(ir)
+    module_expr = generate_ir_module_expr(ir; module_name=module_name)
 
     # Convert to code string
     module_code = expr_to_code_string(module_expr)
@@ -340,11 +340,11 @@ function generate(xml_path::String, output_path::String)
 end
 
 """
-    generate(xml_path::String) -> String
+    generate(xml_path::String; module_name=nothing) -> String
 
 Generate Julia code from an SBE schema XML file and return it as a string.
 """
-function generate(xml_path::String)
+function generate(xml_path::String; module_name::Union{Nothing, Symbol, String}=nothing)
     # Verify input file exists
     if !isfile(xml_path)
         error("Schema file not found: $xml_path")
@@ -356,7 +356,7 @@ function generate(xml_path::String)
     ir = generate_ir(schema)
 
     # Generate the complete module expression from IR
-    module_expr = generate_ir_module_expr(ir)
+    module_expr = generate_ir_module_expr(ir; module_name=module_name)
 
     # Convert to code string and return
     return expr_to_code_string(module_expr)

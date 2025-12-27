@@ -22,6 +22,28 @@ function make_token(signal::IR.Signal.T; name="tok", encoded_length=0, offset=0,
 end
 
 @testset "IR Utilities" begin
+    @testset "IR API accessors" begin
+        schema_path = joinpath(@__DIR__, "example-schema.xml")
+        xml_content = read(schema_path, String)
+
+        schema = SBE.parse_xml_schema(xml_content)
+        ir = SBE.generate_ir(schema)
+        ir_xml = SBE.generate_ir_xml(xml_content)
+        ir_file = SBE.generate_ir_file(schema_path)
+
+        @test SBE.IR.ir_package_name(ir) == "baseline"
+        @test SBE.IR.ir_id(ir) == 1
+        @test SBE.IR.ir_version(ir) == 0
+        @test SBE.IR.ir_byte_order(ir) == :littleEndian
+
+        @test !isempty(SBE.IR.ir_messages(ir))
+        @test SBE.IR.ir_message(ir, 1) !== nothing
+        @test !isempty(SBE.IR.ir_types(ir))
+
+        @test SBE.IR.ir_id(ir_xml) == SBE.IR.ir_id(ir)
+        @test SBE.IR.ir_id(ir_file) == SBE.IR.ir_id(ir)
+    end
+
     @testset "PrimitiveValue helpers" begin
         long = IR.primitive_value_long(42, 2)
         @test long.representation == IR.PrimitiveValueRepresentation.LONG
