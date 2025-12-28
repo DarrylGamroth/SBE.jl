@@ -1692,10 +1692,13 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
             position_ptr::PositionPointer
             acting_block_length::UInt16
             acting_version::$version_type_symbol
-            function $decoder_name(buffer::T, offset::Integer, position_ptr::PositionPointer,
-                acting_block_length::Integer, acting_version::Integer) where {T}
-                position_ptr[] = offset + acting_block_length
-                new{T}(buffer, offset, position_ptr, acting_block_length, acting_version)
+            function $decoder_name{T}() where {T<:AbstractArray{UInt8}}
+                obj = new{T}()
+                obj.offset = Int64(0)
+                obj.position_ptr = PositionPointer()
+                obj.acting_block_length = UInt16(0)
+                obj.acting_version = $version_type_symbol(0)
+                return obj
             end
         end
 
@@ -1703,36 +1706,20 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
             buffer::T
             offset::Int64
             position_ptr::PositionPointer
-            function $encoder_name(buffer::T, offset::Integer,
-                position_ptr::PositionPointer) where {T}
-                position_ptr[] = offset + $(block_length_expr(ir, msg_token.encoded_length))
-                new{T}(buffer, offset, position_ptr)
+            function $encoder_name{T}() where {T<:AbstractArray{UInt8}}
+                obj = new{T}()
+                obj.offset = Int64(0)
+                obj.position_ptr = PositionPointer()
+                return obj
             end
         end
 
-        @inline function $decoder_name(buffer::AbstractArray, offset::Integer=0;
-            position_ptr::PositionPointer=PositionPointer(),
-            header=$header_module.Decoder(buffer, offset))
-            if $header_module.templateId(header) != $(template_id_expr(ir, msg_token.id)) ||
-               $header_module.schemaId(header) != $(schema_id_expr(ir, ir.id))
-                throw(DomainError("Template id or schema id mismatch"))
-            end
-            $decoder_name(buffer, offset + sbe_encoded_length(header), position_ptr,
-                $header_module.blockLength(header), $header_module.version(header))
+        @inline function $decoder_name(::Type{T}) where {T<:AbstractArray{UInt8}}
+            return $decoder_name{T}()
         end
 
-        @inline function $encoder_name(buffer::AbstractArray, offset::Integer=0;
-            position_ptr::PositionPointer=PositionPointer(),
-            header=$header_module.Encoder(buffer, offset))
-            $header_module.blockLength!(header, $(block_length_expr(ir, msg_token.encoded_length)))
-            $header_module.templateId!(header, $(template_id_expr(ir, msg_token.id)))
-            $header_module.schemaId!(header, $(schema_id_expr(ir, ir.id)))
-            $header_module.version!(header, $(version_expr(ir, ir.version)))
-            $encoder_name(buffer, offset + sbe_encoded_length(header), position_ptr)
-        end
-
-        @inline function $decoder_name(buffer::AbstractArray, offset::Integer, position_ptr::PositionPointer)
-            return $decoder_name(buffer, offset; position_ptr=position_ptr)
+        @inline function $encoder_name(::Type{T}) where {T<:AbstractArray{UInt8}}
+            return $encoder_name{T}()
         end
 
         @inline function wrap!(m::$decoder_name{T}, buffer::T, offset::Integer,
@@ -1800,7 +1787,9 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
         $(var_data_exprs...)
 
         @inline function sbe_decoded_length(m::$abstract_type_name)
-            skipper = $decoder_name(sbe_buffer(m), sbe_offset(m), PositionPointer(),
+            skipper = $decoder_name(typeof(sbe_buffer(m)))
+            skipper.position_ptr = PositionPointer()
+            wrap!(skipper, sbe_buffer(m), sbe_offset(m),
                 sbe_acting_block_length(m), sbe_acting_version(m))
             sbe_skip!(skipper)
             return sbe_encoded_length(skipper)

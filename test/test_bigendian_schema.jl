@@ -3,7 +3,8 @@ using Test
 @testset "Big Endian Baseline Schema" begin
     buffer = zeros(UInt8, 512)
     header = BigEndianBaseline.MessageHeader.Encoder(buffer, 0)
-    enc = BigEndianBaseline.Car.Encoder(buffer, 0; header=header)
+    enc = BigEndianBaseline.Car.Encoder(typeof(buffer))
+    BigEndianBaseline.Car.wrap_and_apply_header!(enc, buffer, 0; header=header)
 
     BigEndianBaseline.Car.serialNumber!(enc, UInt64(0x1122334455667788))
     BigEndianBaseline.Car.modelYear!(enc, UInt16(2024))
@@ -27,7 +28,8 @@ using Test
     BigEndianBaseline.Booster.horsePower!(booster, UInt8(15))
     BigEndianBaseline.Booster.boostType!(booster, BigEndianBaseline.BoostType.TURBO)
 
-    dec = BigEndianBaseline.Car.Decoder(buffer, 0)
+    dec = BigEndianBaseline.Car.Decoder(typeof(buffer))
+    BigEndianBaseline.Car.wrap!(dec, buffer, 0)
     @test BigEndianBaseline.Car.serialNumber(dec) == UInt64(0x1122334455667788)
     @test BigEndianBaseline.Car.modelYear(dec) == UInt16(2024)
     @test BigEndianBaseline.Car.available(dec) == BigEndianBaseline.BooleanType.T

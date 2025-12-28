@@ -23,10 +23,12 @@ include("generated/Optional.jl")
         
         # Create encoder with header (encodes header automatically)
         header = Optional.MessageHeader.Encoder(buffer, 0)
-        enc = Optional.Order.Encoder(buffer, 0; header=header)
+        enc = Optional.Order.Encoder(typeof(buffer))
+        Optional.Order.wrap_and_apply_header!(enc, buffer, 0; header=header)
         
         # Create decoder (reads header at offset 0 and validates it)
-        msg = Optional.Order.Decoder(buffer, 0)
+        msg = Optional.Order.Decoder(typeof(buffer))
+        Optional.Order.wrap!(msg, buffer, 0)
         
         # Accessors should return concrete types, NOT Union{T, Nothing}
         @test typeof(Optional.Order.optionalPrice(msg)) === UInt32
@@ -44,10 +46,12 @@ include("generated/Optional.jl")
         
         # Create encoder with header
         header = Optional.MessageHeader.Encoder(buffer, 0)
-        enc = Optional.Order.Encoder(buffer, 0, header=header)
+        enc = Optional.Order.Encoder(typeof(buffer))
+        Optional.Order.wrap_and_apply_header!(enc, buffer, 0; header=header)
         
         # Create decoder (starts after 8-byte message header)
-        msg = Optional.Order.Decoder(buffer, 0)
+        msg = Optional.Order.Decoder(typeof(buffer))
+        Optional.Order.wrap!(msg, buffer, 0)
         
         # Enum accessor should return concrete enum type
         status_val = Optional.Order.status(msg)
@@ -62,7 +66,8 @@ include("generated/Optional.jl")
         
         # Create encoder with header and set values
         header = Optional.MessageHeader.Encoder(buffer, 0)
-        enc = Optional.Order.Encoder(buffer, 0, header=header)
+        enc = Optional.Order.Encoder(typeof(buffer))
+        Optional.Order.wrap_and_apply_header!(enc, buffer, 0; header=header)
         Optional.Order.orderId!(enc, UInt64(12345))
         Optional.Order.quantity!(enc, UInt32(100))
         Optional.Order.optionalPrice!(enc, UInt32(9999))
@@ -72,7 +77,8 @@ include("generated/Optional.jl")
         Optional.Order.timestamp!(enc, UInt64(1234567890))
         
         # Decode and verify (starts after 8-byte message header)
-        dec = Optional.Order.Decoder(buffer, 0)
+        dec = Optional.Order.Decoder(typeof(buffer))
+        Optional.Order.wrap!(dec, buffer, 0)
         @test Optional.Order.orderId(dec) == UInt64(12345)
         @test Optional.Order.quantity(dec) == UInt32(100)
         @test Optional.Order.optionalPrice(dec) == UInt32(9999)
@@ -87,7 +93,8 @@ include("generated/Optional.jl")
         
         # Create encoder with header and set null values explicitly
         header = Optional.MessageHeader.Encoder(buffer, 0)
-        enc = Optional.Order.Encoder(buffer, 0, header=header)
+        enc = Optional.Order.Encoder(typeof(buffer))
+        Optional.Order.wrap_and_apply_header!(enc, buffer, 0; header=header)
         Optional.Order.orderId!(enc, UInt64(999))
         Optional.Order.quantity!(enc, UInt32(50))
         
@@ -100,7 +107,8 @@ include("generated/Optional.jl")
         Optional.Order.timestamp!(enc, UInt64(9999))
         
         # Decode and verify null values are preserved (starts after 8-byte message header)
-        dec = Optional.Order.Decoder(buffer, 0)
+        dec = Optional.Order.Decoder(typeof(buffer))
+        Optional.Order.wrap!(dec, buffer, 0)
         @test Optional.Order.orderId(dec) == UInt64(999)
         @test Optional.Order.quantity(dec) == UInt32(50)
         
@@ -118,7 +126,8 @@ include("generated/Optional.jl")
         
         # Encode with null values
         header = Optional.MessageHeader.Encoder(buffer, 0)
-        enc = Optional.Order.Encoder(buffer, 0, header=header)
+        enc = Optional.Order.Encoder(typeof(buffer))
+        Optional.Order.wrap_and_apply_header!(enc, buffer, 0; header=header)
         Optional.Order.orderId!(enc, UInt64(1))
         Optional.Order.quantity!(enc, UInt32(1))
         Optional.Order.optionalPrice!(enc, Optional.Order.optionalPrice_null_value(Optional.Order.Encoder))
@@ -127,7 +136,8 @@ include("generated/Optional.jl")
         Optional.Order.timestamp!(enc, UInt64(1))
         
         # Decode and check which fields are null (starts after 8-byte message header)
-        dec = Optional.Order.Decoder(buffer, 0)
+        dec = Optional.Order.Decoder(typeof(buffer))
+        Optional.Order.wrap!(dec, buffer, 0)
         
         # User can check for null by comparing to null_value()
         @test Optional.Order.optionalPrice(dec) == Optional.Order.optionalPrice_null_value(Optional.Order.Decoder)
@@ -141,7 +151,8 @@ include("generated/Optional.jl")
         
         # Encode mixed null/non-null values
         header1 = Optional.MessageHeader.Encoder(buffer1, 0)
-        enc = Optional.Order.Encoder(buffer1, 0; header=header1)
+        enc = Optional.Order.Encoder(typeof(buffer1))
+        Optional.Order.wrap_and_apply_header!(enc, buffer1, 0; header=header1)
         Optional.Order.orderId!(enc, UInt64(777))
         Optional.Order.quantity!(enc, UInt32(25))
         Optional.Order.optionalPrice!(enc, UInt32(1234))  # Non-null
@@ -151,9 +162,11 @@ include("generated/Optional.jl")
         Optional.Order.timestamp!(enc, UInt64(555))
         
         # Decode and re-encode (decoder reads header at offset 0)
-        dec1 = Optional.Order.Decoder(buffer1, 0)
+        dec1 = Optional.Order.Decoder(typeof(buffer1))
+        Optional.Order.wrap!(dec1, buffer1, 0)
         header2 = Optional.MessageHeader.Encoder(buffer2, 0)
-        enc2 = Optional.Order.Encoder(buffer2, 0; header=header2)
+        enc2 = Optional.Order.Encoder(typeof(buffer2))
+        Optional.Order.wrap_and_apply_header!(enc2, buffer2, 0; header=header2)
         
         Optional.Order.orderId!(enc2, Optional.Order.orderId(dec1))
         Optional.Order.quantity!(enc2, Optional.Order.quantity(dec1))
@@ -167,7 +180,8 @@ include("generated/Optional.jl")
         @test buffer1[1:50] == buffer2[1:50]
         
         # Verify decoded values (decoder reads header at offset 0)
-        dec2 = Optional.Order.Decoder(buffer2, 0)
+        dec2 = Optional.Order.Decoder(typeof(buffer2))
+        Optional.Order.wrap!(dec2, buffer2, 0)
         @test Optional.Order.orderId(dec2) == UInt64(777)
         @test Optional.Order.optionalPrice(dec2) == UInt32(1234)
         @test Optional.Order.optionalVolume(dec2) == Optional.Order.optionalVolume_null_value(Optional.Order.Decoder)
@@ -178,10 +192,12 @@ include("generated/Optional.jl")
     @testset "Zero-allocation Field Access" begin
         buffer = zeros(UInt8, 256)
         header = Optional.MessageHeader.Encoder(buffer, 0)
-        enc = Optional.Order.Encoder(buffer, 0; header=header)
+        enc = Optional.Order.Encoder(typeof(buffer))
+        Optional.Order.wrap_and_apply_header!(enc, buffer, 0; header=header)
         Optional.Order.optionalPrice!(enc, UInt32(5000))
         
-        dec = Optional.Order.Decoder(buffer, 0)
+        dec = Optional.Order.Decoder(typeof(buffer))
+        Optional.Order.wrap!(dec, buffer, 0)
         
         # Accessing optional fields should not allocate
         @test isempty(check_allocs(Optional.Order.optionalPrice, (typeof(dec),)))

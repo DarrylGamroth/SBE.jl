@@ -85,7 +85,8 @@ include("generated/Baseline.jl")
     @testset "Nested Enum in Composite Used in Message" begin
         # Test that the nested enum works when the composite is used in a message
         buffer = zeros(UInt8, 1000)
-        car_enc = Baseline.Car.Encoder(buffer)
+        car_enc = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(car_enc, buffer, 0)
         
         # Get the engine composite
         engine = Baseline.Car.engine(car_enc)
@@ -98,7 +99,8 @@ include("generated/Baseline.jl")
         Baseline.Booster.horsePower!(booster, 200)
         
         # Decode and verify
-        car_dec = Baseline.Car.Decoder(buffer)
+        car_dec = Baseline.Car.Decoder(typeof(buffer))
+        Baseline.Car.wrap!(car_dec, buffer, 0)
         engine_dec = Baseline.Car.engine(car_dec)
         booster_dec = Baseline.Engine.booster(engine_dec)
         

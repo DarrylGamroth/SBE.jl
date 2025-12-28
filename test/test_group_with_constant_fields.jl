@@ -3,7 +3,8 @@ using Test
 @testset "Group With Constant Fields" begin
     buffer = zeros(UInt8, 256)
     header = GroupWithConstantFields.MessageHeader.Encoder(buffer, 0)
-    enc = GroupWithConstantFields.ConstantsGalore.Encoder(buffer, 0; header=header)
+    enc = GroupWithConstantFields.ConstantsGalore.Encoder(typeof(buffer))
+    GroupWithConstantFields.ConstantsGalore.wrap_and_apply_header!(enc, buffer, 0; header=header)
 
     GroupWithConstantFields.ConstantsGalore.a!(enc, UInt8(1))
     comp = GroupWithConstantFields.ConstantsGalore.e(enc)
@@ -16,7 +17,8 @@ using Test
     comp_group = GroupWithConstantFields.ConstantsGalore.F.h(group_enc)
     GroupWithConstantFields.CompositeWithConst.w!(comp_group, UInt8(6))
 
-    dec = GroupWithConstantFields.ConstantsGalore.Decoder(buffer, 0)
+    dec = GroupWithConstantFields.ConstantsGalore.Decoder(typeof(buffer))
+    GroupWithConstantFields.ConstantsGalore.wrap!(dec, buffer, 0)
     @test GroupWithConstantFields.ConstantsGalore.a(dec) == UInt8(1)
     @test GroupWithConstantFields.ConstantsGalore.b(dec) == UInt16(9000)
     @test GroupWithConstantFields.ConstantsGalore.c(dec) == GroupWithConstantFields.Model.C

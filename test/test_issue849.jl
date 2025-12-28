@@ -3,7 +3,8 @@ using Test
 @testset "Issue849 Deep Composite Refs" begin
     buffer = zeros(UInt8, 256)
     header = Issue849.MessageHeader.Encoder(buffer, 0)
-    enc = Issue849.Barmsg.Encoder(buffer, 0; header=header)
+    enc = Issue849.Barmsg.Encoder(typeof(buffer))
+    Issue849.Barmsg.wrap_and_apply_header!(enc, buffer, 0; header=header)
 
     msg_header = Issue849.Barmsg.header(enc)
     header_c1 = Issue849.MessageHeader.c1(msg_header)
@@ -32,7 +33,8 @@ using Test
     c4 = Issue849.Barmsg.c4(enc)
     Issue849.Comp4.roe!(c4, UInt32(15))
 
-    dec = Issue849.Barmsg.Decoder(buffer, 0)
+    dec = Issue849.Barmsg.Decoder(typeof(buffer))
+    Issue849.Barmsg.wrap!(dec, buffer, 0)
     msg_header_dec = Issue849.Barmsg.header(dec)
     header_c1_dec = Issue849.MessageHeader.c1(msg_header_dec)
     @test Issue849.Comp1.abc(header_c1_dec) == UInt32(1)

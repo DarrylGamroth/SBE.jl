@@ -18,7 +18,8 @@ using SBE
         
         # Verify AbstractSbeGroup inheritance
         buffer = zeros(UInt8, 256)
-        car_enc = Baseline.Car.Encoder(buffer)
+        car_enc = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(car_enc, buffer, 0)
         fuel = Baseline.Car.fuelFigures!(car_enc, 1)
         @test fuel isa SBE.AbstractSbeGroup
         
@@ -32,7 +33,8 @@ using SBE
     
     @testset "Empty Group Encoding" begin
         buffer = zeros(UInt8, 256)
-        car_enc = Baseline.Car.Encoder(buffer)
+        car_enc = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(car_enc, buffer, 0)
         
         # Create empty fuel figures group
         fuel = Baseline.Car.fuelFigures!(car_enc, 0)
@@ -54,7 +56,8 @@ using SBE
         buffer = zeros(UInt8, 256)
         
         # Create encoder (writes header automatically)
-        car_enc = Baseline.Car.Encoder(buffer)
+        car_enc = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(car_enc, buffer, 0)
         
         # Create and encode group with 2 elements
         fuel_enc = Baseline.Car.fuelFigures!(car_enc, 2)
@@ -71,7 +74,8 @@ using SBE
         Baseline.Car.FuelFigures.mpg!(fuel_enc, 28.3)
         
         # Now decode and verify (decoder reads header)
-        car_dec = Baseline.Car.Decoder(buffer)
+        car_dec = Baseline.Car.Decoder(typeof(buffer))
+        Baseline.Car.wrap!(car_dec, buffer, 0)
         fuel_dec = Baseline.Car.fuelFigures(car_dec)
         
         @test length(fuel_dec) == 2
@@ -95,7 +99,8 @@ using SBE
         buffer = zeros(UInt8, 256)
         
         # Create encoder (writes header)
-        car_enc = Baseline.Car.Encoder(buffer)
+        car_enc = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(car_enc, buffer, 0)
         fuel_enc = Baseline.Car.fuelFigures!(car_enc, 3)
         
         # Encode using next!
@@ -108,7 +113,8 @@ using SBE
         end
         
         # Decode and verify using iteration (decoder reads header)
-        car_dec = Baseline.Car.Decoder(buffer)
+        car_dec = Baseline.Car.Decoder(typeof(buffer))
+        Baseline.Car.wrap!(car_dec, buffer, 0)
         fuel_dec = Baseline.Car.fuelFigures(car_dec)
         
         speeds_decoded = UInt16[]
@@ -124,7 +130,8 @@ using SBE
 
     @testset "Group Decoder Reuse" begin
         function encode_fuel!(buffer, speeds, mpgs)
-            car_enc = Baseline.Car.Encoder(buffer)
+            car_enc = Baseline.Car.Encoder(typeof(buffer))
+            Baseline.Car.wrap_and_apply_header!(car_enc, buffer, 0)
             fuel_enc = Baseline.Car.fuelFigures!(car_enc, length(speeds))
             for (speed, mpg) in zip(speeds, mpgs)
                 Baseline.Car.FuelFigures.next!(fuel_enc)
@@ -136,14 +143,16 @@ using SBE
 
         buffer1 = zeros(UInt8, 256)
         encode_fuel!(buffer1, [100, 120], [35.5, 28.3])
-        dec1 = Baseline.Car.Decoder(buffer1)
+        dec1 = Baseline.Car.Decoder(typeof(buffer1))
+        Baseline.Car.wrap!(dec1, buffer1, 0)
         fuel_dec = Baseline.Car.fuelFigures(dec1)
         speeds1 = [Baseline.Car.FuelFigures.speed(item) for item in fuel_dec]
         @test speeds1 == UInt16[100, 120]
 
         buffer2 = zeros(UInt8, 256)
         encode_fuel!(buffer2, [80, 90], [40.0, 41.0])
-        dec2 = Baseline.Car.Decoder(buffer2)
+        dec2 = Baseline.Car.Decoder(typeof(buffer2))
+        Baseline.Car.wrap!(dec2, buffer2, 0)
         reused = Baseline.Car.fuelFigures!(dec2, fuel_dec)
         @test reused === fuel_dec
         speeds2 = [Baseline.Car.FuelFigures.speed(item) for item in reused]
@@ -152,7 +161,8 @@ using SBE
     
     @testset "Base.eltype" begin
         buffer = zeros(UInt8, 256)
-        car_enc = Baseline.Car.Encoder(buffer)
+        car_enc = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(car_enc, buffer, 0)
         fuel_enc = Baseline.Car.fuelFigures!(car_enc, 1)
         
         # Encoder eltype returns Encoder type
@@ -161,7 +171,8 @@ using SBE
     
     @testset "Base.isdone" begin
         buffer = zeros(UInt8, 256)
-        car_enc = Baseline.Car.Encoder(buffer)
+        car_enc = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(car_enc, buffer, 0)
         fuel = Baseline.Car.fuelFigures!(car_enc, 2)
         
         # Not done initially
@@ -178,7 +189,8 @@ using SBE
     
     @testset "Position Management" begin
         buffer = zeros(UInt8, 256)
-        car_enc = Baseline.Car.Encoder(buffer)
+        car_enc = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(car_enc, buffer, 0)
         
         # Record position before group
         pos_before = SBE.sbe_position(car_enc)
@@ -202,7 +214,8 @@ using SBE
     
     @testset "Count Validation" begin
         buffer = zeros(UInt8, 256)
-        car_enc = Baseline.Car.Encoder(buffer)
+        car_enc = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(car_enc, buffer, 0)
         
         # Test maximum count (65534)
         @test_throws ErrorException Baseline.Car.fuelFigures!(car_enc, 65535)
@@ -210,7 +223,8 @@ using SBE
     
     @testset "reset_count_to_index!" begin
         buffer = zeros(UInt8, 256)
-        car_enc = Baseline.Car.Encoder(buffer)
+        car_enc = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(car_enc, buffer, 0)
         
         # Create group with count=5 but only write 3 elements
         fuel = Baseline.Car.fuelFigures!(car_enc, 5)
@@ -235,7 +249,8 @@ using SBE
     
     @testset "Multiple Groups in Message" begin
         buffer = zeros(UInt8, 512)
-        car_enc = Baseline.Car.Encoder(buffer)
+        car_enc = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(car_enc, buffer, 0)
         
         # Write first group (fuelFigures)
         fuel = Baseline.Car.fuelFigures!(car_enc, 2)
@@ -266,7 +281,8 @@ using SBE
         
         # Verify nested group inherits from AbstractSbeGroup
         buffer = zeros(UInt8, 512)
-        car_enc = Baseline.Car.Encoder(buffer)
+        car_enc = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(car_enc, buffer, 0)
         perf = Baseline.Car.performanceFigures!(car_enc, 1)
         Baseline.Car.PerformanceFigures.next!(perf)
         Baseline.Car.PerformanceFigures.octaneRating!(perf, 95)
@@ -277,7 +293,8 @@ using SBE
     
     @testset "Nested Groups - Encoding" begin
         buffer = zeros(UInt8, 512)
-        car_enc = Baseline.Car.Encoder(buffer)
+        car_enc = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(car_enc, buffer, 0)
         
         # Create performance figures with nested acceleration
         perf = Baseline.Car.performanceFigures!(car_enc, 2)
@@ -324,7 +341,8 @@ using SBE
     
     @testset "Nested Groups - Iterator" begin
         buffer = zeros(UInt8, 512)
-        car_enc = Baseline.Car.Encoder(buffer)
+        car_enc = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(car_enc, buffer, 0)
         
         perf = Baseline.Car.performanceFigures!(car_enc, 1)
         Baseline.Car.PerformanceFigures.next!(perf)
@@ -347,7 +365,8 @@ using SBE
     
     @testset "Variable-Length Data in Groups" begin
         buffer = zeros(UInt8, 512)
-        car_enc = Baseline.Car.Encoder(buffer)
+        car_enc = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(car_enc, buffer, 0)
         
         # Create fuel figures with var data
         fuel = Baseline.Car.fuelFigures!(car_enc, 2)
@@ -379,7 +398,8 @@ using SBE
     
     @testset "Variable-Length Data - Empty String" begin
         buffer = zeros(UInt8, 256)
-        car_enc = Baseline.Car.Encoder(buffer)
+        car_enc = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(car_enc, buffer, 0)
         
         fuel = Baseline.Car.fuelFigures!(car_enc, 1)
         Baseline.Car.FuelFigures.next!(fuel)
@@ -397,7 +417,8 @@ using SBE
     
     @testset "Shared AbstractSbeGroup Interface" begin
         buffer = zeros(UInt8, 512)
-        car_enc = Baseline.Car.Encoder(buffer)
+        car_enc = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(car_enc, buffer, 0)
         
         # Test that shared methods work on any group type
         fuel = Baseline.Car.fuelFigures!(car_enc, 2)
@@ -428,7 +449,8 @@ using SBE
     
     @testset "Complex Scenario - All Features" begin
         buffer = zeros(UInt8, 1024)
-        car_enc = Baseline.Car.Encoder(buffer)
+        car_enc = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(car_enc, buffer, 0)
         
         # Test 1: FuelFigures with var data
         fuel = Baseline.Car.fuelFigures!(car_enc, 2)

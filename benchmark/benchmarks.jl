@@ -21,7 +21,8 @@ const SOME_NUMBERS = UInt32[1, 2, 3, 4]
 const SINK = Ref{UInt64}(0)
 
 function encode_car_construct!(buffer::AbstractVector{UInt8})
-    enc = Baseline.Car.Encoder(buffer)
+    enc = Baseline.Car.Encoder(typeof(buffer))
+    Baseline.Car.wrap_and_apply_header!(enc, buffer, 0)
 
     Baseline.Car.serialNumber!(enc, UInt64(12345))
     Baseline.Car.modelYear!(enc, UInt16(2024))
@@ -83,7 +84,8 @@ end
 
 function build_encode_wrap_ctx(buffer::Vector{UInt8})
     header = Baseline.MessageHeader.Encoder(buffer, 0)
-    enc = Baseline.Car.Encoder(buffer, 0)
+    enc = Baseline.Car.Encoder(typeof(buffer))
+    Baseline.Car.wrap_and_apply_header!(enc, buffer, 0; header=header)
     position_ptr = enc.position_ptr
 
     engine = Baseline.Car.engine(enc)
@@ -162,7 +164,8 @@ function encode_car_wrap!(ctx::EncodeWrapCtx)
 end
 
 function decode_car_construct!(buffer::AbstractVector{UInt8})
-    dec = Baseline.Car.Decoder(buffer)
+    dec = Baseline.Car.Decoder(typeof(buffer))
+    Baseline.Car.wrap!(dec, buffer, 0)
 
     checksum = UInt64(0)
     checksum += UInt64(Baseline.Car.serialNumber(dec))
@@ -222,7 +225,8 @@ end
 
 function build_decode_wrap_ctx(buffer::Vector{UInt8})
     header = Baseline.MessageHeader.Decoder(buffer, 0)
-    dec = Baseline.Car.Decoder(buffer, 0)
+    dec = Baseline.Car.Decoder(typeof(buffer))
+    Baseline.Car.wrap!(dec, buffer, 0; header=header)
     position_ptr = dec.position_ptr
 
     engine = Baseline.Car.engine(dec)

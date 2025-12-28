@@ -4,7 +4,8 @@ using Test
     buffer = zeros(UInt8, 256)
     header = GroupWithData.MessageHeader.Encoder(buffer, 0)
 
-    enc = GroupWithData.TestMessage1.Encoder(buffer, 0; header=header)
+    enc = GroupWithData.TestMessage1.Encoder(typeof(buffer))
+    GroupWithData.TestMessage1.wrap_and_apply_header!(enc, buffer, 0; header=header)
     GroupWithData.TestMessage1.tag1!(enc, UInt32(42))
     entries = GroupWithData.TestMessage1.entries!(enc, 1)
     GroupWithData.TestMessage1.Entries.next!(entries)
@@ -12,7 +13,8 @@ using Test
     GroupWithData.TestMessage1.Entries.tagGroup2!(entries, Int64(99))
     GroupWithData.TestMessage1.Entries.varDataField!(entries, "hi")
 
-    dec = GroupWithData.TestMessage1.Decoder(buffer, 0)
+    dec = GroupWithData.TestMessage1.Decoder(typeof(buffer))
+    GroupWithData.TestMessage1.wrap!(dec, buffer, 0)
     @test GroupWithData.TestMessage1.tag1(dec) == UInt32(42)
     entries_dec = GroupWithData.TestMessage1.entries(dec)
     elems = collect(entries_dec)

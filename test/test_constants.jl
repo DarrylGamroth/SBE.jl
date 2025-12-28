@@ -22,7 +22,8 @@ end
     @testset "Constant Field Values" begin
         # Create a properly encoded message
         buffer = zeros(UInt8, 2048)
-        encoder = Baseline.Car.Encoder(buffer, 0)
+        encoder = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(encoder, buffer, 0)
         
         # Encode required fields
         Baseline.Car.serialNumber!(encoder, 12345)
@@ -38,7 +39,8 @@ end
         Baseline.Engine.numCylinders!(engine, 4)
         
         # Now decode and check constant values
-        decoder = Baseline.Car.Decoder(buffer, 0)
+        decoder = Baseline.Car.Decoder(typeof(buffer))
+        Baseline.Car.wrap!(decoder, buffer, 0)
         
         # Test discountedModel constant (should return Model.C)
         @test Baseline.Car.discountedModel(decoder) == Baseline.Model.C
@@ -57,7 +59,8 @@ end
     
     @testset "Constant Field Encoding Behavior" begin
         buffer = zeros(UInt8, 2048)
-        encoder = Baseline.Car.Encoder(buffer, 0)
+        encoder = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(encoder, buffer, 0)
         
         # Encode required fields
         Baseline.Car.serialNumber!(encoder, 12345)

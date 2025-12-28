@@ -10,8 +10,10 @@ using Test
     NpeSmallHeader.MessageHeader.numGroups!(header, UInt8(0))
     NpeSmallHeader.MessageHeader.numVarDataFields!(header, UInt8(0))
 
-    ping = NpeSmallHeader.Ping.Encoder(buffer, 0; header=header)
-    dec = NpeSmallHeader.Ping.Decoder(buffer, 0)
+    ping = NpeSmallHeader.Ping.Encoder(typeof(buffer))
+    NpeSmallHeader.Ping.wrap_and_apply_header!(ping, buffer, 0; header=header)
+    dec = NpeSmallHeader.Ping.Decoder(typeof(buffer))
+    NpeSmallHeader.Ping.wrap!(dec, buffer, 0)
     @test NpeSmallHeader.MessageHeader.schemaId(NpeSmallHeader.MessageHeader.Decoder(buffer, 0)) == UInt16(2001)
     @test SBE.sbe_template_id(dec) == UInt16(0)
 end

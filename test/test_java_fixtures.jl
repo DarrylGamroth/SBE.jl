@@ -10,7 +10,8 @@ const FixtureBaseline = FixtureGenerated.Baseline
 
 function encode_baseline_car!(buffer::Vector{UInt8})
     header = FixtureBaseline.MessageHeader.Encoder(buffer, 0)
-    enc = FixtureBaseline.Car.Encoder(buffer, 0; header=header)
+    enc = FixtureBaseline.Car.Encoder(typeof(buffer))
+    FixtureBaseline.Car.wrap_and_apply_header!(enc, buffer, 0; header=header)
 
     FixtureBaseline.Car.serialNumber!(enc, UInt64(1234))
     FixtureBaseline.Car.modelYear!(enc, UInt16(2013))
@@ -96,7 +97,8 @@ end
     @test isfile(fixture_path)
     bytes = read(fixture_path)
 
-    dec = CodeGenerationTest.GlobalKeywords.Decoder(bytes, 0)
+    dec = CodeGenerationTest.GlobalKeywords.Decoder(typeof(bytes))
+    CodeGenerationTest.GlobalKeywords.wrap!(dec, bytes, 0)
     @test CodeGenerationTest.GlobalKeywords.abstract_(dec) == Int8(1)
     @test CodeGenerationTest.GlobalKeywords.break_(dec) == Int8(2)
     @test CodeGenerationTest.GlobalKeywords.const_(dec) == Int8(3)
@@ -120,7 +122,8 @@ end
     @test String(CodeGenerationTest.GlobalKeywords.var(dec)) == "var-value"
 
     buffer = zeros(UInt8, 4096)
-    enc = CodeGenerationTest.GlobalKeywords.Encoder(buffer, 0)
+    enc = CodeGenerationTest.GlobalKeywords.Encoder(typeof(buffer))
+    CodeGenerationTest.GlobalKeywords.wrap_and_apply_header!(enc, buffer, 0)
     CodeGenerationTest.GlobalKeywords.abstract_!(enc, Int8(1))
     CodeGenerationTest.GlobalKeywords.break_!(enc, Int8(2))
     CodeGenerationTest.GlobalKeywords.const_!(enc, Int8(3))
@@ -152,7 +155,8 @@ end
     @test isfile(fixture_path)
     bytes = read(fixture_path)
 
-    dec = Extension.Car.Decoder(bytes, 0)
+    dec = Extension.Car.Decoder(typeof(bytes))
+    Extension.Car.wrap!(dec, bytes, 0)
 
     @test Extension.Car.serialNumber(dec) == UInt64(1234)
     @test Extension.Car.modelYear(dec) == UInt16(2013)
@@ -196,7 +200,8 @@ end
     @test String(Extension.Car.activationCode(dec)) == "abcdef"
 
     buffer = zeros(UInt8, 4096)
-    enc = Extension.Car.Encoder(buffer, 0)
+    enc = Extension.Car.Encoder(typeof(buffer))
+    Extension.Car.wrap_and_apply_header!(enc, buffer, 0)
 
     Extension.Car.serialNumber!(enc, UInt64(1234))
     Extension.Car.modelYear!(enc, UInt16(2013))
@@ -288,7 +293,8 @@ end
     @test isfile(fixture_path)
     bytes = read(fixture_path)
 
-    dec = FixtureBaseline.Car.Decoder(bytes, 0)
+    dec = FixtureBaseline.Car.Decoder(typeof(bytes))
+    FixtureBaseline.Car.wrap!(dec, bytes, 0)
 
     @test FixtureBaseline.Car.serialNumber(dec) == UInt64(1234)
     @test FixtureBaseline.Car.modelYear(dec) == UInt16(2013)

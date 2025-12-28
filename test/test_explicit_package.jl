@@ -3,7 +3,8 @@ using Test
 @testset "Explicit Package Types" begin
     buffer = zeros(UInt8, 128)
     header = ExplicitPackage.MessageHeader.Encoder(buffer, 0)
-    enc = ExplicitPackage.TestMessage.Encoder(buffer, 0; header=header)
+    enc = ExplicitPackage.TestMessage.Encoder(typeof(buffer))
+    ExplicitPackage.TestMessage.wrap_and_apply_header!(enc, buffer, 0; header=header)
 
     ExplicitPackage.TestMessage.id!(enc, UInt64(42))
     car_enc = ExplicitPackage.TestMessage.car(enc)
@@ -24,7 +25,8 @@ using Test
     ExplicitPackage.Days.Monday!(days_enc, true)
     ExplicitPackage.Days.Friday!(days_enc, true)
 
-    dec = ExplicitPackage.TestMessage.Decoder(buffer, 0)
+    dec = ExplicitPackage.TestMessage.Decoder(typeof(buffer))
+    ExplicitPackage.TestMessage.wrap!(dec, buffer, 0)
     @test ExplicitPackage.TestMessage.id(dec) == UInt64(42)
     car_dec = ExplicitPackage.TestMessage.car(dec)
     @test ExplicitPackage.Car.make(car_dec) == UInt16(7)

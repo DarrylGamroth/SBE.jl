@@ -3,7 +3,8 @@ using Test
 @testset "Json Printer Schema" begin
     buffer = zeros(UInt8, 512)
     header = JsonPrinterSchema.MessageHeader.Encoder(buffer, 0)
-    enc = JsonPrinterSchema.Car.Encoder(buffer, 0; header=header)
+    enc = JsonPrinterSchema.Car.Encoder(typeof(buffer))
+    JsonPrinterSchema.Car.wrap_and_apply_header!(enc, buffer, 0; header=header)
 
     JsonPrinterSchema.Car.serialNumber!(enc, UInt64(123))
     JsonPrinterSchema.Car.modelYear!(enc, UInt16(2024))
@@ -21,7 +22,8 @@ using Test
     JsonPrinterSchema.Car.manufacturer!(enc, "Tesla")
     JsonPrinterSchema.Car.model!(enc, "Model3")
 
-    dec = JsonPrinterSchema.Car.Decoder(buffer, 0)
+    dec = JsonPrinterSchema.Car.Decoder(typeof(buffer))
+    JsonPrinterSchema.Car.wrap!(dec, buffer, 0)
     @test JsonPrinterSchema.Car.serialNumber(dec) == UInt64(123)
     @test JsonPrinterSchema.Car.modelYear(dec) == UInt16(2024)
     @test JsonPrinterSchema.Car.available(dec) == JsonPrinterSchema.BooleanType.T
@@ -36,11 +38,13 @@ using Test
 
     creds_buffer = zeros(UInt8, 128)
     creds_header = JsonPrinterSchema.MessageHeader.Encoder(creds_buffer, 0)
-    creds_enc = JsonPrinterSchema.Credentials.Encoder(creds_buffer, 0; header=creds_header)
+    creds_enc = JsonPrinterSchema.Credentials.Encoder(typeof(creds_buffer))
+    JsonPrinterSchema.Credentials.wrap_and_apply_header!(creds_enc, creds_buffer, 0; header=creds_header)
     JsonPrinterSchema.Credentials.login!(creds_enc, "user")
     JsonPrinterSchema.Credentials.encryptedPassword!(creds_enc, UInt8[0xAA, 0xBB])
 
-    creds_dec = JsonPrinterSchema.Credentials.Decoder(creds_buffer, 0)
+    creds_dec = JsonPrinterSchema.Credentials.Decoder(typeof(creds_buffer))
+    JsonPrinterSchema.Credentials.wrap!(creds_dec, creds_buffer, 0)
     @test String(JsonPrinterSchema.Credentials.login(creds_dec)) == "user"
     @test collect(JsonPrinterSchema.Credentials.encryptedPassword(creds_dec)) == UInt8[0xAA, 0xBB]
 end
