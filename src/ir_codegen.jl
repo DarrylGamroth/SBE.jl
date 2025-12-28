@@ -1665,27 +1665,27 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
             return view(a, 1:len)
         end
 
-        struct $decoder_name{T<:AbstractArray{UInt8},P} <: $abstract_type_name{T}
+        struct $decoder_name{T<:AbstractArray{UInt8}} <: $abstract_type_name{T}
             buffer::T
             offset::Int64
-            position_ptr::P
+            position_ptr::PositionPointer
             acting_block_length::UInt16
             acting_version::$version_type_symbol
             function $decoder_name(buffer::T, offset::Integer, position_ptr::PositionPointer,
                 acting_block_length::Integer, acting_version::Integer) where {T}
                 position_ptr[] = offset + acting_block_length
-                new{T,PositionPointer}(buffer, offset, position_ptr, acting_block_length, acting_version)
+                new{T}(buffer, offset, position_ptr, acting_block_length, acting_version)
             end
         end
 
-        struct $encoder_name{T<:AbstractArray{UInt8},P,HasSbeHeader} <: $abstract_type_name{T}
+        struct $encoder_name{T<:AbstractArray{UInt8},HasSbeHeader} <: $abstract_type_name{T}
             buffer::T
             offset::Int64
-            position_ptr::P
+            position_ptr::PositionPointer
             function $encoder_name(buffer::T, offset::Integer,
                 position_ptr::PositionPointer, hasSbeHeader::Bool=false) where {T}
                 position_ptr[] = offset + $(block_length_expr(ir, msg_token.encoded_length))
-                new{T,PositionPointer,hasSbeHeader}(buffer, offset, position_ptr)
+                new{T,hasSbeHeader}(buffer, offset, position_ptr)
             end
         end
 

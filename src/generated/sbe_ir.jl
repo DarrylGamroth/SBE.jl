@@ -572,24 +572,24 @@ end
             end
         return view(a, 1:len)
     end
-struct Decoder{T <: AbstractArray{UInt8}, P} <: AbstractTokenCodec{T}
+struct Decoder{T <: AbstractArray{UInt8}} <: AbstractTokenCodec{T}
     buffer::T
     offset::Int64
-    position_ptr::P
+    position_ptr::PositionPointer
     acting_block_length::UInt16
     acting_version::UInt16
     function Decoder(buffer::T, offset::Integer, position_ptr::PositionPointer, acting_block_length::Integer, acting_version::Integer) where T
         position_ptr[] = offset + acting_block_length
-        new{T, PositionPointer}(buffer, offset, position_ptr, acting_block_length, acting_version)
+        new{T}(buffer, offset, position_ptr, acting_block_length, acting_version)
     end
 end
-struct Encoder{T <: AbstractArray{UInt8}, P, HasSbeHeader} <: AbstractTokenCodec{T}
+struct Encoder{T <: AbstractArray{UInt8}, HasSbeHeader} <: AbstractTokenCodec{T}
     buffer::T
     offset::Int64
-    position_ptr::P
+    position_ptr::PositionPointer
     function Encoder(buffer::T, offset::Integer, position_ptr::PositionPointer, hasSbeHeader::Bool = false) where T
         position_ptr[] = offset + UInt16(28)
-        new{T, PositionPointer, hasSbeHeader}(buffer, offset, position_ptr)
+        new{T, hasSbeHeader}(buffer, offset, position_ptr)
     end
 end
 @inline function Decoder(buffer::AbstractArray, offset::Integer = 0; position_ptr::PositionPointer = PositionPointer(), header = MessageHeader.Decoder(buffer, offset))
@@ -2968,24 +2968,24 @@ end
             end
         return view(a, 1:len)
     end
-struct Decoder{T <: AbstractArray{UInt8}, P} <: AbstractFrameCodec{T}
+struct Decoder{T <: AbstractArray{UInt8}} <: AbstractFrameCodec{T}
     buffer::T
     offset::Int64
-    position_ptr::P
+    position_ptr::PositionPointer
     acting_block_length::UInt16
     acting_version::UInt16
     function Decoder(buffer::T, offset::Integer, position_ptr::PositionPointer, acting_block_length::Integer, acting_version::Integer) where T
         position_ptr[] = offset + acting_block_length
-        new{T, PositionPointer}(buffer, offset, position_ptr, acting_block_length, acting_version)
+        new{T}(buffer, offset, position_ptr, acting_block_length, acting_version)
     end
 end
-struct Encoder{T <: AbstractArray{UInt8}, P, HasSbeHeader} <: AbstractFrameCodec{T}
+struct Encoder{T <: AbstractArray{UInt8}, HasSbeHeader} <: AbstractFrameCodec{T}
     buffer::T
     offset::Int64
-    position_ptr::P
+    position_ptr::PositionPointer
     function Encoder(buffer::T, offset::Integer, position_ptr::PositionPointer, hasSbeHeader::Bool = false) where T
         position_ptr[] = offset + UInt16(12)
-        new{T, PositionPointer, hasSbeHeader}(buffer, offset, position_ptr)
+        new{T, hasSbeHeader}(buffer, offset, position_ptr)
     end
 end
 @inline function Decoder(buffer::AbstractArray, offset::Integer = 0; position_ptr::PositionPointer = PositionPointer(), header = MessageHeader.Decoder(buffer, offset))
