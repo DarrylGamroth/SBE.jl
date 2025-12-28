@@ -13,8 +13,10 @@ end
     
     @testset "Message Display" begin
         buffer = zeros(UInt8, 2048)
-        encoder = Baseline.Car.Encoder(buffer, 0)
-        decoder = Baseline.Car.Decoder(buffer, 0)
+        encoder = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(encoder, buffer, 0)
+        decoder = Baseline.Car.Decoder(typeof(buffer))
+        Baseline.Car.wrap!(decoder, buffer, 0)
         
         # Test encoder display
         encoder_str = repr(encoder)
@@ -35,7 +37,8 @@ end
     
     @testset "Composite Display" begin
         buffer = zeros(UInt8, 2048)
-        encoder = Baseline.Car.Encoder(buffer, 0)
+        encoder = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(encoder, buffer, 0)
         
         # Get engine composite
         engine = Baseline.Car.engine(encoder)

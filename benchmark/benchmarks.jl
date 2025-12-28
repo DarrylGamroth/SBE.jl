@@ -21,7 +21,8 @@ const SOME_NUMBERS = UInt32[1, 2, 3, 4]
 const SINK = Ref{UInt64}(0)
 
 function encode_car_construct!(buffer::AbstractVector{UInt8})
-    enc = Baseline.Car.Encoder(buffer)
+    enc = Baseline.Car.Encoder(typeof(buffer))
+    Baseline.Car.wrap_and_apply_header!(enc, buffer, 0)
 
     Baseline.Car.serialNumber!(enc, UInt64(12345))
     Baseline.Car.modelYear!(enc, UInt16(2024))
@@ -66,8 +67,9 @@ function encode_car_construct!(buffer::AbstractVector{UInt8})
     return enc
 end
 
-mutable struct EncodeReuseCtx{E,H,EN,EX,EC,VD,ND}
+mutable struct EncodeWrapCtx{E,H,EN,EX,EC,VD,ND,FG,PF,AC}
     buffer::Vector{UInt8}
+    position_ptr::PositionPointer
     enc::E
     header::H
     engine::EN
@@ -75,11 +77,16 @@ mutable struct EncodeReuseCtx{E,H,EN,EX,EC,VD,ND}
     engine_code_dest::EC
     vehicle_dest::VD
     numbers_dest::ND
+    fuel::FG
+    perf::PF
+    accel::AC
 end
 
-function build_encode_reuse_ctx(buffer::Vector{UInt8})
+function build_encode_wrap_ctx(buffer::Vector{UInt8})
     header = Baseline.MessageHeader.Encoder(buffer, 0)
-    enc = Baseline.Car.Encoder(buffer, 0)
+    enc = Baseline.Car.Encoder(typeof(buffer))
+    Baseline.Car.wrap_and_apply_header!(enc, buffer, 0; header=header)
+    position_ptr = enc.position_ptr
 
     engine = Baseline.Car.engine(enc)
     extras = Baseline.Car.extras(enc)
@@ -88,8 +95,13 @@ function build_encode_reuse_ctx(buffer::Vector{UInt8})
     vehicle_dest = Baseline.Car.vehicleCode!(enc)
     numbers_dest = Baseline.Car.someNumbers!(enc)
 
-    return EncodeReuseCtx(
+    fuel = Baseline.Car.FuelFigures.Encoder(buffer, 0, position_ptr, 0, 0, 0)
+    perf = Baseline.Car.PerformanceFigures.Encoder(buffer, 0, position_ptr, 0, 0, 0)
+    accel = Baseline.Car.PerformanceFigures.Acceleration.Encoder(buffer, 0, position_ptr, 0, 0, 0)
+
+    return EncodeWrapCtx(
         buffer,
+        position_ptr,
         enc,
         header,
         engine,
@@ -97,17 +109,16 @@ function build_encode_reuse_ctx(buffer::Vector{UInt8})
         engine_code_dest,
         vehicle_dest,
         numbers_dest,
+        fuel,
+        perf,
+        accel,
     )
 end
 
-function encode_car_wrap!(ctx::EncodeReuseCtx)
-    enc = ctx.enc
-    header = ctx.header
-    Baseline.MessageHeader.blockLength!(header, SBE.sbe_block_length(enc))
-    Baseline.MessageHeader.templateId!(header, SBE.sbe_template_id(enc))
-    Baseline.MessageHeader.schemaId!(header, SBE.sbe_schema_id(enc))
-    Baseline.MessageHeader.version!(header, SBE.sbe_schema_version(enc))
+function encode_car_wrap!(ctx::EncodeWrapCtx)
+    Baseline.Car.wrap_and_apply_header!(ctx.enc, ctx.buffer, 0; header=ctx.header)
 
+    enc = ctx.enc
     Baseline.Car.serialNumber!(enc, UInt64(12345))
     Baseline.Car.modelYear!(enc, UInt16(2024))
     Baseline.Car.available!(enc, Baseline.BooleanType.T)
@@ -125,9 +136,8 @@ function encode_car_wrap!(ctx::EncodeReuseCtx)
     Baseline.OptionalExtras.sunRoof!(extras, true)
     Baseline.OptionalExtras.cruiseControl!(extras, true)
 
-    SBE.sbe_rewind!(enc)
-
-    fuel = Baseline.Car.fuelFigures!(enc, 2)
+    fuel = ctx.fuel
+    Baseline.Car.FuelFigures.wrap!(fuel, ctx.buffer, 2, ctx.position_ptr)
     Baseline.Car.FuelFigures.next!(fuel)
     Baseline.Car.FuelFigures.speed!(fuel, UInt16(30))
     Baseline.Car.FuelFigures.mpg!(fuel, Float32(35.9))
@@ -135,10 +145,13 @@ function encode_car_wrap!(ctx::EncodeReuseCtx)
     Baseline.Car.FuelFigures.speed!(fuel, UInt16(70))
     Baseline.Car.FuelFigures.mpg!(fuel, Float32(49.0))
 
-    perf = Baseline.Car.performanceFigures!(enc, 1)
+    perf = ctx.perf
+    Baseline.Car.PerformanceFigures.wrap!(perf, ctx.buffer, 1, ctx.position_ptr)
     Baseline.Car.PerformanceFigures.next!(perf)
     Baseline.Car.PerformanceFigures.octaneRating!(perf, UInt8(95))
-    accel = Baseline.Car.PerformanceFigures.acceleration!(perf, 1)
+
+    accel = ctx.accel
+    Baseline.Car.PerformanceFigures.Acceleration.wrap!(accel, ctx.buffer, 1, ctx.position_ptr)
     Baseline.Car.PerformanceFigures.Acceleration.next!(accel)
     Baseline.Car.PerformanceFigures.Acceleration.mph!(accel, UInt16(60))
     Baseline.Car.PerformanceFigures.Acceleration.seconds!(accel, Float32(4.5))
@@ -151,7 +164,8 @@ function encode_car_wrap!(ctx::EncodeReuseCtx)
 end
 
 function decode_car_construct!(buffer::AbstractVector{UInt8})
-    dec = Baseline.Car.Decoder(buffer)
+    dec = Baseline.Car.Decoder(typeof(buffer))
+    Baseline.Car.wrap!(dec, buffer, 0)
 
     checksum = UInt64(0)
     checksum += UInt64(Baseline.Car.serialNumber(dec))
@@ -197,36 +211,48 @@ function decode_car_construct!(buffer::AbstractVector{UInt8})
     return nothing
 end
 
-mutable struct DecodeReuseCtx{D,EN,EX}
+mutable struct DecodeWrapCtx{D,H,EN,EX,FG,PF,AC}
     buffer::Vector{UInt8}
+    position_ptr::PositionPointer
     dec::D
+    header::H
     engine::EN
     extras::EX
+    fuel::FG
+    perf::PF
+    accel::AC
 end
 
-function build_decode_reuse_ctx(buffer::Vector{UInt8})
-    dec = Baseline.Car.Decoder(buffer, 0)
+function build_decode_wrap_ctx(buffer::Vector{UInt8})
+    header = Baseline.MessageHeader.Decoder(buffer, 0)
+    dec = Baseline.Car.Decoder(typeof(buffer))
+    Baseline.Car.wrap!(dec, buffer, 0; header=header)
+    position_ptr = dec.position_ptr
+
     engine = Baseline.Car.engine(dec)
     extras = Baseline.Car.extras(dec)
 
-    return DecodeReuseCtx(
+    fuel = Baseline.Car.FuelFigures.Decoder(buffer, 0, position_ptr, 0, 0, 0, 0)
+    perf = Baseline.Car.PerformanceFigures.Decoder(buffer, 0, position_ptr, 0, 0, 0, 0)
+    accel = Baseline.Car.PerformanceFigures.Acceleration.Decoder(buffer, 0, position_ptr, 0, 0, 0, 0)
+
+    return DecodeWrapCtx(
         buffer,
+        position_ptr,
         dec,
+        header,
         engine,
         extras,
+        fuel,
+        perf,
+        accel,
     )
 end
 
-function decode_car_wrap!(ctx::DecodeReuseCtx)
+function decode_car_wrap!(ctx::DecodeWrapCtx)
+    Baseline.Car.wrap!(ctx.dec, ctx.buffer, 0; header=ctx.header)
+
     dec = ctx.dec
-    header = Baseline.MessageHeader.Decoder(ctx.buffer, 0)
-    if Baseline.MessageHeader.templateId(header) != SBE.sbe_template_id(dec) ||
-       Baseline.MessageHeader.schemaId(header) != SBE.sbe_schema_id(dec)
-        throw(DomainError("Template id or schema id mismatch"))
-    end
-
-    SBE.sbe_rewind!(dec)
-
     checksum = UInt64(0)
     checksum += UInt64(Baseline.Car.serialNumber(dec))
     checksum += UInt64(Baseline.Car.modelYear(dec))
@@ -246,7 +272,8 @@ function decode_car_wrap!(ctx::DecodeReuseCtx)
 
     speed_sum = UInt32(0)
     mpg_sum = Float32(0)
-    for fig in Baseline.Car.fuelFigures(dec)
+    fuel = Baseline.Car.fuelFigures!(dec, ctx.fuel)
+    for fig in fuel
         speed_sum += Baseline.Car.FuelFigures.speed(fig)
         mpg_sum += Baseline.Car.FuelFigures.mpg(fig)
     end
@@ -254,9 +281,11 @@ function decode_car_wrap!(ctx::DecodeReuseCtx)
     checksum += UInt64(round(mpg_sum))
 
     octane_sum = Float32(0)
-    for fig in Baseline.Car.performanceFigures(dec)
+    perf = Baseline.Car.performanceFigures!(dec, ctx.perf)
+    for fig in perf
         octane_sum += Float32(Baseline.Car.PerformanceFigures.octaneRating(fig))
-        for acc in Baseline.Car.PerformanceFigures.acceleration(fig)
+        accel = Baseline.Car.PerformanceFigures.acceleration!(fig, ctx.accel)
+        for acc in accel
             octane_sum += Float32(Baseline.Car.PerformanceFigures.Acceleration.mph(acc))
             octane_sum += Baseline.Car.PerformanceFigures.Acceleration.seconds(acc)
         end
@@ -273,14 +302,14 @@ end
 
 encode_car_construct!(DECODE_BUFFER)
 
-const ENCODE_REUSE_CTX = build_encode_reuse_ctx(ENCODE_BUFFER)
-const DECODE_REUSE_CTX = build_decode_reuse_ctx(DECODE_BUFFER)
+const ENCODE_WRAP_CTX = build_encode_wrap_ctx(ENCODE_BUFFER)
+const DECODE_WRAP_CTX = build_decode_wrap_ctx(DECODE_BUFFER)
 
 suite = BenchmarkGroup()
 suite["encode_construct"] = @benchmarkable encode_car_construct!($ENCODE_BUFFER)
-suite["encode_reuse"] = @benchmarkable encode_car_wrap!($ENCODE_REUSE_CTX)
+suite["encode_reuse"] = @benchmarkable encode_car_wrap!($ENCODE_WRAP_CTX)
 suite["decode_construct"] = @benchmarkable decode_car_construct!($DECODE_BUFFER)
-suite["decode_reuse"] = @benchmarkable decode_car_wrap!($DECODE_REUSE_CTX)
+suite["decode_reuse"] = @benchmarkable decode_car_wrap!($DECODE_WRAP_CTX)
 
 results = run(suite; verbose=true)
 show(results)

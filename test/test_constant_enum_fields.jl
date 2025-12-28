@@ -3,12 +3,14 @@ using Test
 @testset "Constant Enum Fields" begin
     buffer = zeros(UInt8, 128)
     header = ConstantEnumFields.MessageHeader.Encoder(buffer, 0)
-    enc = ConstantEnumFields.ConstantEnums.Encoder(buffer, 0; header=header)
+    enc = ConstantEnumFields.ConstantEnums.Encoder(typeof(buffer))
+    ConstantEnumFields.ConstantEnums.wrap_and_apply_header!(enc, buffer, 0; header=header)
 
     group_enc = ConstantEnumFields.ConstantEnums.f!(enc, 1)
     ConstantEnumFields.ConstantEnums.F.next!(group_enc)
 
-    dec = ConstantEnumFields.ConstantEnums.Decoder(buffer, 0)
+    dec = ConstantEnumFields.ConstantEnums.Decoder(typeof(buffer))
+    ConstantEnumFields.ConstantEnums.wrap!(dec, buffer, 0)
     @test ConstantEnumFields.ConstantEnums.c(dec) == ConstantEnumFields.Model.C
 
     group_dec = ConstantEnumFields.ConstantEnums.f(dec)

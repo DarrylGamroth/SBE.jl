@@ -17,7 +17,8 @@ using SBE
 Baseline = @load_schema "path/to/example-schema.xml"
 
 buffer = zeros(UInt8, 512)
-car = Baseline.Car.Encoder(buffer)
+car = Baseline.Car.Encoder(typeof(buffer))
+Baseline.Car.wrap_and_apply_header!(car, buffer, 0)
 
 Baseline.Car.serialNumber!(car, 12345)
 Baseline.Car.modelYear!(car, 2024)
@@ -27,7 +28,8 @@ Baseline.Car.vehicleCode!(car, "ABC123")
 
 encoded_len = SBE.sbe_encoded_length(car)
 
-dec = Baseline.Car.Decoder(buffer)
+dec = Baseline.Car.Decoder(typeof(buffer))
+Baseline.Car.wrap!(dec, buffer, 0)
 serial = Baseline.Car.serialNumber(dec)
 ```
 
@@ -62,7 +64,8 @@ Encoders write directly into a `Vector{UInt8}`.
 
 ```julia
 buffer = zeros(UInt8, 512)
-car = Baseline.Car.Encoder(buffer)
+car = Baseline.Car.Encoder(typeof(buffer))
+Baseline.Car.wrap_and_apply_header!(car, buffer, 0)
 
 Baseline.Car.serialNumber!(car, 12345)
 Baseline.Car.modelYear!(car, 2024)
@@ -94,7 +97,8 @@ Baseline.Car.FuelFigures.mpg!(fig, 42.0f0)
 To reuse a group decoder without allocations, call the accessor with an existing decoder:
 
 ```julia
-car_dec = Baseline.Car.Decoder(buffer)
+car_dec = Baseline.Car.Decoder(typeof(buffer))
+Baseline.Car.wrap!(car_dec, buffer, 0)
 fuel_dec = Baseline.Car.fuelFigures(car_dec)
 for fig in fuel_dec
     Baseline.Car.FuelFigures.speed(fig)
@@ -118,7 +122,8 @@ Baseline.Car.activationCode!(car, "ABCD1234")
 Decoders read directly from the same buffer.
 
 ```julia
-dec = Baseline.Car.Decoder(buffer)
+dec = Baseline.Car.Decoder(typeof(buffer))
+Baseline.Car.wrap!(dec, buffer, 0)
 serial = Baseline.Car.serialNumber(dec)
 year = Baseline.Car.modelYear(dec)
 
@@ -148,15 +153,18 @@ Encoders/decoders accept optional headers. This is useful when framing messages.
 
 ```julia
 header = Baseline.MessageHeader.Encoder(buffer, 0)
-car = Baseline.Car.Encoder(buffer, 0; header=header)
+car = Baseline.Car.Encoder(typeof(buffer))
+Baseline.Car.wrap_and_apply_header!(car, buffer, 0; header=header)
 
 dec_header = Baseline.MessageHeader.Decoder(buffer, 0)
-dec = Baseline.Car.Decoder(buffer, 0; header=dec_header)
+dec = Baseline.Car.Decoder(typeof(buffer))
+Baseline.Car.wrap!(dec, buffer, 0; header=dec_header)
 ```
 
 ## Positions and Lengths
 
-SBE.jl uses a shared position pointer for variable-length data:
+SBE.jl uses a shared position pointer for variable-length data. Messages own their
+position pointer internally; groups share the parent message pointer when iterating.
 
 ```julia
 pos = SBE.sbe_position(car)
@@ -165,30 +173,14 @@ len = SBE.sbe_encoded_length(car)
 decoded_len = SBE.sbe_decoded_length(dec)
 ```
 
-### Reusing PositionPointer
-
-Use a shared `PositionPointer` to avoid allocating a new pointer for each encoder/decoder.
-
-```julia
-buffer = zeros(UInt8, 512)
-pos = SBE.PositionPointer(0)
-
-enc = Baseline.Car.Encoder(buffer, 0, pos)
-Baseline.Car.serialNumber!(enc, 12345)
-Baseline.Car.modelYear!(enc, 2024)
-
-dec = Baseline.Car.Decoder(buffer, 0, pos)
-serial = Baseline.Car.serialNumber(dec)
-year = Baseline.Car.modelYear(dec)
-```
-
 ## Versioning
 
 The generated code respects `sinceVersion` and `deprecated` attributes. You can
 override acting version and block length on decoders:
 
 ```julia
-dec = Baseline.Car.Decoder(buffer, 0, SBE.PositionPointer(0), UInt16(45), UInt16(0))
+dec = Baseline.Car.Decoder(typeof(buffer))
+Baseline.Car.wrap!(dec, buffer, 0, UInt16(45), UInt16(0))
 ```
 
 ## Endianness

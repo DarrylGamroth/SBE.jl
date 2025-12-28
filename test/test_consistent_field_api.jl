@@ -41,8 +41,10 @@ include("generated/Baseline.jl")
         
         # Create encoder and decoder with proper header
         header = Baseline.MessageHeader.Encoder(buffer, 0)
-        car_encoder = Baseline.Car.Encoder(buffer, 0, header=header)
-        car_decoder = Baseline.Car.Decoder(buffer, 0)
+        car_encoder = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(car_encoder, buffer, 0; header=header)
+        car_decoder = Baseline.Car.Decoder(typeof(buffer))
+        Baseline.Car.wrap!(car_decoder, buffer, 0)
         
         @test typeof(car_decoder) <: SBE.AbstractSbeMessage
         @test typeof(car_encoder) <: SBE.AbstractSbeMessage
@@ -74,8 +76,10 @@ include("generated/Baseline.jl")
         engine_encoder = Baseline.Engine.Encoder(buffer, 0)
         
         header = Baseline.MessageHeader.Encoder(buffer, 100)
-        car_encoder = Baseline.Car.Encoder(buffer, 100, header=header)
-        car_decoder = Baseline.Car.Decoder(buffer, 100)
+        car_encoder = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(car_encoder, buffer, 100; header=header)
+        car_decoder = Baseline.Car.Decoder(typeof(buffer))
+        Baseline.Car.wrap!(car_decoder, buffer, 100)
         
         # Both should have direct accessor functions
         @test hasmethod(Baseline.Engine.capacity, Tuple{typeof(engine_decoder)})
@@ -118,8 +122,10 @@ include("generated/Baseline.jl")
         
         # Create encoder and decoder
         header = Baseline.MessageHeader.Encoder(buffer, 0)
-        car_encoder = Baseline.Car.Encoder(buffer, 0, header=header)
-        car_decoder = Baseline.Car.Decoder(buffer, 0)
+        car_encoder = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(car_encoder, buffer, 0; header=header)
+        car_decoder = Baseline.Car.Decoder(typeof(buffer))
+        Baseline.Car.wrap!(car_decoder, buffer, 0)
         
         # Test SomeNumbers array field - write then read
         Baseline.Car.someNumbers!(car_encoder, [10, 20, 30, 40])

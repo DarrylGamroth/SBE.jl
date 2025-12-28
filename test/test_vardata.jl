@@ -6,7 +6,8 @@ using SBE
     
     @testset "Basic String Read/Write" begin
         buffer = zeros(UInt8, 1024)
-        encoder = Baseline.Car.Encoder(buffer, 0)
+        encoder = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(encoder, buffer, 0)
         
         # Write variable-length data
         manufacturer_text = "Honda"
@@ -18,7 +19,8 @@ using SBE
         Baseline.Car.activationCode!(encoder, activation_text)
         
         # Create decoder from same buffer
-        decoder = Baseline.Car.Decoder(buffer, 0)
+        decoder = Baseline.Car.Decoder(typeof(buffer))
+        Baseline.Car.wrap!(decoder, buffer, 0)
         
         # Read back and verify
         @test Baseline.Car.manufacturer(decoder, String) == manufacturer_text
@@ -28,18 +30,21 @@ using SBE
     
     @testset "Length Accessors" begin
         buffer = zeros(UInt8, 1024)
-        encoder = Baseline.Car.Encoder(buffer, 0)
+        encoder = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(encoder, buffer, 0)
         
         text = "TestData"
         Baseline.Car.manufacturer!(encoder, text)
         
-        decoder = Baseline.Car.Decoder(buffer, 0)
+        decoder = Baseline.Car.Decoder(typeof(buffer))
+        Baseline.Car.wrap!(decoder, buffer, 0)
         @test Baseline.Car.manufacturer_length(decoder) == length(text)
     end
     
     @testset "Skip Functions" begin
         buffer = zeros(UInt8, 1024)
-        encoder = Baseline.Car.Encoder(buffer, 0)
+        encoder = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(encoder, buffer, 0)
         
         manufacturer_text = "Honda"
         model_text = "Civic"
@@ -47,7 +52,8 @@ using SBE
         Baseline.Car.manufacturer!(encoder, manufacturer_text)
         Baseline.Car.model!(encoder, model_text)
         
-        decoder = Baseline.Car.Decoder(buffer, 0)
+        decoder = Baseline.Car.Decoder(typeof(buffer))
+        Baseline.Car.wrap!(decoder, buffer, 0)
         
         # Skip manufacturer
         skipped = Baseline.Car.skip_manufacturer!(decoder)
@@ -60,7 +66,8 @@ using SBE
     
     @testset "Position Management" begin
         buffer = zeros(UInt8, 1024)
-        encoder = Baseline.Car.Encoder(buffer, 0)
+        encoder = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(encoder, buffer, 0)
         
         text1 = "First"
         text2 = "Second"
@@ -80,13 +87,15 @@ using SBE
     
     @testset "Type Conversions - Bytes" begin
         buffer = zeros(UInt8, 1024)
-        encoder = Baseline.Car.Encoder(buffer, 0)
+        encoder = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(encoder, buffer, 0)
         
         # Write raw bytes
         data = UInt8[0x01, 0x02, 0x03, 0x04]
         Baseline.Car.manufacturer!(encoder, data)
         
-        decoder = Baseline.Car.Decoder(buffer, 0)
+        decoder = Baseline.Car.Decoder(typeof(buffer))
+        Baseline.Car.wrap!(decoder, buffer, 0)
         result = Baseline.Car.manufacturer(decoder)
         
         @test collect(result) == data
@@ -94,13 +103,15 @@ using SBE
     
     @testset "Type Conversions - Symbol" begin
         buffer = zeros(UInt8, 1024)
-        encoder = Baseline.Car.Encoder(buffer, 0)
+        encoder = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(encoder, buffer, 0)
         
         # Write symbol
         sym = :TestSymbol
         Baseline.Car.manufacturer!(encoder, sym)
         
-        decoder = Baseline.Car.Decoder(buffer, 0)
+        decoder = Baseline.Car.Decoder(typeof(buffer))
+        Baseline.Car.wrap!(decoder, buffer, 0)
         result = Baseline.Car.manufacturer(decoder, Symbol)
         
         @test result == sym
@@ -108,18 +119,21 @@ using SBE
     
     @testset "Empty Strings" begin
         buffer = zeros(UInt8, 1024)
-        encoder = Baseline.Car.Encoder(buffer, 0)
+        encoder = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(encoder, buffer, 0)
         
         Baseline.Car.manufacturer!(encoder, "")
         
-        decoder = Baseline.Car.Decoder(buffer, 0)
+        decoder = Baseline.Car.Decoder(typeof(buffer))
+        Baseline.Car.wrap!(decoder, buffer, 0)
         @test Baseline.Car.manufacturer_length(decoder) == 0
         @test Baseline.Car.manufacturer(decoder, String) == ""
     end
     
     @testset "Multiple Fields in Sequence" begin
         buffer = zeros(UInt8, 1024)
-        encoder = Baseline.Car.Encoder(buffer, 0)
+        encoder = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(encoder, buffer, 0)
         
         # Write all var data fields
         Baseline.Car.manufacturer!(encoder, "Toyota")
@@ -127,7 +141,8 @@ using SBE
         Baseline.Car.activationCode!(encoder, "XYZ789")
         
         # Read back in order
-        decoder = Baseline.Car.Decoder(buffer, 0)
+        decoder = Baseline.Car.Decoder(typeof(buffer))
+        Baseline.Car.wrap!(decoder, buffer, 0)
         @test Baseline.Car.manufacturer(decoder, String) == "Toyota"
         @test Baseline.Car.model(decoder, String) == "Corolla"
         @test Baseline.Car.activationCode(decoder, String) == "XYZ789"

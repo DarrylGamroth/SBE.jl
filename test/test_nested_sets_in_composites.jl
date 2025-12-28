@@ -95,7 +95,8 @@ include(joinpath(@__DIR__, "generated", "CompositeElements.jl"))
     @testset "Nested Set in Composite Used in Message" begin
         # Test that the nested set works when the composite is used in a message
         buffer = zeros(UInt8, 1000)
-        msg_enc = CompositeElements.Msg.Encoder(buffer)
+        msg_enc = CompositeElements.Msg.Encoder(typeof(buffer))
+        CompositeElements.Msg.wrap_and_apply_header!(msg_enc, buffer, 0)
         
         # Get the outer composite
         outer = CompositeElements.Msg.structure(msg_enc)
@@ -109,7 +110,8 @@ include(joinpath(@__DIR__, "generated", "CompositeElements.jl"))
         CompositeElements.Outer.SetOne.Bit26!(set, true)
         
         # Decode and verify
-        msg_dec = CompositeElements.Msg.Decoder(buffer)
+        msg_dec = CompositeElements.Msg.Decoder(typeof(buffer))
+        CompositeElements.Msg.wrap!(msg_dec, buffer, 0)
         outer_dec = CompositeElements.Msg.structure(msg_dec)
         set_dec = CompositeElements.Outer.setOne(outer_dec)
         

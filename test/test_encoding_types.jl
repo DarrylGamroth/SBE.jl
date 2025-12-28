@@ -3,7 +3,8 @@ using Test
 @testset "Encoding Types" begin
     buffer = zeros(UInt8, 128)
     header = EncodingTypes.MessageHeader.Encoder(buffer, 0)
-    enc = EncodingTypes.Message1.Encoder(buffer, 0; header=header)
+    enc = EncodingTypes.Message1.Encoder(typeof(buffer))
+    EncodingTypes.Message1.wrap_and_apply_header!(enc, buffer, 0; header=header)
 
     EncodingTypes.Message1.eC!(enc, EncodingTypes.EChar.ValueB)
     EncodingTypes.Message1.e8!(enc, EncodingTypes.EUInt8.Value10)
@@ -25,7 +26,8 @@ using Test
     EncodingTypes.SUInt64.Bit16!(s64, true)
     EncodingTypes.SUInt64.Bit26!(s64, true)
 
-    dec = EncodingTypes.Message1.Decoder(buffer, 0)
+    dec = EncodingTypes.Message1.Decoder(typeof(buffer))
+    EncodingTypes.Message1.wrap!(dec, buffer, 0)
     @test EncodingTypes.Message1.eC(dec) == EncodingTypes.EChar.ValueB
     @test EncodingTypes.Message1.e8(dec) == EncodingTypes.EUInt8.Value10
 

@@ -9,7 +9,8 @@ end
 const JBaseline = JsonPrinterGenerated.Baseline
 
 function encode_test_message(buffer::AbstractVector{UInt8})
-    enc = JBaseline.Car.Encoder(buffer, 0)
+    enc = JBaseline.Car.Encoder(typeof(buffer))
+    JBaseline.Car.wrap_and_apply_header!(enc, buffer, 0)
 
     JBaseline.Car.serialNumber!(enc, UInt64(1234))
     JBaseline.Car.modelYear!(enc, UInt16(2013))
@@ -179,7 +180,8 @@ end
     @testset "Rewind" begin
         buffer = zeros(UInt8, 4096)
         encode_test_message(buffer)
-        dec = JBaseline.Car.Decoder(buffer, 0)
+        dec = JBaseline.Car.Decoder(typeof(buffer))
+        JBaseline.Car.wrap!(dec, buffer, 0)
 
         pass_one = get_values(dec)
         JBaseline.Car.sbe_rewind!(dec)
@@ -201,7 +203,8 @@ end
     @testset "SkipAndDecodedLength" begin
         buffer = zeros(UInt8, 4096)
         encoded_length = encode_test_message(buffer)
-        dec = JBaseline.Car.Decoder(buffer, 0)
+        dec = JBaseline.Car.Decoder(typeof(buffer))
+        JBaseline.Car.wrap!(dec, buffer, 0)
 
         decoded_length_no_read = JBaseline.Car.sbe_decoded_length(dec)
 

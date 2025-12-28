@@ -3,7 +3,8 @@ using Test
 @testset "Issue848 Composite Ref in Message and Header" begin
     buffer = zeros(UInt8, 96)
     header = Issue848.MessageHeader.Encoder(buffer, 0)
-    enc = Issue848.Barmsg.Encoder(buffer, 0; header=header)
+    enc = Issue848.Barmsg.Encoder(typeof(buffer))
+    Issue848.Barmsg.wrap_and_apply_header!(enc, buffer, 0; header=header)
 
     msg_header = Issue848.Barmsg.header(enc)
     header_c1 = Issue848.MessageHeader.c1(msg_header)
@@ -15,7 +16,8 @@ using Test
     Issue848.Comp1.lmn!(c2_c1, UInt16(3))
     Issue848.Comp1.wxy!(c2_c1, UInt16(4))
 
-    dec = Issue848.Barmsg.Decoder(buffer, 0)
+    dec = Issue848.Barmsg.Decoder(typeof(buffer))
+    Issue848.Barmsg.wrap!(dec, buffer, 0)
     msg_header_dec = Issue848.Barmsg.header(dec)
     header_c1_dec = Issue848.MessageHeader.c1(msg_header_dec)
     @test Issue848.Comp1.lmn(header_c1_dec) == UInt16(1)

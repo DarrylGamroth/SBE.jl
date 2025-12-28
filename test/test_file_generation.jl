@@ -56,7 +56,8 @@ using SBE
         
         # Test message encoding/decoding
         msg_buffer = zeros(UInt8, 512)
-        car_enc = Main.Baseline.Car.Encoder(msg_buffer, 0)
+        car_enc = Main.Baseline.Car.Encoder(typeof(msg_buffer))
+        Main.Baseline.Car.wrap_and_apply_header!(car_enc, msg_buffer, 0)
         @test car_enc isa Main.Baseline.Car.Encoder
         
         # Set field values
@@ -66,7 +67,8 @@ using SBE
         Main.Baseline.Car.code!(car_enc, Main.Baseline.Model.A)
         
         # Decode and verify
-        car_dec = Main.Baseline.Car.Decoder(msg_buffer, 0)
+        car_dec = Main.Baseline.Car.Decoder(typeof(msg_buffer))
+        Main.Baseline.Car.wrap!(car_dec, msg_buffer, 0)
         @test Main.Baseline.Car.serialNumber(car_dec) == UInt64(12345)
         @test Main.Baseline.Car.modelYear(car_dec) == UInt16(2024)
         @test Main.Baseline.Car.available(car_dec) == Main.Baseline.BooleanType.T
@@ -91,12 +93,14 @@ using SBE
         
         # Test actual functionality - can encode/decode
         buffer = zeros(UInt8, 512)
-        encoder = Main.Extension.Car.Encoder(buffer, 0)
+        encoder = Main.Extension.Car.Encoder(typeof(buffer))
+        Main.Extension.Car.wrap_and_apply_header!(encoder, buffer, 0)
         @test encoder isa Main.Extension.Car.Encoder
         
         # Set and verify a value
         Main.Extension.Car.serialNumber!(encoder, UInt64(54321))
-        decoder = Main.Extension.Car.Decoder(buffer, 0)
+        decoder = Main.Extension.Car.Decoder(typeof(buffer))
+        Main.Extension.Car.wrap!(decoder, buffer, 0)
         @test Main.Extension.Car.serialNumber(decoder) == UInt64(54321)
     end
     
@@ -109,13 +113,15 @@ using SBE
         
         # Test actual functionality - can encode/decode Order message
         buffer = zeros(UInt8, 512)
-        encoder = Main.Optional.Order.Encoder(buffer, 0)
+        encoder = Main.Optional.Order.Encoder(typeof(buffer))
+        Main.Optional.Order.wrap_and_apply_header!(encoder, buffer, 0)
         @test encoder isa Main.Optional.Order.Encoder
         
         # Test required and optional field functionality
         Main.Optional.Order.orderId!(encoder, UInt64(12345))
         Main.Optional.Order.quantity!(encoder, UInt32(100))
-        decoder = Main.Optional.Order.Decoder(buffer, 0)
+        decoder = Main.Optional.Order.Decoder(typeof(buffer))
+        Main.Optional.Order.wrap!(decoder, buffer, 0)
         @test Main.Optional.Order.orderId(decoder) == UInt64(12345)
         @test Main.Optional.Order.quantity(decoder) == UInt32(100)
     end
@@ -152,13 +158,15 @@ using SBE
             
             # Test version handling - encode and decode
             buffer = zeros(UInt8, 512)
-            encoder = Main.Versioned.Product.Encoder(buffer, 0)
+            encoder = Main.Versioned.Product.Encoder(typeof(buffer))
+            Main.Versioned.Product.wrap_and_apply_header!(encoder, buffer, 0)
             @test encoder isa Main.Versioned.Product.Encoder
             
             # Set base version fields and verify
             Main.Versioned.Product.id!(encoder, UInt64(99))
             Main.Versioned.Product.quantity!(encoder, UInt32(42))
-            decoder = Main.Versioned.Product.Decoder(buffer, 0)
+            decoder = Main.Versioned.Product.Decoder(typeof(buffer))
+            Main.Versioned.Product.wrap!(decoder, buffer, 0)
             @test Main.Versioned.Product.id(decoder) == UInt64(99)
             @test Main.Versioned.Product.quantity(decoder) == UInt32(42)
         finally

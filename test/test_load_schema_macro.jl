@@ -60,8 +60,10 @@ using SBE
     @testset "No World Age Issues" begin
         # Baseline already loaded - test immediate use
         buffer = zeros(UInt8, 1024)
-        encoder = Baseline.Car.Encoder(buffer, 0)
-        decoder = Baseline.Car.Decoder(buffer, 0)
+        encoder = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(encoder, buffer, 0)
+        decoder = Baseline.Car.Decoder(typeof(buffer))
+        Baseline.Car.wrap!(decoder, buffer, 0)
         
         @test encoder isa Baseline.Car.Encoder
         @test decoder isa Baseline.Car.Decoder
@@ -74,8 +76,10 @@ using SBE
     
     @testset "Field Access Functions" begin
         buffer = zeros(UInt8, 1024)
-        encoder = Baseline.Car.Encoder(buffer, 0)
-        decoder = Baseline.Car.Decoder(buffer, 0)
+        encoder = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(encoder, buffer, 0)
+        decoder = Baseline.Car.Decoder(typeof(buffer))
+        Baseline.Car.wrap!(decoder, buffer, 0)
         
         # Test various field types
         
@@ -123,8 +127,10 @@ using SBE
     
     @testset "Composite Types" begin
         buffer = zeros(UInt8, 1024)
-        encoder = Baseline.Car.Encoder(buffer, 0)
-        decoder = Baseline.Car.Decoder(buffer, 0)
+        encoder = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(encoder, buffer, 0)
+        decoder = Baseline.Car.Decoder(typeof(buffer))
+        Baseline.Car.wrap!(decoder, buffer, 0)
         
         # Test that composite field exists (Engine is a composite)
         @test hasmethod(Baseline.Car.engine, Tuple{typeof(decoder)})
@@ -168,8 +174,10 @@ using SBE
     
     @testset "Groups" begin
         buffer = zeros(UInt8, 1024)
-        encoder = Baseline.Car.Encoder(buffer, 0)
-        decoder = Baseline.Car.Decoder(buffer, 0)
+        encoder = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(encoder, buffer, 0)
+        decoder = Baseline.Car.Decoder(typeof(buffer))
+        Baseline.Car.wrap!(decoder, buffer, 0)
         
         # Test that group accessor exists (decoder only in file-based generation)
         @test hasmethod(Baseline.Car.fuelFigures, Tuple{typeof(decoder)})
@@ -181,8 +189,10 @@ using SBE
     
     @testset "Variable Length Data" begin
         buffer = zeros(UInt8, 2048)
-        encoder = Baseline.Car.Encoder(buffer, 0)
-        decoder = Baseline.Car.Decoder(buffer, 0)
+        encoder = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(encoder, buffer, 0)
+        decoder = Baseline.Car.Decoder(typeof(buffer))
+        Baseline.Car.wrap!(decoder, buffer, 0)
         
         # Test that vardata accessor exists
         @test hasmethod(Baseline.Car.manufacturer, Tuple{typeof(decoder)})
@@ -244,14 +254,17 @@ using SBE
         
         # Should still work
         buffer = zeros(UInt8, 1024)
-        car = Extension.Car.Encoder(buffer, 0)
+        car = Extension.Car.Encoder(typeof(buffer))
+        Extension.Car.wrap_and_apply_header!(car, buffer, 0)
         @test car isa Extension.Car.Encoder
     end
     
     @testset "Generated Code Quality" begin
         buffer = zeros(UInt8, 1024)
-        encoder = Baseline.Car.Encoder(buffer, 0)
-        decoder = Baseline.Car.Decoder(buffer, 0)
+        encoder = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(encoder, buffer, 0)
+        decoder = Baseline.Car.Decoder(typeof(buffer))
+        Baseline.Car.wrap!(decoder, buffer, 0)
         
         # Test that generated code has proper type annotations
         # File-based generation uses minimal fields

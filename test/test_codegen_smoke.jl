@@ -41,13 +41,20 @@ using SBE
         ping = Base.invokelatest(getfield, smoke, :Ping)
         encoder = Base.invokelatest(getfield, ping, :Encoder)
         decoder = Base.invokelatest(getfield, ping, :Decoder)
+        wrap_and_apply_header! = Base.invokelatest(getfield, ping, :wrap_and_apply_header!)
+        wrap! = Base.invokelatest(getfield, ping, :wrap!)
+        header_mod = Base.invokelatest(getfield, smoke, :MessageHeader)
+        header_encoder = Base.invokelatest(getfield, header_mod, :Encoder)
         value! = Base.invokelatest(getfield, ping, :value!)
         value = Base.invokelatest(getfield, ping, :value)
 
         buffer = zeros(UInt8, 64)
-        enc = Base.invokelatest(encoder, buffer)
+        header = Base.invokelatest(header_encoder, buffer, 0)
+        enc = Base.invokelatest(encoder, typeof(buffer))
+        Base.invokelatest(wrap_and_apply_header!, enc, buffer, 0; header=header)
         Base.invokelatest(value!, enc, UInt32(99))
-        dec = Base.invokelatest(decoder, buffer)
+        dec = Base.invokelatest(decoder, typeof(buffer))
+        Base.invokelatest(wrap!, dec, buffer, 0)
         @test Base.invokelatest(value, dec) == UInt32(99)
     end
 end

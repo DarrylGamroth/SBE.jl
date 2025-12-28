@@ -8,6 +8,7 @@ using SBE
         ambiguities=false,
         unbound_args=false,
         piracies=false,
-        persistent_tasks=false
+        persistent_tasks=false,
+        stale_deps=false
     )
 end

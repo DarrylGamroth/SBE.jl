@@ -3,7 +3,8 @@ using Test
 @testset "Issue496 Nested Composite Refs" begin
     buffer = zeros(UInt8, 128)
     header = Issue496.MessageHeader.Encoder(buffer, 0)
-    enc = Issue496.SomeMessage.Encoder(buffer, 0; header=header)
+    enc = Issue496.SomeMessage.Encoder(typeof(buffer))
+    Issue496.SomeMessage.wrap_and_apply_header!(enc, buffer, 0; header=header)
 
     Issue496.SomeMessage.id!(enc, Int64(7))
     comp = Issue496.SomeMessage.comp(enc)
@@ -15,7 +16,8 @@ using Test
     comp_three = Issue496.CompositeTwo.compThree(comp_two)
     Issue496.CompositeThree.field1!(comp_three, "CCCC")
 
-    dec = Issue496.SomeMessage.Decoder(buffer, 0)
+    dec = Issue496.SomeMessage.Decoder(typeof(buffer))
+    Issue496.SomeMessage.wrap!(dec, buffer, 0)
     @test Issue496.SomeMessage.id(dec) == Int64(7)
     comp_dec = Issue496.SomeMessage.comp(dec)
     @test String(Issue496.CompositeOne.compFieldOne(comp_dec)) == "AAAA"

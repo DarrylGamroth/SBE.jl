@@ -10,7 +10,8 @@ using SBE
         # Java: allowsEncodingNestedGroupsInSchemaDefinedOrder
         
         buffer = zeros(UInt8, 512)
-        enc = OrderCheck.NestedGroups.Encoder(buffer)
+        enc = OrderCheck.NestedGroups.Encoder(typeof(buffer))
+        OrderCheck.NestedGroups.wrap_and_apply_header!(enc, buffer, 0)
         
         # Set top-level field
         OrderCheck.NestedGroups.a!(enc, 42)
@@ -38,7 +39,8 @@ using SBE
         OrderCheck.NestedGroups.H.i!(h_enc, 5)
         
         # Decode and verify the nested structure
-        dec = OrderCheck.NestedGroups.Decoder(buffer)
+        dec = OrderCheck.NestedGroups.Decoder(typeof(buffer))
+        OrderCheck.NestedGroups.wrap!(dec, buffer, 0)
         @test OrderCheck.NestedGroups.a(dec) == 42
         
         # Decode outer group b
@@ -70,7 +72,8 @@ using SBE
         # Java: allowsEncodingAndDecodingVariableLengthFieldInsideGroupInSchemaDefinedOrder
         
         buffer = zeros(UInt8, 512)
-        enc = OrderCheck.VarLengthInsideGroup.Encoder(buffer)
+        enc = OrderCheck.VarLengthInsideGroup.Encoder(typeof(buffer))
+        OrderCheck.VarLengthInsideGroup.wrap_and_apply_header!(enc, buffer, 0)
         
         # Set top-level field
         OrderCheck.VarLengthInsideGroup.a!(enc, 100)
@@ -92,7 +95,8 @@ using SBE
         OrderCheck.VarLengthInsideGroup.e!(enc, "xyz")
         
         # Decode and verify
-        dec = OrderCheck.VarLengthInsideGroup.Decoder(buffer)
+        dec = OrderCheck.VarLengthInsideGroup.Decoder(typeof(buffer))
+        OrderCheck.VarLengthInsideGroup.wrap!(dec, buffer, 0)
         @test OrderCheck.VarLengthInsideGroup.a(dec) == 100
         
     b_dec = OrderCheck.VarLengthInsideGroup.b(dec)
@@ -112,7 +116,8 @@ using SBE
         # Java: NestedGroupWithVarLength message tests
         
         buffer = zeros(UInt8, 512)
-        enc = OrderCheck.NestedGroupWithVarLength.Encoder(buffer)
+        enc = OrderCheck.NestedGroupWithVarLength.Encoder(typeof(buffer))
+        OrderCheck.NestedGroupWithVarLength.wrap_and_apply_header!(enc, buffer, 0)
         
         OrderCheck.NestedGroupWithVarLength.a!(enc, 42)
         
@@ -133,7 +138,8 @@ using SBE
         OrderCheck.NestedGroupWithVarLength.B.D.f!(d_enc, "second")
         
         # Decode and verify
-        dec = OrderCheck.NestedGroupWithVarLength.Decoder(buffer)
+        dec = OrderCheck.NestedGroupWithVarLength.Decoder(typeof(buffer))
+        OrderCheck.NestedGroupWithVarLength.wrap!(dec, buffer, 0)
         @test OrderCheck.NestedGroupWithVarLength.a(dec) == 42
         
     b_dec = OrderCheck.NestedGroupWithVarLength.b(dec)
@@ -153,7 +159,8 @@ using SBE
         # Java: allowsEncodingAndDecodingArrayInsideGroup
         
         buffer = zeros(UInt8, 512)
-        enc = OrderCheck.ArrayInsideGroup.Encoder(buffer)
+        enc = OrderCheck.ArrayInsideGroup.Encoder(typeof(buffer))
+        OrderCheck.ArrayInsideGroup.wrap_and_apply_header!(enc, buffer, 0)
         
         # Set top-level array field (ipV4Address is 4-byte array)
         OrderCheck.ArrayInsideGroup.a!(enc, UInt8[192, 168, 1, 1])
@@ -168,7 +175,8 @@ using SBE
         OrderCheck.ArrayInsideGroup.B.c!(b_enc, UInt8[10, 0, 0, 2])
         
         # Decode and verify
-        dec = OrderCheck.ArrayInsideGroup.Decoder(buffer)
+        dec = OrderCheck.ArrayInsideGroup.Decoder(typeof(buffer))
+        OrderCheck.ArrayInsideGroup.wrap!(dec, buffer, 0)
         a_val = OrderCheck.ArrayInsideGroup.a(dec)
         @test a_val == UInt8[192, 168, 1, 1]
         
@@ -184,7 +192,8 @@ using SBE
         # Java: allowsEncodingAndDecodingCompositeInsideGroupInSchemaDefinedOrder
         
         buffer = zeros(UInt8, 512)
-        enc = OrderCheck.CompositeInsideGroup.Encoder(buffer)
+        enc = OrderCheck.CompositeInsideGroup.Encoder(typeof(buffer))
+        OrderCheck.CompositeInsideGroup.wrap_and_apply_header!(enc, buffer, 0)
         
         # Set top-level composite field (point has x, y)
         a_comp = OrderCheck.CompositeInsideGroup.a(enc)
@@ -205,7 +214,8 @@ using SBE
         OrderCheck.Point.y!(c2_comp, 400)
         
         # Decode and verify
-        dec = OrderCheck.CompositeInsideGroup.Decoder(buffer)
+        dec = OrderCheck.CompositeInsideGroup.Decoder(typeof(buffer))
+        OrderCheck.CompositeInsideGroup.wrap!(dec, buffer, 0)
         a_val = OrderCheck.CompositeInsideGroup.a(dec)
         @test OrderCheck.Point.x(a_val) == 10
         @test OrderCheck.Point.y(a_val) == 20
@@ -226,7 +236,8 @@ using SBE
         # Java: EnumInsideGroup tests
         
         buffer = zeros(UInt8, 512)
-        enc = OrderCheck.EnumInsideGroup.Encoder(buffer)
+        enc = OrderCheck.EnumInsideGroup.Encoder(typeof(buffer))
+        OrderCheck.EnumInsideGroup.wrap_and_apply_header!(enc, buffer, 0)
         
         # Set top-level enum
         OrderCheck.EnumInsideGroup.a!(enc, OrderCheck.Direction.BUY)
@@ -241,7 +252,8 @@ using SBE
         OrderCheck.EnumInsideGroup.B.c!(b_enc, OrderCheck.Direction.SELL)
         
         # Decode and verify
-        dec = OrderCheck.EnumInsideGroup.Decoder(buffer)
+        dec = OrderCheck.EnumInsideGroup.Decoder(typeof(buffer))
+        OrderCheck.EnumInsideGroup.wrap!(dec, buffer, 0)
         @test OrderCheck.EnumInsideGroup.a(dec) == OrderCheck.Direction.BUY
         
     b_dec = OrderCheck.EnumInsideGroup.b(dec)
@@ -256,7 +268,8 @@ using SBE
         # Java: BitSetInsideGroup tests
         
         buffer = zeros(UInt8, 512)
-        enc = OrderCheck.BitSetInsideGroup.Encoder(buffer)
+        enc = OrderCheck.BitSetInsideGroup.Encoder(typeof(buffer))
+        OrderCheck.BitSetInsideGroup.wrap_and_apply_header!(enc, buffer, 0)
         
         # Set top-level bitset (correct pattern: get set accessor, then set individual bits)
         a_set_enc = OrderCheck.BitSetInsideGroup.a(enc)
@@ -275,7 +288,8 @@ using SBE
         OrderCheck.Flags.sourCream!(c2_set_enc, true)
         
         # Decode and verify
-        dec = OrderCheck.BitSetInsideGroup.Decoder(buffer)
+        dec = OrderCheck.BitSetInsideGroup.Decoder(typeof(buffer))
+        OrderCheck.BitSetInsideGroup.wrap!(dec, buffer, 0)
         a_set = OrderCheck.BitSetInsideGroup.a(dec)
         @test OrderCheck.Flags.guacamole(a_set)
         @test !OrderCheck.Flags.cheese(a_set)
@@ -295,7 +309,8 @@ using SBE
         # Java: allowsEncodingAndDecodingAsciiInsideGroupInSchemaDefinedOrder
         
         buffer = zeros(UInt8, 512)
-        enc = OrderCheck.AsciiInsideGroup.Encoder(buffer)
+        enc = OrderCheck.AsciiInsideGroup.Encoder(typeof(buffer))
+        OrderCheck.AsciiInsideGroup.wrap_and_apply_header!(enc, buffer, 0)
         
         # Set top-level ASCII field (ccyPair is 6-char US-ASCII)
         OrderCheck.AsciiInsideGroup.a!(enc, "EURUSD")
@@ -310,7 +325,8 @@ using SBE
         OrderCheck.AsciiInsideGroup.B.c!(b_enc, "USDJPY")
         
         # Decode and verify
-        dec = OrderCheck.AsciiInsideGroup.Decoder(buffer)
+        dec = OrderCheck.AsciiInsideGroup.Decoder(typeof(buffer))
+        OrderCheck.AsciiInsideGroup.wrap!(dec, buffer, 0)
         @test OrderCheck.AsciiInsideGroup.a(dec) == "EURUSD"
         
     b_dec = OrderCheck.AsciiInsideGroup.b(dec)
@@ -325,7 +341,8 @@ using SBE
         # Java: disallowsEncodingElementOfEmptyGroup (we allow but verify behavior)
         
         buffer = zeros(UInt8, 512)
-        enc = OrderCheck.NestedGroups.Encoder(buffer)
+        enc = OrderCheck.NestedGroups.Encoder(typeof(buffer))
+        OrderCheck.NestedGroups.wrap_and_apply_header!(enc, buffer, 0)
         
         OrderCheck.NestedGroups.a!(enc, 42)
         
@@ -340,7 +357,8 @@ using SBE
         OrderCheck.NestedGroups.H.i!(h_enc, 99)
         
         # Decode and verify empty group
-        dec = OrderCheck.NestedGroups.Decoder(buffer)
+        dec = OrderCheck.NestedGroups.Decoder(typeof(buffer))
+        OrderCheck.NestedGroups.wrap!(dec, buffer, 0)
         @test OrderCheck.NestedGroups.a(dec) == 42
         
     b_dec = OrderCheck.NestedGroups.b(dec)
@@ -356,7 +374,8 @@ using SBE
         # Java: GroupWithNoBlock message tests
         
         buffer = zeros(UInt8, 512)
-        enc = OrderCheck.GroupWithNoBlock.Encoder(buffer)
+        enc = OrderCheck.GroupWithNoBlock.Encoder(typeof(buffer))
+        OrderCheck.GroupWithNoBlock.wrap_and_apply_header!(enc, buffer, 0)
         
         # Group with only vardata field
         a_enc = OrderCheck.GroupWithNoBlock.a!(enc, 2)
@@ -368,7 +387,8 @@ using SBE
         OrderCheck.GroupWithNoBlock.A.b!(a_enc, "second")
         
         # Decode and verify
-        dec = OrderCheck.GroupWithNoBlock.Decoder(buffer)
+        dec = OrderCheck.GroupWithNoBlock.Decoder(typeof(buffer))
+        OrderCheck.GroupWithNoBlock.wrap!(dec, buffer, 0)
     a_dec = OrderCheck.GroupWithNoBlock.a(dec)
     OrderCheck.GroupWithNoBlock.A.next!(a_dec)
     @test OrderCheck.GroupWithNoBlock.A.b(a_dec) == "first"
@@ -381,12 +401,14 @@ using SBE
         # Java: NoBlock message tests
         
         buffer = zeros(UInt8, 512)
-        enc = OrderCheck.NoBlock.Encoder(buffer)
+        enc = OrderCheck.NoBlock.Encoder(typeof(buffer))
+        OrderCheck.NoBlock.wrap_and_apply_header!(enc, buffer, 0)
         
         OrderCheck.NoBlock.a!(enc, "hello world")
         
         # Decode and verify
-        dec = OrderCheck.NoBlock.Decoder(buffer)
+        dec = OrderCheck.NoBlock.Decoder(typeof(buffer))
+        OrderCheck.NoBlock.wrap!(dec, buffer, 0)
         @test OrderCheck.NoBlock.a(dec) == "hello world"
     end
     
@@ -395,14 +417,16 @@ using SBE
         # Java: MultipleVarLength tests
         
         buffer = zeros(UInt8, 512)
-        enc = OrderCheck.MultipleVarLength.Encoder(buffer)
+        enc = OrderCheck.MultipleVarLength.Encoder(typeof(buffer))
+        OrderCheck.MultipleVarLength.wrap_and_apply_header!(enc, buffer, 0)
         
         OrderCheck.MultipleVarLength.a!(enc, 42)
         OrderCheck.MultipleVarLength.b!(enc, "first variable")
         OrderCheck.MultipleVarLength.c!(enc, "second variable")
         
         # Decode and verify
-    dec = OrderCheck.MultipleVarLength.Decoder(buffer)
+    dec = OrderCheck.MultipleVarLength.Decoder(typeof(buffer))
+    OrderCheck.MultipleVarLength.wrap!(dec, buffer, 0)
     @test OrderCheck.MultipleVarLength.a(dec) == 42
     @test OrderCheck.MultipleVarLength.b(dec) == "first variable"
     @test OrderCheck.MultipleVarLength.c(dec) == "second variable"
@@ -413,7 +437,8 @@ using SBE
         # Java: GroupAndVarLength tests
         
         buffer = zeros(UInt8, 512)
-        enc = OrderCheck.GroupAndVarLength.Encoder(buffer)
+        enc = OrderCheck.GroupAndVarLength.Encoder(typeof(buffer))
+        OrderCheck.GroupAndVarLength.wrap_and_apply_header!(enc, buffer, 0)
         
         OrderCheck.GroupAndVarLength.a!(enc, 100)
         
@@ -426,7 +451,8 @@ using SBE
         OrderCheck.GroupAndVarLength.d!(enc, "variable data")
         
         # Decode and verify
-        dec = OrderCheck.GroupAndVarLength.Decoder(buffer)
+        dec = OrderCheck.GroupAndVarLength.Decoder(typeof(buffer))
+        OrderCheck.GroupAndVarLength.wrap!(dec, buffer, 0)
         @test OrderCheck.GroupAndVarLength.a(dec) == 100
         
     b_dec = OrderCheck.GroupAndVarLength.b(dec)
@@ -442,7 +468,8 @@ using SBE
         # Java: MultipleGroups tests
         
         buffer = zeros(UInt8, 512)
-        enc = OrderCheck.MultipleGroups.Encoder(buffer)
+        enc = OrderCheck.MultipleGroups.Encoder(typeof(buffer))
+        OrderCheck.MultipleGroups.wrap_and_apply_header!(enc, buffer, 0)
         
         OrderCheck.MultipleGroups.a!(enc, 42)
         
@@ -459,7 +486,8 @@ using SBE
         OrderCheck.MultipleGroups.D.e!(d_enc, 99)
         
         # Decode and verify
-        dec = OrderCheck.MultipleGroups.Decoder(buffer)
+        dec = OrderCheck.MultipleGroups.Decoder(typeof(buffer))
+        OrderCheck.MultipleGroups.wrap!(dec, buffer, 0)
         @test OrderCheck.MultipleGroups.a(dec) == 42
         
     b_dec = OrderCheck.MultipleGroups.b(dec)

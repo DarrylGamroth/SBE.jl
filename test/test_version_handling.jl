@@ -24,7 +24,9 @@ using SBE
         position_ptr = SBE.PositionPointer()
         
         # Create decoder with acting_version=0 (baseline schema without extensions)
-        car_v0 = Extension.Car.Decoder(buffer, 0, position_ptr, UInt16(45), UInt16(0))
+        car_v0 = Extension.Car.Decoder(typeof(buffer))
+        car_v0.position_ptr = position_ptr
+        Extension.Car.wrap!(car_v0, buffer, 0, UInt16(45), UInt16(0))
         
         @test car_v0.acting_version == UInt16(0)
         
@@ -43,7 +45,9 @@ using SBE
         position_ptr = SBE.PositionPointer()
         
         # Create decoder with acting_version=1 (extension schema with new fields)
-        car_v1 = Extension.Car.Decoder(buffer, 0, position_ptr, UInt16(62), UInt16(1))
+        car_v1 = Extension.Car.Decoder(typeof(buffer))
+        car_v1.position_ptr = position_ptr
+        Extension.Car.wrap!(car_v1, buffer, 0, UInt16(62), UInt16(1))
         
         @test car_v1.acting_version == UInt16(1)
         
@@ -64,7 +68,9 @@ using SBE
         position_ptr_v0 = SBE.PositionPointer()
         
         # Old decoder (version 0) reads data
-        car_v0 = Extension.Car.Decoder(buffer, 0, position_ptr_v0, UInt16(45), UInt16(0))
+        car_v0 = Extension.Car.Decoder(typeof(buffer))
+        car_v0.position_ptr = position_ptr_v0
+        Extension.Car.wrap!(car_v0, buffer, 0, UInt16(45), UInt16(0))
         
         # Old decoder gets null values for extended fields
         @test Extension.Car.cupHolderCount(car_v0) == UInt8(255)  # null value
@@ -77,7 +83,9 @@ using SBE
         position_ptr_v1 = SBE.PositionPointer()
         
         # New decoder (version 1) reads old data (which won't have extended fields)
-        car_v1 = Extension.Car.Decoder(buffer, 0, position_ptr_v1, UInt16(45), UInt16(0))
+        car_v1 = Extension.Car.Decoder(typeof(buffer))
+        car_v1.position_ptr = position_ptr_v1
+        Extension.Car.wrap!(car_v1, buffer, 0, UInt16(45), UInt16(0))
         
         # New decoder should return null values for extended fields when data is version 0
         @test Extension.Car.cupHolderCount(car_v1) == UInt8(255)  # null value
@@ -89,7 +97,9 @@ using SBE
         # Test that metadata constants exist
         buffer = zeros(UInt8, 1024)
         position_ptr = SBE.PositionPointer()
-        car = Extension.Car.Decoder(buffer, 0, position_ptr, UInt16(62), UInt16(1))
+        car = Extension.Car.Decoder(typeof(buffer))
+        car.position_ptr = position_ptr
+        Extension.Car.wrap!(car, buffer, 0, UInt16(62), UInt16(1))
         
         # since_version should be constants
         # Verify metadata functions are consistent
@@ -110,12 +120,17 @@ using SBE
         @test Baseline.Car.serialNumber_since_version(Baseline.Car.Decoder) == UInt16(0)
         @test Baseline.Car.modelYear_since_version(Baseline.Car.Decoder) == UInt16(0)
         @test Baseline.Car.available_since_version(Baseline.Car.Decoder) == UInt16(0)        # Fields should work normally
-        car_enc = Baseline.Car.Encoder(buffer, 0, position_ptr)
+        car_enc = Baseline.Car.Encoder(typeof(buffer))
+        car_enc.position_ptr = position_ptr
+        Baseline.Car.wrap_and_apply_header!(car_enc, buffer, 0)
         Baseline.Car.serialNumber!(car_enc, UInt64(12345))
         
         # Decode and verify
         position_ptr2 = SBE.PositionPointer()
-        car_dec = Baseline.Car.Decoder(buffer, 0, position_ptr2, UInt16(45), UInt16(0))
+        header = Baseline.MessageHeader.Decoder(buffer, 0)
+        car_dec = Baseline.Car.Decoder(typeof(buffer))
+        car_dec.position_ptr = position_ptr2
+        Baseline.Car.wrap!(car_dec, buffer, 0; header=header)
         @test Baseline.Car.serialNumber(car_dec) == UInt64(12345)
     end
 end

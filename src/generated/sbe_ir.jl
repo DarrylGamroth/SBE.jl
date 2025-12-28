@@ -572,44 +572,64 @@ end
             end
         return view(a, 1:len)
     end
-struct Decoder{T <: AbstractArray{UInt8}} <: AbstractTokenCodec{T}
+mutable struct Decoder{T <: AbstractArray{UInt8}} <: AbstractTokenCodec{T}
     buffer::T
     offset::Int64
     position_ptr::PositionPointer
     acting_block_length::UInt16
     acting_version::UInt16
-    function Decoder(buffer::T, offset::Integer, position_ptr::PositionPointer, acting_block_length::Integer, acting_version::Integer) where T
-        position_ptr[] = offset + acting_block_length
-        new{T}(buffer, offset, position_ptr, acting_block_length, acting_version)
+    function Decoder{T}() where T <: AbstractArray{UInt8}
+        obj = new{T}()
+        obj.offset = Int64(0)
+        obj.position_ptr = PositionPointer()
+        obj.acting_block_length = UInt16(0)
+        obj.acting_version = UInt16(0)
+        return obj
     end
 end
-struct Encoder{T <: AbstractArray{UInt8}, HasSbeHeader} <: AbstractTokenCodec{T}
+mutable struct Encoder{T <: AbstractArray{UInt8}} <: AbstractTokenCodec{T}
     buffer::T
     offset::Int64
     position_ptr::PositionPointer
-    function Encoder(buffer::T, offset::Integer, position_ptr::PositionPointer, hasSbeHeader::Bool = false) where T
-        position_ptr[] = offset + UInt16(28)
-        new{T, hasSbeHeader}(buffer, offset, position_ptr)
+    function Encoder{T}() where T <: AbstractArray{UInt8}
+        obj = new{T}()
+        obj.offset = Int64(0)
+        obj.position_ptr = PositionPointer()
+        return obj
     end
 end
-@inline function Decoder(buffer::AbstractArray, offset::Integer = 0; position_ptr::PositionPointer = PositionPointer(), header = MessageHeader.Decoder(buffer, offset))
+@inline function Decoder(::Type{T}) where T <: AbstractArray{UInt8}
+        return Decoder{T}()
+    end
+@inline function Encoder(::Type{T}) where T <: AbstractArray{UInt8}
+        return Encoder{T}()
+    end
+@inline function wrap!(m::Decoder{T}, buffer::T, offset::Integer, acting_block_length::Integer, acting_version::Integer) where T
+        m.buffer = buffer
+        m.offset = Int64(offset)
+        m.acting_block_length = UInt16(acting_block_length)
+        m.acting_version = UInt16(acting_version)
+        m.position_ptr[] = m.offset + m.acting_block_length
+        return m
+    end
+@inline function wrap!(m::Decoder, buffer::AbstractArray, offset::Integer = 0; header = MessageHeader.Decoder(buffer, offset))
         if MessageHeader.templateId(header) != UInt16(2) || MessageHeader.schemaId(header) != UInt16(1)
             throw(DomainError("Template id or schema id mismatch"))
         end
-        Decoder(buffer, offset + sbe_encoded_length(header), position_ptr, MessageHeader.blockLength(header), MessageHeader.version(header))
+        return wrap!(m, buffer, offset + sbe_encoded_length(header), MessageHeader.blockLength(header), MessageHeader.version(header))
     end
-@inline function Encoder(buffer::AbstractArray, offset::Integer = 0; position_ptr::PositionPointer = PositionPointer(), header = MessageHeader.Encoder(buffer, offset))
+@inline function wrap!(m::Encoder{T}, buffer::T, offset::Integer) where T
+        m.buffer = buffer
+        m.offset = Int64(offset)
+        m.position_ptr[] = m.offset + UInt16(28)
+        return m
+    end
+@inline function wrap_and_apply_header!(m::Encoder, buffer::AbstractArray, offset::Integer = 0; header = MessageHeader.Encoder(buffer, offset))
         MessageHeader.blockLength!(header, UInt16(28))
         MessageHeader.templateId!(header, UInt16(2))
         MessageHeader.schemaId!(header, UInt16(1))
         MessageHeader.version!(header, UInt16(0))
-        Encoder(buffer, offset + sbe_encoded_length(header), position_ptr, true)
-    end
-@inline function Decoder(buffer::AbstractArray, offset::Integer, position_ptr::PositionPointer)
-        return Decoder(buffer, offset; position_ptr = position_ptr)
-    end
-@inline function Encoder(buffer::AbstractArray, offset::Integer, position_ptr::PositionPointer)
-        return Encoder(buffer, offset, position_ptr, false)
+        return wrap!(m, buffer, offset + sbe_encoded_length(header))
     end
 sbe_buffer(m::AbstractTokenCodec) = begin
         m.buffer
@@ -2919,7 +2939,9 @@ begin
         end
 end
 @inline function sbe_decoded_length(m::AbstractTokenCodec)
-        skipper = Decoder(sbe_buffer(m), sbe_offset(m), PositionPointer(), sbe_acting_block_length(m), sbe_acting_version(m))
+        skipper = Decoder(typeof(sbe_buffer(m)))
+        skipper.position_ptr = PositionPointer()
+        wrap!(skipper, sbe_buffer(m), sbe_offset(m), sbe_acting_block_length(m), sbe_acting_version(m))
         sbe_skip!(skipper)
         return sbe_encoded_length(skipper)
     end
@@ -2968,44 +2990,64 @@ end
             end
         return view(a, 1:len)
     end
-struct Decoder{T <: AbstractArray{UInt8}} <: AbstractFrameCodec{T}
+mutable struct Decoder{T <: AbstractArray{UInt8}} <: AbstractFrameCodec{T}
     buffer::T
     offset::Int64
     position_ptr::PositionPointer
     acting_block_length::UInt16
     acting_version::UInt16
-    function Decoder(buffer::T, offset::Integer, position_ptr::PositionPointer, acting_block_length::Integer, acting_version::Integer) where T
-        position_ptr[] = offset + acting_block_length
-        new{T}(buffer, offset, position_ptr, acting_block_length, acting_version)
+    function Decoder{T}() where T <: AbstractArray{UInt8}
+        obj = new{T}()
+        obj.offset = Int64(0)
+        obj.position_ptr = PositionPointer()
+        obj.acting_block_length = UInt16(0)
+        obj.acting_version = UInt16(0)
+        return obj
     end
 end
-struct Encoder{T <: AbstractArray{UInt8}, HasSbeHeader} <: AbstractFrameCodec{T}
+mutable struct Encoder{T <: AbstractArray{UInt8}} <: AbstractFrameCodec{T}
     buffer::T
     offset::Int64
     position_ptr::PositionPointer
-    function Encoder(buffer::T, offset::Integer, position_ptr::PositionPointer, hasSbeHeader::Bool = false) where T
-        position_ptr[] = offset + UInt16(12)
-        new{T, hasSbeHeader}(buffer, offset, position_ptr)
+    function Encoder{T}() where T <: AbstractArray{UInt8}
+        obj = new{T}()
+        obj.offset = Int64(0)
+        obj.position_ptr = PositionPointer()
+        return obj
     end
 end
-@inline function Decoder(buffer::AbstractArray, offset::Integer = 0; position_ptr::PositionPointer = PositionPointer(), header = MessageHeader.Decoder(buffer, offset))
+@inline function Decoder(::Type{T}) where T <: AbstractArray{UInt8}
+        return Decoder{T}()
+    end
+@inline function Encoder(::Type{T}) where T <: AbstractArray{UInt8}
+        return Encoder{T}()
+    end
+@inline function wrap!(m::Decoder{T}, buffer::T, offset::Integer, acting_block_length::Integer, acting_version::Integer) where T
+        m.buffer = buffer
+        m.offset = Int64(offset)
+        m.acting_block_length = UInt16(acting_block_length)
+        m.acting_version = UInt16(acting_version)
+        m.position_ptr[] = m.offset + m.acting_block_length
+        return m
+    end
+@inline function wrap!(m::Decoder, buffer::AbstractArray, offset::Integer = 0; header = MessageHeader.Decoder(buffer, offset))
         if MessageHeader.templateId(header) != UInt16(1) || MessageHeader.schemaId(header) != UInt16(1)
             throw(DomainError("Template id or schema id mismatch"))
         end
-        Decoder(buffer, offset + sbe_encoded_length(header), position_ptr, MessageHeader.blockLength(header), MessageHeader.version(header))
+        return wrap!(m, buffer, offset + sbe_encoded_length(header), MessageHeader.blockLength(header), MessageHeader.version(header))
     end
-@inline function Encoder(buffer::AbstractArray, offset::Integer = 0; position_ptr::PositionPointer = PositionPointer(), header = MessageHeader.Encoder(buffer, offset))
+@inline function wrap!(m::Encoder{T}, buffer::T, offset::Integer) where T
+        m.buffer = buffer
+        m.offset = Int64(offset)
+        m.position_ptr[] = m.offset + UInt16(12)
+        return m
+    end
+@inline function wrap_and_apply_header!(m::Encoder, buffer::AbstractArray, offset::Integer = 0; header = MessageHeader.Encoder(buffer, offset))
         MessageHeader.blockLength!(header, UInt16(12))
         MessageHeader.templateId!(header, UInt16(1))
         MessageHeader.schemaId!(header, UInt16(1))
         MessageHeader.version!(header, UInt16(0))
-        Encoder(buffer, offset + sbe_encoded_length(header), position_ptr, true)
-    end
-@inline function Decoder(buffer::AbstractArray, offset::Integer, position_ptr::PositionPointer)
-        return Decoder(buffer, offset; position_ptr = position_ptr)
-    end
-@inline function Encoder(buffer::AbstractArray, offset::Integer, position_ptr::PositionPointer)
-        return Encoder(buffer, offset, position_ptr, false)
+        return wrap!(m, buffer, offset + sbe_encoded_length(header))
     end
 sbe_buffer(m::AbstractFrameCodec) = begin
         m.buffer
@@ -3662,7 +3704,9 @@ begin
         end
 end
 @inline function sbe_decoded_length(m::AbstractFrameCodec)
-        skipper = Decoder(sbe_buffer(m), sbe_offset(m), PositionPointer(), sbe_acting_block_length(m), sbe_acting_version(m))
+        skipper = Decoder(typeof(sbe_buffer(m)))
+        skipper.position_ptr = PositionPointer()
+        wrap!(skipper, sbe_buffer(m), sbe_offset(m), sbe_acting_block_length(m), sbe_acting_version(m))
         sbe_skip!(skipper)
         return sbe_encoded_length(skipper)
     end
