@@ -1398,10 +1398,10 @@ function generate_group_expr(
 
         abstract type $abstract_type_name{T} <: AbstractSbeGroup end
 
-        mutable struct $decoder_name{T<:AbstractArray{UInt8},P} <: $abstract_type_name{T}
+        mutable struct $decoder_name{T<:AbstractArray{UInt8}} <: $abstract_type_name{T}
             buffer::T
             offset::Int64
-            position_ptr::P
+            position_ptr::PositionPointer
             block_length::UInt16
             acting_version::$version_type_symbol
             count::$count_type_symbol
@@ -1409,21 +1409,21 @@ function generate_group_expr(
             function $decoder_name(buffer::T, offset::Integer, position_ptr::PositionPointer,
                 block_length::Integer, acting_version::Integer,
                 count::Integer, index::Integer) where {T}
-                new{T,PositionPointer}(buffer, offset, position_ptr, block_length, acting_version,
+                new{T}(buffer, offset, position_ptr, block_length, acting_version,
                     $count_type_symbol(count), $count_type_symbol(index))
             end
         end
 
-        mutable struct $encoder_name{T<:AbstractArray{UInt8},P} <: $abstract_type_name{T}
+        mutable struct $encoder_name{T<:AbstractArray{UInt8}} <: $abstract_type_name{T}
             buffer::T
             offset::Int64
-            position_ptr::P
+            position_ptr::PositionPointer
             initial_position::Int64
             count::$count_type_symbol
             index::$count_type_symbol
             function $encoder_name(buffer::T, offset::Integer, position_ptr::PositionPointer,
                 initial_position::Int64, count::Integer, index::Integer) where {T}
-                new{T,PositionPointer}(buffer, offset, position_ptr, initial_position,
+                new{T}(buffer, offset, position_ptr, initial_position,
                     $count_type_symbol(count), $count_type_symbol(index))
             end
         end
@@ -1435,7 +1435,7 @@ function generate_group_expr(
                 acting_version, $num_in_group_get(dimensions), $count_zero_expr)
         end
 
-        @inline function reset!(g::$decoder_name{T,P}, buffer::T, position_ptr::P, acting_version) where {T,P}
+        @inline function reset!(g::$decoder_name{T}, buffer::T, position_ptr::PositionPointer, acting_version) where {T}
             dimensions = $dimension_decoder(buffer, position_ptr[])
             position_ptr[] += $dimension_header_length
             g.buffer = buffer
@@ -1448,7 +1448,7 @@ function generate_group_expr(
             return g
         end
 
-        @inline function reset_missing!(g::$decoder_name{T,P}, buffer::T, position_ptr::P, acting_version) where {T,P}
+        @inline function reset_missing!(g::$decoder_name{T}, buffer::T, position_ptr::PositionPointer, acting_version) where {T}
             g.buffer = buffer
             g.offset = 0
             g.position_ptr = position_ptr
@@ -1459,7 +1459,7 @@ function generate_group_expr(
             return g
         end
 
-        @inline function wrap!(g::$decoder_name{T,P}, buffer::T, position_ptr::P, acting_version) where {T,P}
+        @inline function wrap!(g::$decoder_name{T}, buffer::T, position_ptr::PositionPointer, acting_version) where {T}
             return reset!(g, buffer, position_ptr, acting_version)
         end
 
@@ -1475,7 +1475,7 @@ function generate_group_expr(
             return $encoder_name(buffer, 0, position_ptr, initial_position, count, $count_zero_expr)
         end
 
-        @inline function wrap!(g::$encoder_name{T,P}, buffer::T, count, position_ptr::PositionPointer) where {T,P}
+        @inline function wrap!(g::$encoder_name{T}, buffer::T, count, position_ptr::PositionPointer) where {T}
             if $(min_check === nothing ? :(count > $max_count) : :($min_check || count > $max_count))
                 error("count outside of allowed range")
             end

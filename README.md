@@ -42,7 +42,8 @@ CustomSchema = getfield(Main, custom_name)
 ```julia
 # Create buffer and encoder
 buffer = zeros(UInt8, 512)
-car = Baseline.Car.Encoder(buffer)
+car = Baseline.Car.Encoder(typeof(buffer))
+Baseline.Car.wrap_and_apply_header!(car, buffer, 0)
 
 # Set message fields
 Baseline.Car.serialNumber!(car, 12345)
@@ -84,7 +85,8 @@ encoded_length = SBE.sbe_encoded_length(car)
 
 ```julia
 # Create decoder from buffer
-car_decoder = Baseline.Car.Decoder(buffer)
+car_decoder = Baseline.Car.Decoder(typeof(buffer))
+Baseline.Car.wrap!(car_decoder, buffer, 0)
 
 # Read fields
 serial = Baseline.Car.serialNumber(car_decoder)
@@ -210,7 +212,7 @@ julia --project test/test_groups.jl
 julia --project=. scripts/generate_java_fixtures.jl
 ```
 
-Current status: **947 tests passing**
+Current status: **1043 tests passing**
 
 ## Performance
 
