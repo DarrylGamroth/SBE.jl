@@ -1415,10 +1415,10 @@ function generate_group_expr(
         end
 
         mutable struct $encoder_name{T<:AbstractArray{UInt8},P} <: $abstract_type_name{T}
-            const buffer::T
+            buffer::T
             offset::Int64
-            const position_ptr::P
-            const initial_position::Int64
+            position_ptr::P
+            initial_position::Int64
             count::$count_type_symbol
             index::$count_type_symbol
             function $encoder_name(buffer::T, offset::Integer, position_ptr::PositionPointer,
@@ -1459,6 +1459,10 @@ function generate_group_expr(
             return g
         end
 
+        @inline function wrap!(g::$decoder_name{T,P}, buffer::T, position_ptr::P, acting_version) where {T,P}
+            return reset!(g, buffer, position_ptr, acting_version)
+        end
+
         @inline function $encoder_name(buffer, count, position_ptr::PositionPointer)
             if $(min_check === nothing ? :(count > $max_count) : :($min_check || count > $max_count))
                 error("count outside of allowed range")
@@ -1469,6 +1473,23 @@ function generate_group_expr(
             initial_position = position_ptr[]
             position_ptr[] += $dimension_header_length
             return $encoder_name(buffer, 0, position_ptr, initial_position, count, $count_zero_expr)
+        end
+
+        @inline function wrap!(g::$encoder_name{T,P}, buffer::T, count, position_ptr::PositionPointer) where {T,P}
+            if $(min_check === nothing ? :(count > $max_count) : :($min_check || count > $max_count))
+                error("count outside of allowed range")
+            end
+            dimensions = $dimension_encoder(buffer, position_ptr[])
+            $block_length_set(dimensions, $(block_length_expr(ir, block_length)))
+            $num_in_group_set(dimensions, count)
+            g.buffer = buffer
+            g.offset = 0
+            g.position_ptr = position_ptr
+            g.initial_position = position_ptr[]
+            g.count = $count_type_symbol(count)
+            g.index = $count_zero_expr
+            position_ptr[] += $dimension_header_length
+            return g
         end
 
         sbe_header_size(::$abstract_type_name) = $dimension_header_length
@@ -1665,27 +1686,27 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
             return view(a, 1:len)
         end
 
-        struct $decoder_name{T<:AbstractArray{UInt8},P} <: $abstract_type_name{T}
+        mutable struct $decoder_name{T<:AbstractArray{UInt8}} <: $abstract_type_name{T}
             buffer::T
             offset::Int64
-            position_ptr::P
+            position_ptr::PositionPointer
             acting_block_length::UInt16
             acting_version::$version_type_symbol
             function $decoder_name(buffer::T, offset::Integer, position_ptr::PositionPointer,
                 acting_block_length::Integer, acting_version::Integer) where {T}
                 position_ptr[] = offset + acting_block_length
-                new{T,PositionPointer}(buffer, offset, position_ptr, acting_block_length, acting_version)
+                new{T}(buffer, offset, position_ptr, acting_block_length, acting_version)
             end
         end
 
-        struct $encoder_name{T<:AbstractArray{UInt8},P,HasSbeHeader} <: $abstract_type_name{T}
+        mutable struct $encoder_name{T<:AbstractArray{UInt8}} <: $abstract_type_name{T}
             buffer::T
             offset::Int64
-            position_ptr::P
+            position_ptr::PositionPointer
             function $encoder_name(buffer::T, offset::Integer,
-                position_ptr::PositionPointer, hasSbeHeader::Bool=false) where {T}
+                position_ptr::PositionPointer) where {T}
                 position_ptr[] = offset + $(block_length_expr(ir, msg_token.encoded_length))
-                new{T,PositionPointer,hasSbeHeader}(buffer, offset, position_ptr)
+                new{T}(buffer, offset, position_ptr)
             end
         end
 
@@ -1707,15 +1728,47 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
             $header_module.templateId!(header, $(template_id_expr(ir, msg_token.id)))
             $header_module.schemaId!(header, $(schema_id_expr(ir, ir.id)))
             $header_module.version!(header, $(version_expr(ir, ir.version)))
-            $encoder_name(buffer, offset + sbe_encoded_length(header), position_ptr, true)
+            $encoder_name(buffer, offset + sbe_encoded_length(header), position_ptr)
         end
 
         @inline function $decoder_name(buffer::AbstractArray, offset::Integer, position_ptr::PositionPointer)
             return $decoder_name(buffer, offset; position_ptr=position_ptr)
         end
 
-        @inline function $encoder_name(buffer::AbstractArray, offset::Integer, position_ptr::PositionPointer)
-            return $encoder_name(buffer, offset, position_ptr, false)
+        @inline function wrap!(m::$decoder_name{T}, buffer::T, offset::Integer,
+            acting_block_length::Integer, acting_version::Integer) where {T}
+            m.buffer = buffer
+            m.offset = Int64(offset)
+            m.acting_block_length = UInt16(acting_block_length)
+            m.acting_version = $version_type_symbol(acting_version)
+            m.position_ptr[] = m.offset + m.acting_block_length
+            return m
+        end
+
+        @inline function wrap!(m::$decoder_name, buffer::AbstractArray, offset::Integer=0;
+            header=$header_module.Decoder(buffer, offset))
+            if $header_module.templateId(header) != $(template_id_expr(ir, msg_token.id)) ||
+               $header_module.schemaId(header) != $(schema_id_expr(ir, ir.id))
+                throw(DomainError("Template id or schema id mismatch"))
+            end
+            return wrap!(m, buffer, offset + sbe_encoded_length(header),
+                $header_module.blockLength(header), $header_module.version(header))
+        end
+
+        @inline function wrap!(m::$encoder_name{T}, buffer::T, offset::Integer) where {T}
+            m.buffer = buffer
+            m.offset = Int64(offset)
+            m.position_ptr[] = m.offset + $(block_length_expr(ir, msg_token.encoded_length))
+            return m
+        end
+
+        @inline function wrap_and_apply_header!(m::$encoder_name, buffer::AbstractArray, offset::Integer=0;
+            header=$header_module.Encoder(buffer, offset))
+            $header_module.blockLength!(header, $(block_length_expr(ir, msg_token.encoded_length)))
+            $header_module.templateId!(header, $(template_id_expr(ir, msg_token.id)))
+            $header_module.schemaId!(header, $(schema_id_expr(ir, ir.id)))
+            $header_module.version!(header, $(version_expr(ir, ir.version)))
+            return wrap!(m, buffer, offset + sbe_encoded_length(header))
         end
 
         sbe_buffer(m::$abstract_type_name) = m.buffer

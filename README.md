@@ -162,6 +162,15 @@ messages = SBE.IR.ir_messages(ir)
 schema_id = SBE.IR.ir_id(ir)
 ```
 
+## Benchmarks
+
+Benchmarks cover encode-only, decode-only, and round-trip paths:
+
+```bash
+julia --project=benchmark -e 'using Pkg; Pkg.develop(path=".."); Pkg.instantiate()'
+julia --project=benchmark benchmark/benchmarks.jl
+```
+
 ## File-Based Generation
 
 For production use, generate standalone Julia files:
