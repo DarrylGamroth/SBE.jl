@@ -384,7 +384,12 @@ function parse_enum_type(
     values = XmlValidValue[]
     for value_node in findall("validValue", node)
         value_name = value_node["name"]
-        value_text = strip(nodecontent(value_node))
+        value_text = if haskey(value_node, "value")
+            strip(value_node["value"])
+        else
+            strip(nodecontent(value_node))
+        end
+        isempty(value_text) && error("Enum validValue missing value for $(name).$(value_name)")
         value_desc = haskey(value_node, "description") ? value_node["description"] : ""
         value_since = parse(Int, haskey(value_node, "sinceVersion") ? value_node["sinceVersion"] : "0")
         value_deprecated = parse(Int, haskey(value_node, "deprecated") ? value_node["deprecated"] : "0")

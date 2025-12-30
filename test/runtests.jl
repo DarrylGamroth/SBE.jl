@@ -308,6 +308,7 @@ const Issue849 = GeneratedIssue849.Issue849
     include("test_groups.jl")
     include("test_constants.jl")
     include("test_display.jl")
+    include("test_enum_value_attribute.jl")
     include("test_version_handling.jl")
     include("test_version_all_types.jl")
     include("test_nested_types_in_composites.jl")  # Nested enums in composites

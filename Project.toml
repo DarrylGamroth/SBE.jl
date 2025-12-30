@@ -1,6 +1,6 @@
 name = "SBE"
 uuid = "b5db94cf-04c1-4db7-9b05-47f582871ea8"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["Darryl Gamroth <dgamroth@rubus.ca>"]
 
 [deps]
