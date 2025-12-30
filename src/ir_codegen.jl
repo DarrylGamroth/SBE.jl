@@ -87,6 +87,40 @@ const JULIA_KEYWORDS = Set([
     "Set",
 ])
 
+const RESERVED_IDENTIFIERS = Set([
+    "Any",
+    "Bool",
+    "Char",
+    "Complex",
+    "Expr",
+    "Float16",
+    "Float32",
+    "Float64",
+    "Int",
+    "Int8",
+    "Int16",
+    "Int32",
+    "Int64",
+    "Int128",
+    "Missing",
+    "Module",
+    "Nothing",
+    "Ptr",
+    "String",
+    "Symbol",
+    "Tuple",
+    "Type",
+    "UInt",
+    "UInt8",
+    "UInt16",
+    "UInt32",
+    "UInt64",
+    "UInt128",
+    "Union",
+    "AbstractArray",
+    "AbstractString",
+])
+
 function sanitize_identifier(name::String)
     candidate = replace(name, r"[^A-Za-z0-9_]" => "_")
     if isempty(candidate)
@@ -97,7 +131,7 @@ function sanitize_identifier(name::String)
     if !isempty(candidate) && isdigit(first(candidate))
         candidate = "_" * candidate
     end
-    while !Base.isidentifier(candidate) || (candidate in JULIA_KEYWORDS)
+    while !Base.isidentifier(candidate) || (candidate in JULIA_KEYWORDS) || (candidate in RESERVED_IDENTIFIERS)
         candidate *= "_"
     end
     return candidate
