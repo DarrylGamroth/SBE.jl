@@ -435,12 +435,26 @@ function generate_composite_member_expr(
             return decode_array($julia_type, m.buffer, m.offset + $(token.offset), $array_len)
         end
 
+        @inline function $member_name(m::$decoder_name, ::Type{NTuple{N,T}}) where {N,T<:Real}
+            N == $array_len || throw(ArgumentError("Expected NTuple{$array_len,<:Real}"))
+            x = decode_array($julia_type, m.buffer, m.offset + $(token.offset), $array_len)
+            return ntuple(i -> x[i], Val(N))
+        end
+
         @inline function $(Symbol(member_name, :!))(m::$encoder_name)
             return encode_array($julia_type, m.buffer, m.offset + $(token.offset), $array_len)
         end
 
         @inline function $(Symbol(member_name, :!))(m::$encoder_name, val)
             copyto!($(Symbol(member_name, :!))(m), val)
+        end
+
+        @inline function $(Symbol(member_name, :!))(m::$encoder_name, val::NTuple{N,T}) where {N,T<:Real}
+            N == $array_len || throw(ArgumentError("Expected NTuple{$array_len,<:Real}"))
+            dest = $(Symbol(member_name, :!))(m)
+            @inbounds for i in 1:$array_len
+                dest[i] = val[i]
+            end
         end
 
         export $member_name, $(Symbol(member_name, :!))
@@ -892,12 +906,29 @@ function generate_encoded_field_expr(
                 return decode_array($julia_type, m.buffer, m.offset + $(field_token.offset), $array_len)
             end
 
+            @inline function $field_name(m::$decoder_name, ::Type{NTuple{N,T}}) where {N,T<:Real}
+                N == $array_len || throw(ArgumentError("Expected NTuple{$array_len,<:Real}"))
+                if m.acting_version < $(version_expr(ir, field_token.version))
+                    return ntuple(_ -> $julia_type_symbol($(null_val)), Val(N))
+                end
+                x = decode_array($julia_type, m.buffer, m.offset + $(field_token.offset), $array_len)
+                return ntuple(i -> x[i], Val(N))
+            end
+
             @inline function $(Symbol(field_name, :!))(m::$encoder_name)
                 return encode_array($julia_type, m.buffer, m.offset + $(field_token.offset), $array_len)
             end
 
             @inline function $(Symbol(field_name, :!))(m::$encoder_name, val)
                 copyto!($(Symbol(field_name, :!))(m), val)
+            end
+
+            @inline function $(Symbol(field_name, :!))(m::$encoder_name, val::NTuple{N,T}) where {N,T<:Real}
+                N == $array_len || throw(ArgumentError("Expected NTuple{$array_len,<:Real}"))
+                dest = $(Symbol(field_name, :!))(m)
+                @inbounds for i in 1:$array_len
+                    dest[i] = val[i]
+                end
             end
 
             export $field_name, $(Symbol(field_name, :!))
@@ -908,12 +939,26 @@ function generate_encoded_field_expr(
                 return decode_array($julia_type, m.buffer, m.offset + $(field_token.offset), $array_len)
             end
 
+            @inline function $field_name(m::$decoder_name, ::Type{NTuple{N,T}}) where {N,T<:Real}
+                N == $array_len || throw(ArgumentError("Expected NTuple{$array_len,<:Real}"))
+                x = decode_array($julia_type, m.buffer, m.offset + $(field_token.offset), $array_len)
+                return ntuple(i -> x[i], Val(N))
+            end
+
             @inline function $(Symbol(field_name, :!))(m::$encoder_name)
                 return encode_array($julia_type, m.buffer, m.offset + $(field_token.offset), $array_len)
             end
 
             @inline function $(Symbol(field_name, :!))(m::$encoder_name, val)
                 copyto!($(Symbol(field_name, :!))(m), val)
+            end
+
+            @inline function $(Symbol(field_name, :!))(m::$encoder_name, val::NTuple{N,T}) where {N,T<:Real}
+                N == $array_len || throw(ArgumentError("Expected NTuple{$array_len,<:Real}"))
+                dest = $(Symbol(field_name, :!))(m)
+                @inbounds for i in 1:$array_len
+                    dest[i] = val[i]
+                end
             end
 
             export $field_name, $(Symbol(field_name, :!))

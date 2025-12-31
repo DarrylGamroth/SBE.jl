@@ -15,4 +15,15 @@ using Test
     @test String(FixedSizedPrimitiveArray.Demo.fixed16Char(dec)) == "HELLO"
     @test FixedSizedPrimitiveArray.Demo.fixed16U8(dec)[1:3] == UInt8[1,2,3]
     @test FixedSizedPrimitiveArray.Demo.fixed16i16(dec)[1:3] == Int16[1,2,3]
+    buffer2 = zeros(UInt8, 512)
+    header2 = FixedSizedPrimitiveArray.MessageHeader.Encoder(buffer2, 0)
+    enc2 = FixedSizedPrimitiveArray.Demo.Encoder(typeof(buffer2))
+    FixedSizedPrimitiveArray.Demo.wrap_and_apply_header!(enc2, buffer2, 0; header=header2)
+    FixedSizedPrimitiveArray.Demo.fixed16U8!(enc2, ntuple(UInt8, 16))
+
+    dec2 = FixedSizedPrimitiveArray.Demo.Decoder(typeof(buffer2))
+    FixedSizedPrimitiveArray.Demo.wrap!(dec2, buffer2, 0)
+    tuple_u8 = FixedSizedPrimitiveArray.Demo.fixed16U8(dec2, NTuple{16,UInt8})
+    @test tuple_u8 == ntuple(UInt8, 16)
+    @test @allocated(FixedSizedPrimitiveArray.Demo.fixed16U8(dec2, NTuple{16,UInt8})) == 0
 end
