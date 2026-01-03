@@ -23,9 +23,10 @@ using SBE
         Baseline.Car.wrap!(decoder, buffer, 0)
         
         # Read back and verify
-        @test Baseline.Car.manufacturer(decoder, String) == manufacturer_text
-        @test Baseline.Car.model(decoder, String) == model_text
-        @test Baseline.Car.activationCode(decoder, String) == activation_text
+    @test Baseline.Car.manufacturer(decoder, String) == manufacturer_text
+    @test Baseline.Car.model(decoder, String) == model_text
+    @test Baseline.Car.activationCode(decoder, String) == activation_text
+    @test Baseline.Car.manufacturer(decoder, AbstractString) isa AbstractString
     end
     
     @testset "Length Accessors" begin
