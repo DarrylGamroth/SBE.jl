@@ -1499,10 +1499,7 @@ begin
     @inline function name(m::Decoder, ::Type{String})
             return String(StringView(rstrip_nul(name(m))))
         end
-    @inline function name(m::Decoder, ::Type{StringView})
-            return StringView(rstrip_nul(name(m)))
-        end
-    @inline function name(m::Decoder, ::Type{AbstractString})
+    @inline function name(m::Decoder, ::Type{T}) where T <: AbstractString
             return StringView(rstrip_nul(name(m)))
         end
     @inline function name(m::Decoder, ::Type{T}) where T <: Symbol
@@ -1634,10 +1631,7 @@ begin
     @inline function constValue(m::Decoder, ::Type{String})
             return String(StringView(rstrip_nul(constValue(m))))
         end
-    @inline function constValue(m::Decoder, ::Type{StringView})
-            return StringView(rstrip_nul(constValue(m)))
-        end
-    @inline function constValue(m::Decoder, ::Type{AbstractString})
+    @inline function constValue(m::Decoder, ::Type{T}) where T <: AbstractString
             return StringView(rstrip_nul(constValue(m)))
         end
     @inline function constValue(m::Decoder, ::Type{T}) where T <: Symbol
@@ -1769,10 +1763,7 @@ begin
     @inline function minValue(m::Decoder, ::Type{String})
             return String(StringView(rstrip_nul(minValue(m))))
         end
-    @inline function minValue(m::Decoder, ::Type{StringView})
-            return StringView(rstrip_nul(minValue(m)))
-        end
-    @inline function minValue(m::Decoder, ::Type{AbstractString})
+    @inline function minValue(m::Decoder, ::Type{T}) where T <: AbstractString
             return StringView(rstrip_nul(minValue(m)))
         end
     @inline function minValue(m::Decoder, ::Type{T}) where T <: Symbol
@@ -1904,10 +1895,7 @@ begin
     @inline function maxValue(m::Decoder, ::Type{String})
             return String(StringView(rstrip_nul(maxValue(m))))
         end
-    @inline function maxValue(m::Decoder, ::Type{StringView})
-            return StringView(rstrip_nul(maxValue(m)))
-        end
-    @inline function maxValue(m::Decoder, ::Type{AbstractString})
+    @inline function maxValue(m::Decoder, ::Type{T}) where T <: AbstractString
             return StringView(rstrip_nul(maxValue(m)))
         end
     @inline function maxValue(m::Decoder, ::Type{T}) where T <: Symbol
@@ -2039,10 +2027,7 @@ begin
     @inline function nullValue(m::Decoder, ::Type{String})
             return String(StringView(rstrip_nul(nullValue(m))))
         end
-    @inline function nullValue(m::Decoder, ::Type{StringView})
-            return StringView(rstrip_nul(nullValue(m)))
-        end
-    @inline function nullValue(m::Decoder, ::Type{AbstractString})
+    @inline function nullValue(m::Decoder, ::Type{T}) where T <: AbstractString
             return StringView(rstrip_nul(nullValue(m)))
         end
     @inline function nullValue(m::Decoder, ::Type{T}) where T <: Symbol
@@ -2174,10 +2159,7 @@ begin
     @inline function characterEncoding(m::Decoder, ::Type{String})
             return String(StringView(rstrip_nul(characterEncoding(m))))
         end
-    @inline function characterEncoding(m::Decoder, ::Type{StringView})
-            return StringView(rstrip_nul(characterEncoding(m)))
-        end
-    @inline function characterEncoding(m::Decoder, ::Type{AbstractString})
+    @inline function characterEncoding(m::Decoder, ::Type{T}) where T <: AbstractString
             return StringView(rstrip_nul(characterEncoding(m)))
         end
     @inline function characterEncoding(m::Decoder, ::Type{T}) where T <: Symbol
@@ -2309,10 +2291,7 @@ begin
     @inline function epoch(m::Decoder, ::Type{String})
             return String(StringView(rstrip_nul(epoch(m))))
         end
-    @inline function epoch(m::Decoder, ::Type{StringView})
-            return StringView(rstrip_nul(epoch(m)))
-        end
-    @inline function epoch(m::Decoder, ::Type{AbstractString})
+    @inline function epoch(m::Decoder, ::Type{T}) where T <: AbstractString
             return StringView(rstrip_nul(epoch(m)))
         end
     @inline function epoch(m::Decoder, ::Type{T}) where T <: Symbol
@@ -2444,10 +2423,7 @@ begin
     @inline function timeUnit(m::Decoder, ::Type{String})
             return String(StringView(rstrip_nul(timeUnit(m))))
         end
-    @inline function timeUnit(m::Decoder, ::Type{StringView})
-            return StringView(rstrip_nul(timeUnit(m)))
-        end
-    @inline function timeUnit(m::Decoder, ::Type{AbstractString})
+    @inline function timeUnit(m::Decoder, ::Type{T}) where T <: AbstractString
             return StringView(rstrip_nul(timeUnit(m)))
         end
     @inline function timeUnit(m::Decoder, ::Type{T}) where T <: Symbol
@@ -2579,10 +2555,7 @@ begin
     @inline function semanticType(m::Decoder, ::Type{String})
             return String(StringView(rstrip_nul(semanticType(m))))
         end
-    @inline function semanticType(m::Decoder, ::Type{StringView})
-            return StringView(rstrip_nul(semanticType(m)))
-        end
-    @inline function semanticType(m::Decoder, ::Type{AbstractString})
+    @inline function semanticType(m::Decoder, ::Type{T}) where T <: AbstractString
             return StringView(rstrip_nul(semanticType(m)))
         end
     @inline function semanticType(m::Decoder, ::Type{T}) where T <: Symbol
@@ -2714,10 +2687,7 @@ begin
     @inline function description(m::Decoder, ::Type{String})
             return String(StringView(rstrip_nul(description(m))))
         end
-    @inline function description(m::Decoder, ::Type{StringView})
-            return StringView(rstrip_nul(description(m)))
-        end
-    @inline function description(m::Decoder, ::Type{AbstractString})
+    @inline function description(m::Decoder, ::Type{T}) where T <: AbstractString
             return StringView(rstrip_nul(description(m)))
         end
     @inline function description(m::Decoder, ::Type{T}) where T <: Symbol
@@ -2849,10 +2819,7 @@ begin
     @inline function referencedName(m::Decoder, ::Type{String})
             return String(StringView(rstrip_nul(referencedName(m))))
         end
-    @inline function referencedName(m::Decoder, ::Type{StringView})
-            return StringView(rstrip_nul(referencedName(m)))
-        end
-    @inline function referencedName(m::Decoder, ::Type{AbstractString})
+    @inline function referencedName(m::Decoder, ::Type{T}) where T <: AbstractString
             return StringView(rstrip_nul(referencedName(m)))
         end
     @inline function referencedName(m::Decoder, ::Type{T}) where T <: Symbol
@@ -2984,10 +2951,7 @@ begin
     @inline function packageName(m::Decoder, ::Type{String})
             return String(StringView(rstrip_nul(packageName(m))))
         end
-    @inline function packageName(m::Decoder, ::Type{StringView})
-            return StringView(rstrip_nul(packageName(m)))
-        end
-    @inline function packageName(m::Decoder, ::Type{AbstractString})
+    @inline function packageName(m::Decoder, ::Type{T}) where T <: AbstractString
             return StringView(rstrip_nul(packageName(m)))
         end
     @inline function packageName(m::Decoder, ::Type{T}) where T <: Symbol
@@ -3497,10 +3461,7 @@ begin
     @inline function packageName(m::Decoder, ::Type{String})
             return String(StringView(rstrip_nul(packageName(m))))
         end
-    @inline function packageName(m::Decoder, ::Type{StringView})
-            return StringView(rstrip_nul(packageName(m)))
-        end
-    @inline function packageName(m::Decoder, ::Type{AbstractString})
+    @inline function packageName(m::Decoder, ::Type{T}) where T <: AbstractString
             return StringView(rstrip_nul(packageName(m)))
         end
     @inline function packageName(m::Decoder, ::Type{T}) where T <: Symbol
@@ -3632,10 +3593,7 @@ begin
     @inline function namespaceName(m::Decoder, ::Type{String})
             return String(StringView(rstrip_nul(namespaceName(m))))
         end
-    @inline function namespaceName(m::Decoder, ::Type{StringView})
-            return StringView(rstrip_nul(namespaceName(m)))
-        end
-    @inline function namespaceName(m::Decoder, ::Type{AbstractString})
+    @inline function namespaceName(m::Decoder, ::Type{T}) where T <: AbstractString
             return StringView(rstrip_nul(namespaceName(m)))
         end
     @inline function namespaceName(m::Decoder, ::Type{T}) where T <: Symbol
@@ -3767,10 +3725,7 @@ begin
     @inline function semanticVersion(m::Decoder, ::Type{String})
             return String(StringView(rstrip_nul(semanticVersion(m))))
         end
-    @inline function semanticVersion(m::Decoder, ::Type{StringView})
-            return StringView(rstrip_nul(semanticVersion(m)))
-        end
-    @inline function semanticVersion(m::Decoder, ::Type{AbstractString})
+    @inline function semanticVersion(m::Decoder, ::Type{T}) where T <: AbstractString
             return StringView(rstrip_nul(semanticVersion(m)))
         end
     @inline function semanticVersion(m::Decoder, ::Type{T}) where T <: Symbol

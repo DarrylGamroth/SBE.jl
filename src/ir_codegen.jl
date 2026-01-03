@@ -1345,10 +1345,7 @@ function generate_var_data_expr(
         @inline function $accessor_name(m::$decoder_name, ::Type{String})
             return String(StringView(rstrip_nul($(returns_string ? bytes_accessor : accessor_name)(m))))
         end
-        @inline function $accessor_name(m::$decoder_name, ::Type{StringView})
-            return StringView(rstrip_nul($(returns_string ? bytes_accessor : accessor_name)(m)))
-        end
-        @inline function $accessor_name(m::$decoder_name, ::Type{AbstractString})
+        @inline function $accessor_name(m::$decoder_name, ::Type{T}) where {T<:AbstractString}
             return StringView(rstrip_nul($(returns_string ? bytes_accessor : accessor_name)(m)))
         end
         @inline function $accessor_name(m::$decoder_name, ::Type{T}) where {T<:Symbol}
