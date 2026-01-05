@@ -1575,11 +1575,14 @@ function generate_group_expr(
         end
 
         sbe_header_size(::$abstract_type_name) = $dimension_header_length
+        sbe_header_size(::Type{<:$abstract_type_name}) = $dimension_header_length
         sbe_block_length(::$abstract_type_name) = $(block_length_expr(ir, block_length))
+        sbe_block_length(::Type{<:$abstract_type_name}) = $(block_length_expr(ir, block_length))
         sbe_acting_block_length(g::$decoder_name) = g.block_length
         sbe_acting_block_length(g::$encoder_name) = $(block_length_expr(ir, block_length))
         sbe_acting_version(g::$decoder_name) = g.acting_version
         sbe_acting_version(::$encoder_name) = $(version_expr(ir, ir.version))
+        sbe_acting_version(::Type{<:$abstract_type_name}) = $(version_expr(ir, ir.version))
         sbe_position(g::$abstract_type_name) = g.position_ptr[]
         @inline sbe_position!(g::$abstract_type_name, position) = g.position_ptr[] = position
         sbe_position_ptr(g::$abstract_type_name) = g.position_ptr

@@ -30,6 +30,25 @@ using SBE
         @test hasmethod(Baseline.Car.fuelFigures!, (Baseline.Car.Encoder, Any))
         @test hasmethod(Baseline.Car.performanceFigures!, (Baseline.Car.Encoder, Any))
     end
+
+    @testset "Type-Level SBE Metadata" begin
+        buffer = zeros(UInt8, 256)
+        car_enc = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(car_enc, buffer, 0)
+
+        # Message metadata on types
+        @test SBE.sbe_block_length(car_enc) == Baseline.Car.sbe_block_length(Baseline.Car.Decoder)
+        @test SBE.sbe_template_id(car_enc) == Baseline.Car.sbe_template_id(Baseline.Car.Decoder)
+        @test SBE.sbe_schema_id(car_enc) == Baseline.Car.sbe_schema_id(Baseline.Car.Decoder)
+        @test SBE.sbe_schema_version(car_enc) == Baseline.Car.sbe_schema_version(Baseline.Car.Decoder)
+
+        # Group metadata on types
+        @test Baseline.Car.FuelFigures.sbe_header_size(Baseline.Car.FuelFigures.Decoder) == 4
+        @test Baseline.Car.FuelFigures.sbe_block_length(Baseline.Car.FuelFigures.Decoder) ==
+              Baseline.Car.FuelFigures.sbe_block_length(Baseline.Car.FuelFigures.Encoder)
+        @test Baseline.Car.FuelFigures.sbe_acting_version(Baseline.Car.FuelFigures.Decoder) ==
+              Baseline.Car.FuelFigures.sbe_acting_version(Baseline.Car.FuelFigures.AbstractFuelFigures)
+    end
     
     @testset "Empty Group Encoding" begin
         buffer = zeros(UInt8, 256)
