@@ -58,6 +58,37 @@ include("generated/Baseline.jl")
 using .Baseline
 ```
 
+Validation can be configured during parsing and generation:
+
+```julia
+SBE.generate("path/to/schema.xml", "generated/Baseline.jl"; warnings_fatal=true)
+SBE.parse_xml_schema(read("path/to/schema.xml", String); suppress_warnings=true)
+Baseline = @load_schema("path/to/schema.xml"; warnings_fatal=true)
+```
+
+### Validation Matrix
+
+Errors (always fatal):
+- duplicate message ids or names
+- duplicate field ids or names within a message/group
+- field/group/data ordering violations
+- invalid or missing types, composites, or refs
+- invalid offsets or insufficient blockLength
+- enum/set encodingType length not equal to 1
+- malformed valueRef or missing valueRef targets
+- enum nullValue collisions or out-of-range enum values
+- invalid group size or varData composites
+- maxValue larger than the primitive type allows for group/varData length fields
+- mismatched semanticType between field and its type
+
+Warnings (fatal only when `warnings_fatal=true`):
+- invalid identifiers for C/C++/Java/Go/C#/Julia
+- duplicate enum validValue names or values
+- duplicate set choice names or values
+- nonstandard header field types (e.g., header fields not `uint16`)
+- nonstandard `blockLength`/`numInGroup`/`length` primitive widths
+- `nullValue` provided for non-optional encodings
+
 ## Encoding
 
 Encoders write directly into a `Vector{UInt8}`.

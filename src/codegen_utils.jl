@@ -309,7 +309,14 @@ end
 
 Generate Julia code from an SBE schema XML file and write it to `output_path`.
 """
-function generate(xml_path::String, output_path::String; module_name::Union{Nothing, Symbol, String}=nothing)
+function generate(
+    xml_path::String,
+    output_path::String;
+    module_name::Union{Nothing, Symbol, String}=nothing,
+    validate::Bool=true,
+    warnings_fatal::Bool=false,
+    suppress_warnings::Bool=false
+)
     # Verify input file exists
     if !isfile(xml_path)
         error("Schema file not found: $xml_path")
@@ -317,7 +324,12 @@ function generate(xml_path::String, output_path::String; module_name::Union{Noth
 
     # Parse XML and generate IR
     xml_content = read(xml_path, String)
-    schema = parse_xml_schema(xml_content)
+    schema = parse_xml_schema(
+        xml_content;
+        validate=validate,
+        warnings_fatal=warnings_fatal,
+        suppress_warnings=suppress_warnings
+    )
     ir = generate_ir(schema)
 
     # Generate the module expression from IR
@@ -344,7 +356,13 @@ end
 
 Generate Julia code from an SBE schema XML file and return it as a string.
 """
-function generate(xml_path::String; module_name::Union{Nothing, Symbol, String}=nothing)
+function generate(
+    xml_path::String;
+    module_name::Union{Nothing, Symbol, String}=nothing,
+    validate::Bool=true,
+    warnings_fatal::Bool=false,
+    suppress_warnings::Bool=false
+)
     # Verify input file exists
     if !isfile(xml_path)
         error("Schema file not found: $xml_path")
@@ -352,7 +370,12 @@ function generate(xml_path::String; module_name::Union{Nothing, Symbol, String}=
 
     # Parse XML and generate IR
     xml_content = read(xml_path, String)
-    schema = parse_xml_schema(xml_content)
+    schema = parse_xml_schema(
+        xml_content;
+        validate=validate,
+        warnings_fatal=warnings_fatal,
+        suppress_warnings=suppress_warnings
+    )
     ir = generate_ir(schema)
 
     # Generate the complete module expression from IR

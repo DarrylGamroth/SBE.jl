@@ -188,6 +188,14 @@ include("generated/Baseline.jl")
 using .Baseline
 ```
 
+Validation can be configured during parsing and generation:
+
+```julia
+SBE.generate("example-schema.xml", "generated/Baseline.jl"; warnings_fatal=true)
+SBE.parse_xml_schema(read("example-schema.xml", String); suppress_warnings=true)
+Baseline = @load_schema("example-schema.xml"; warnings_fatal=true)
+```
+
 This approach:
 - Avoids Core.eval and world-age issues
 - Enables proper IDE support and autocomplete

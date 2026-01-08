@@ -58,6 +58,36 @@ end
         "enum null value collides with valid value"
     )
 
+    enum_encoding_length = """
+    <sbe:messageSchema xmlns:sbe="http://fixprotocol.io/2016/sbe" id="1" version="0">
+        <types>
+            <type name="BadEnumEncoding" primitiveType="uint8" length="2"/>
+            <enum name="BadEnum" encodingType="BadEnumEncoding">
+                <validValue name="A">1</validValue>
+            </enum>
+        </types>
+    </sbe:messageSchema>
+    """
+    expect_error(
+        () -> SBE.parse_xml_schema(enum_encoding_length),
+        "illegal encodingType for enum BadEnum length not equal to 1"
+    )
+
+    set_encoding_length = """
+    <sbe:messageSchema xmlns:sbe="http://fixprotocol.io/2016/sbe" id="1" version="0">
+        <types>
+            <type name="BadSetEncoding" primitiveType="uint8" length="2"/>
+            <set name="BadSet" encodingType="BadSetEncoding">
+                <choice name="A">0</choice>
+            </set>
+        </types>
+    </sbe:messageSchema>
+    """
+    expect_error(
+        () -> SBE.parse_xml_schema(set_encoding_length),
+        "Illegal encodingType BadSetEncoding"
+    )
+
     missing_ref_type = """
     <sbe:messageSchema xmlns:sbe="http://fixprotocol.io/2016/sbe" id="1" version="0">
         <types>
@@ -164,7 +194,7 @@ end
     """
     expect_error(
         () -> SBE.generate_ir(SBE.parse_xml_schema(invalid_value_ref)),
-        "valueRef not found: Side.SELL"
+        "valueRef for validValue name not found: SELL"
     )
 
     expect_error(

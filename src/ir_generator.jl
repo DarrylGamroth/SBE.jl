@@ -58,7 +58,9 @@ mutable struct XmlEnumType <: XmlType
     presence::IR.Presence.T
     description::String
     semantic_type::Union{Nothing, String}
+    encoding_type_name::String
     encoding_type::IR.PrimitiveType.T
+    encoding_type_length::Int
     valid_values::Vector{XmlValidValue}
     offset_attribute::Int
     since_version::Int
@@ -81,7 +83,9 @@ mutable struct XmlSetType <: XmlType
     presence::IR.Presence.T
     description::String
     semantic_type::Union{Nothing, String}
+    encoding_type_name::String
     encoding_type::IR.PrimitiveType.T
+    encoding_type_length::Int
     choices::Vector{XmlChoice}
     offset_attribute::Int
     since_version::Int
@@ -131,6 +135,537 @@ mutable struct XmlMessageSchema
     header_type::String
     types_by_name::Dict{String, XmlType}
     messages::Vector{XmlMessage}
+end
+
+struct ValidationState
+    warnings_fatal::Bool
+    suppress_warnings::Bool
+end
+
+ValidationState(; warnings_fatal::Bool=false, suppress_warnings::Bool=false) =
+    ValidationState(warnings_fatal, suppress_warnings)
+
+function validation_warning(state::ValidationState, msg::String)
+    state.suppress_warnings && return
+    if state.warnings_fatal
+        error(msg)
+    end
+    @warn msg
+end
+
+validation_error(::ValidationState, msg::String) = error(msg)
+
+const C_KEYWORDS = Set([
+    "auto", "_Alignas", "_Alignof", "_Atomic", "bool",
+    "_Bool", "break", "case", "_Complex",
+    "char", "const", "continue", "default",
+    "do", "double", "else", "enum", "extern", "false",
+    "float", "for", "_Generic", "goto", "if", "_Imaginary", "inline",
+    "int", "long", "_Noreturn", "register", "restrict", "return", "short",
+    "signed", "sizeof", "static", "_Static_assert",
+    "struct", "switch", "_Thread_local", "true", "typedef", "union",
+    "unsigned", "void", "volatile", "wchar_t", "while"
+])
+
+const CPP_KEYWORDS = Set([
+    "alignas", "and", "and_eq", "asm", "auto",
+    "bitand", "bitor", "bool", "break", "case",
+    "catch", "char", "class", "compl", "const",
+    "const_cast", "continue", "char16_t", "char32_t", "default",
+    "delete", "do", "double", "dynamic_cast", "else",
+    "enum", "explicit", "export", "extern", "false",
+    "float", "for", "friend", "goto", "if",
+    "inline", "int", "long", "mutable", "namespace",
+    "new", "not", "not_eq", "noexcept", "operator",
+    "or", "or_eq", "private", "protected", "public",
+    "register", "reinterpret_cast", "return", "short", "signed",
+    "sizeof", "static", "static_cast", "struct", "switch",
+    "template", "this", "throw", "true", "try",
+    "typedef", "typeid", "typename", "union", "unsigned",
+    "using", "virtual", "void", "volatile", "wchar_t",
+    "while", "xor", "xor_eq", "override",
+    "alignof", "constexpr", "decltype", "nullptr", "static_assert", "thread_local",
+    "final"
+])
+
+const JAVA_KEYWORDS = Set([
+    "abstract", "assert", "boolean", "break", "byte",
+    "case", "catch", "char", "class", "const",
+    "continue", "default", "do", "double", "else",
+    "enum", "extends", "final", "finally", "float",
+    "for", "goto", "if", "implements", "import",
+    "instanceof", "int", "interface", "long", "native",
+    "new", "package", "private", "protected", "public",
+    "return", "short", "static", "strictfp", "super",
+    "switch", "synchronized", "this", "throw", "throws",
+    "transient", "try", "void", "volatile", "while",
+    "null", "true", "false", "_"
+])
+
+const GOLANG_KEYWORDS = Set([
+    "break", "default", "func", "interface", "select",
+    "case", "defer", "go", "map", "struct",
+    "chan", "else", "goto", "package", "switch",
+    "const", "fallthrough", "if", "range", "type",
+    "continue", "for", "import", "return", "var", "_",
+    "bool", "byte", "complex64", "complex128", "error", "float32", "float64",
+    "int", "int8", "int16", "int32", "int64", "rune", "string",
+    "uint", "uint8", "uint16", "uint32", "uint64", "uintptr",
+    "true", "false", "iota",
+    "nil",
+    "append", "cap", "close", "complex", "copy", "delete", "imag", "len",
+    "make", "new", "panic", "print", "println", "real", "recover", "String"
+])
+
+const CSHARP_KEYWORDS = Set([
+    "abstract", "as", "base", "bool", "break",
+    "byte", "case", "catch", "char", "checked",
+    "class", "const", "continue", "decimal", "default",
+    "delegate", "do", "double", "else", "enum",
+    "event", "explicit", "extern", "false", "finally",
+    "fixed", "float", "for", "foreach", "goto",
+    "if", "implicit", "in", "int", "interface",
+    "internal", "is", "lock", "long", "namespace",
+    "new", "null", "object", "operator", "out",
+    "override", "params", "private", "protected", "public",
+    "readonly", "ref", "return", "sbyte", "sealed",
+    "short", "sizeof", "stackalloc", "static", "string",
+    "struct", "switch", "this", "throw", "true",
+    "try", "typeof", "uint", "ulong", "unchecked",
+    "unsafe", "ushort", "using", "virtual", "void",
+    "volatile", "while"
+])
+
+const JULIA_KEYWORDS = Set([
+    "abstract", "baremodule", "begin", "break", "catch",
+    "const", "continue", "do", "else", "elseif", "end",
+    "export", "false", "finally", "for", "function",
+    "global", "if", "import", "let", "local",
+    "macro", "module", "quote", "return", "struct",
+    "true", "try", "using", "while", "_"
+])
+
+function is_sbe_identifier(value::AbstractString, keywords::Set{String}, is_start, is_part)
+    isempty(value) && return false
+    for (i, c) in enumerate(value)
+        if i == 1
+            is_start(c) || return false
+        else
+            is_part(c) || return false
+        end
+    end
+    return !(value in keywords)
+end
+
+is_sbe_c_name(value::AbstractString) = is_sbe_identifier(value, C_KEYWORDS, c -> isletter(c) || c == '_', c -> isletter(c) || isdigit(c) || c == '_')
+is_sbe_cpp_name(value::AbstractString) = is_sbe_identifier(value, CPP_KEYWORDS, c -> isletter(c) || c == '_', c -> isletter(c) || isdigit(c) || c == '_')
+
+function is_sbe_java_name(value::AbstractString)
+    for token in split(value, '.')
+        isempty(token) && return false
+        is_java_identifier(token) || return false
+        token in JAVA_KEYWORDS && return false
+    end
+    return true
+end
+
+is_java_identifier(token::AbstractString) =
+    is_sbe_identifier(token, Set{String}(), is_java_identifier_start, is_java_identifier_part)
+
+is_java_identifier_start(c::Char) = isletter(c) || c == '_' || c == '$'
+is_java_identifier_part(c::Char) = isletter(c) || isdigit(c) || c == '_' || c == '$'
+
+is_sbe_golang_name(value::AbstractString) = is_sbe_identifier(value, GOLANG_KEYWORDS, c -> isletter(c) || c == '_', c -> isletter(c) || isdigit(c) || c == '_')
+
+is_sbe_csharp_name(value::AbstractString) = is_sbe_identifier(value, CSHARP_KEYWORDS, c -> isletter(c) || c == '_', c -> isletter(c) || isdigit(c) || c == '_')
+
+is_sbe_julia_name(value::AbstractString) = is_sbe_identifier(value, JULIA_KEYWORDS, c -> isletter(c) || c == '_', c -> isletter(c) || isdigit(c) || c == '_')
+
+function check_for_valid_name(state::ValidationState, name::String)
+    is_sbe_cpp_name(name) || validation_warning(state, "name is not valid for C++: $(name)")
+    is_sbe_java_name(name) || validation_warning(state, "name is not valid for Java: $(name)")
+    is_sbe_golang_name(name) || validation_warning(state, "name is not valid for Golang: $(name)")
+    is_sbe_csharp_name(name) || validation_warning(state, "name is not valid for C#: $(name)")
+    is_sbe_julia_name(name) || validation_warning(state, "name is not valid for Julia: $(name)")
+end
+
+is_unsigned_primitive(primitive_type::IR.PrimitiveType.T) =
+    primitive_type == IR.PrimitiveType.UINT8 ||
+    primitive_type == IR.PrimitiveType.UINT16 ||
+    primitive_type == IR.PrimitiveType.UINT32 ||
+    primitive_type == IR.PrimitiveType.UINT64
+
+function validation_path(path::Vector{String}, name::String)
+    isempty(path) && return name
+    return join([path; name], ".")
+end
+
+function validate_since_version!(state::ValidationState, schema::XmlMessageSchema, path::Vector{String}, name::String, since_version::Int)
+    if since_version > schema.version
+        validation_error(
+            state,
+            "$(validation_path(path, name)).sinceVersion=$(since_version) > messageSchema.version=$(schema.version)"
+        )
+    end
+end
+
+function validate_encoded_type!(state::ValidationState, schema::XmlMessageSchema, type_def::XmlEncodedType, path::Vector{String})
+    validate_since_version!(state, schema, path, type_def.name, type_def.since_version)
+    check_for_valid_name(state, type_def.name)
+
+    if type_def.value_ref !== nothing
+        occursin('.', type_def.value_ref) || validation_error(state, "valueRef format not valid (enum-name.valid-value-name): $(type_def.value_ref)")
+        type_def.presence == IR.Presence.CONSTANT || validation_error(state, "presence must be constant when valueRef is set: $(type_def.value_ref)")
+        validate_value_ref!(state, schema, type_def.value_ref, type_def.primitive_type, true)
+    end
+
+    if type_def.presence == IR.Presence.CONSTANT && type_def.const_value === nothing && type_def.value_ref === nothing
+        validation_error(state, "type has declared presence as \"constant\" but XML node has no data")
+    end
+
+    if type_def.presence != IR.Presence.OPTIONAL && type_def.null_value !== nothing
+        validation_warning(state, "nullValue set, but presence is not optional")
+    end
+
+    if type_def.primitive_type == IR.PrimitiveType.CHAR &&
+        type_def.const_value !== nothing &&
+        type_def.const_value.representation == IR.PrimitiveValueRepresentation.BYTE_ARRAY &&
+        ncodeunits(type_def.const_value.value) > type_def.length
+        validation_error(state, "length of $(type_def.length) is less than provided value: $(type_def.const_value.value)")
+    end
+end
+
+function validate_enum_type!(state::ValidationState, schema::XmlMessageSchema, enum_def::XmlEnumType, path::Vector{String})
+    validate_since_version!(state, schema, path, enum_def.name, enum_def.since_version)
+    check_for_valid_name(state, enum_def.name)
+
+    if enum_def.encoding_type == IR.PrimitiveType.NONE
+        validation_error(state, "illegal encodingType for enum $(enum_def.name)")
+    end
+    if enum_def.encoding_type_length != 1
+        validation_error(state, "illegal encodingType for enum $(enum_def.name) length not equal to 1")
+    end
+
+    if enum_def.presence == IR.Presence.OPTIONAL && enum_def.null_value === nothing
+        validation_error(state, "presence optional but no null value found")
+    end
+
+    seen_values = Set{Float64}()
+    seen_names = Set{String}()
+
+    for value in enum_def.valid_values
+        validate_since_version!(state, schema, [path; enum_def.name], value.name, value.since_version)
+        check_for_valid_name(state, value.name)
+        if value.name in seen_names
+            validation_warning(state, "validValue already exists for name: $(value.name)")
+        end
+        value_numeric = Float64(primitive_value_numeric(value.primitive_value, enum_def.encoding_type))
+        if value_numeric in seen_values
+            validation_warning(state, "validValue already exists for value: $(value_numeric)")
+        end
+        push!(seen_values, value_numeric)
+        push!(seen_names, value.name)
+    end
+end
+
+function validate_set_type!(state::ValidationState, schema::XmlMessageSchema, set_def::XmlSetType, path::Vector{String})
+    validate_since_version!(state, schema, path, set_def.name, set_def.since_version)
+    check_for_valid_name(state, set_def.name)
+
+    if set_def.encoding_type == IR.PrimitiveType.NONE || set_def.encoding_type_length != 1
+        validation_error(state, "Illegal encodingType $(set_def.encoding_type_name)")
+    end
+
+    if !is_unsigned_primitive(set_def.encoding_type)
+        validation_error(state, "Illegal encodingType $(set_def.encoding_type) for set $(set_def.name)")
+    end
+
+    seen_values = Set{Float64}()
+    seen_names = Set{String}()
+    for choice in set_def.choices
+        validate_since_version!(state, schema, [path; set_def.name], choice.name, choice.since_version)
+        check_for_valid_name(state, choice.name)
+        if choice.name in seen_names
+            validation_warning(state, "Choice already exists for name: $(choice.name)")
+        end
+        value_numeric = Float64(primitive_value_numeric(choice.primitive_value, set_def.encoding_type))
+        if value_numeric in seen_values
+            validation_warning(state, "Choice value already defined: $(value_numeric)")
+        end
+        push!(seen_values, value_numeric)
+        push!(seen_names, choice.name)
+    end
+end
+
+function validate_composite_offsets!(state::ValidationState, composite::XmlCompositeType)
+    offset = 0
+    for member in composite.members
+        if member.offset_attribute != -1
+            if member.offset_attribute < offset
+                validation_error(state, "composite element \"$(member.name)\" has incorrect offset specified")
+            end
+            offset = member.offset_attribute
+        end
+        offset += encoded_length(member)
+    end
+end
+
+function validate_composite_type!(state::ValidationState, schema::XmlMessageSchema, composite::XmlCompositeType, path::Vector{String})
+    validate_since_version!(state, schema, path, composite.name, composite.since_version)
+    check_for_valid_name(state, composite.name)
+    validate_composite_offsets!(state, composite)
+
+    for member in composite.members
+        validate_type!(state, schema, member, [path; composite.name])
+    end
+
+    if composite.name == schema.header_type
+        validate_message_header!(state, composite)
+    end
+end
+
+function validate_message_header!(state::ValidationState, composite::XmlCompositeType)
+    block_length = get(composite.member_by_name, "blockLength", nothing)
+    template_id = get(composite.member_by_name, "templateId", nothing)
+    schema_id = get(composite.member_by_name, "schemaId", nothing)
+    version = get(composite.member_by_name, "version", nothing)
+
+    validate_header_field!(state, composite, "blockLength", block_length, IR.PrimitiveType.UINT16)
+    validate_header_field!(state, composite, "templateId", template_id, IR.PrimitiveType.UINT16)
+    validate_header_field!(state, composite, "schemaId", schema_id, IR.PrimitiveType.UINT16)
+    validate_header_field!(state, composite, "version", version, IR.PrimitiveType.UINT16)
+end
+
+function validate_header_field!(
+    state::ValidationState,
+    composite::XmlCompositeType,
+    field_name::String,
+    field_def::Union{Nothing, XmlType},
+    expected_type::IR.PrimitiveType.T
+)
+    if field_def === nothing
+        validation_error(state, "composite for message header must have \"$(field_name)\"")
+        return
+    end
+    if !(field_def isa XmlEncodedType) || field_def.primitive_type != expected_type
+        validation_warning(state, "\"$(field_name)\" should be $(expected_type)")
+    end
+end
+
+function validate_max_value!(state::ValidationState, type_def::XmlEncodedType)
+    type_def.max_value === nothing && return
+    max_value = primitive_value_numeric(type_def.max_value, type_def.primitive_type)
+    allowed_value = primitive_value_numeric(IR.primitive_type_max(type_def.primitive_type), type_def.primitive_type)
+    if max_value > allowed_value
+        validation_error(
+            state,
+            "maxValue greater than allowed for type: maxValue=$(max_value) allowed=$(allowed_value)"
+        )
+    end
+end
+
+function validate_group_dimension_type!(state::ValidationState, composite::XmlCompositeType)
+    block_length = get(composite.member_by_name, "blockLength", nothing)
+    num_in_group = get(composite.member_by_name, "numInGroup", nothing)
+
+    if !(block_length isa XmlEncodedType)
+        validation_error(state, "composite for group encodedLength encoding must have \"blockLength\"")
+    elseif !is_unsigned_primitive(block_length.primitive_type)
+        validation_error(state, "\"blockLength\" must be unsigned type")
+    elseif block_length.primitive_type != IR.PrimitiveType.UINT8 && block_length.primitive_type != IR.PrimitiveType.UINT16
+        validation_warning(state, "\"blockLength\" should be UINT8 or UINT16")
+    else
+        validate_max_value!(state, block_length)
+    end
+
+    if !(num_in_group isa XmlEncodedType)
+        validation_error(state, "composite for group encodedLength encoding must have \"numInGroup\"")
+    elseif !is_unsigned_primitive(num_in_group.primitive_type)
+        validation_warning(state, "\"numInGroup\" should be unsigned type")
+        if num_in_group.min_value === nothing || primitive_value_numeric(num_in_group.min_value, num_in_group.primitive_type) < 0
+            validation_error(state, "\"numInGroup\" minValue must be set for signed types")
+        end
+    elseif num_in_group.primitive_type != IR.PrimitiveType.UINT8 && num_in_group.primitive_type != IR.PrimitiveType.UINT16
+        validation_warning(state, "\"numInGroup\" should be UINT8 or UINT16")
+    else
+        validate_max_value!(state, num_in_group)
+    end
+end
+
+function validate_var_data_encoding!(state::ValidationState, composite::XmlCompositeType)
+    length_def = get(composite.member_by_name, "length", nothing)
+    var_data = get(composite.member_by_name, "varData", nothing)
+
+    if !(length_def isa XmlEncodedType)
+        validation_error(state, "composite for variable length data encoding must have \"length\"")
+    else
+        if !is_unsigned_primitive(length_def.primitive_type)
+            validation_error(state, "\"length\" must be unsigned type")
+        elseif length_def.primitive_type != IR.PrimitiveType.UINT8 &&
+            length_def.primitive_type != IR.PrimitiveType.UINT16 &&
+            length_def.primitive_type != IR.PrimitiveType.UINT32
+            validation_warning(state, "\"length\" should be UINT8, UINT16, or UINT32")
+        end
+        validate_max_value!(state, length_def)
+    end
+
+    if composite.presence == IR.Presence.OPTIONAL
+        validation_error(state, "composite for variable length data encoding cannot have presence=\"optional\"")
+    end
+
+    if !(var_data isa XmlEncodedType)
+        validation_error(state, "composite for variable length data encoding must have \"varData\"")
+    end
+end
+
+function validate_value_ref!(
+    state::ValidationState,
+    schema::XmlMessageSchema,
+    value_ref::String,
+    primitive_type::IR.PrimitiveType.T,
+    require_enum_match::Bool
+)
+    period_index = findfirst(==('.'), value_ref)
+    period_index === nothing && validation_error(state, "valueRef format not valid (enum-name.valid-value-name): $(value_ref)")
+    type_name = value_ref[1:period_index-1]
+    value_name = value_ref[period_index+1:end]
+    enum_type = get(schema.types_by_name, type_name, nothing)
+    enum_type isa XmlEnumType || validation_error(state, "valueRef type not found: $(type_name)")
+    if require_enum_match && enum_type.encoding_type != primitive_type
+        validation_error(state, "valueRef does not match this type: $(value_ref)")
+    end
+    for value in enum_type.valid_values
+        value.name == value_name && return
+    end
+    validation_error(state, "valueRef for validValue name not found: $(value_name)")
+end
+
+function validate_field_value_ref!(
+    state::ValidationState,
+    schema::XmlMessageSchema,
+    field::XmlField
+)
+    field.value_ref === nothing && return
+    occursin('.', field.value_ref) || validation_error(state, "valueRef format not valid (enum-name.valid-value-name): $(field.value_ref)")
+    type_name = first(split(field.value_ref, '.'))
+    enum_type = get(schema.types_by_name, type_name, nothing)
+    enum_type isa XmlEnumType || validation_error(state, "valueRef for enum name not found: $(type_name)")
+
+    if field.type_def isa XmlEncodedType
+        enum_type.encoding_type == field.type_def.primitive_type ||
+            validation_error(state, "valueRef does not match field type: $(field.value_ref)")
+    elseif field.type_def isa XmlEnumType
+        field.type_def.name == type_name ||
+            validation_error(state, "valueRef for enum name not found: $(type_name)")
+    else
+        validation_error(state, "valueRef does not match field type: $(field.value_ref)")
+    end
+
+    for value in enum_type.valid_values
+        value.name == last(split(field.value_ref, '.')) && return
+    end
+    validation_error(state, "valueRef for validValue name not found: $(last(split(field.value_ref, '.')))")
+end
+
+function validate_field!(state::ValidationState, schema::XmlMessageSchema, field::XmlField, path::Vector{String})
+    validate_since_version!(state, schema, path, field.name, field.since_version)
+    check_for_valid_name(state, field.name)
+
+    if field.type_def !== nothing &&
+        field.semantic_type !== nothing &&
+        field.type_def.semantic_type !== nothing &&
+        field.semantic_type != field.type_def.semantic_type
+        validation_error(state, "Mismatched semanticType on type and field: $(field.name)")
+    end
+
+    validate_field_value_ref!(state, schema, field)
+
+    if field.type_def isa XmlEnumType && field.presence == IR.Presence.CONSTANT && field.value_ref === nothing
+        validation_error(state, "valueRef not set for constant enum")
+    end
+
+    if field.group_fields !== nothing
+        validate_group_dimension_type!(state, field.dimension_type)
+        for group_field in field.group_fields
+            validate_field!(state, schema, group_field, [path; field.name])
+        end
+    elseif field.variable_length
+        field.type_def isa XmlCompositeType &&
+            validate_var_data_encoding!(state, field.type_def)
+    end
+end
+
+function validate_type!(state::ValidationState, schema::XmlMessageSchema, type_def::XmlType, path::Vector{String})
+    if type_def isa XmlEncodedType
+        validate_encoded_type!(state, schema, type_def, path)
+    elseif type_def isa XmlEnumType
+        validate_enum_type!(state, schema, type_def, path)
+    elseif type_def isa XmlSetType
+        validate_set_type!(state, schema, type_def, path)
+    elseif type_def isa XmlCompositeType
+        validate_composite_type!(state, schema, type_def, path)
+    end
+end
+
+function validate_message!(state::ValidationState, schema::XmlMessageSchema, message::XmlMessage)
+    check_for_valid_name(state, message.name)
+    validate_since_version!(state, schema, String[], message.name, message.since_version)
+
+    seen_group = false
+    seen_data = false
+    ids = Set{Int}()
+    names = Set{String}()
+
+    for field in message.fields
+        if field.group_fields !== nothing
+            seen_data && validation_error(state, "group node specified after data node")
+            seen_group = true
+        elseif field.variable_length
+            seen_data = true
+        else
+            (seen_group || seen_data) && validation_error(state, "field node specified after group or data node specified")
+        end
+
+        if field.id in ids
+            validation_error(state, "duplicate id found: $(field.id)")
+        end
+        if field.name in names
+            validation_error(state, "duplicate name found: $(field.name)")
+        end
+        push!(ids, field.id)
+        push!(names, field.name)
+
+        validate_field!(state, schema, field, [message.name])
+    end
+
+    if message.block_length != 0 && message.computed_block_length > message.block_length
+        validation_error(
+            state,
+            "specified blockLength provides insufficient space $(message.computed_block_length) > $(message.block_length)"
+        )
+    end
+end
+
+function validate_schema!(schema::XmlMessageSchema; warnings_fatal::Bool=false, suppress_warnings::Bool=false)
+    state = ValidationState(warnings_fatal=warnings_fatal, suppress_warnings=suppress_warnings)
+
+    for type_def in values(schema.types_by_name)
+        validate_type!(state, schema, type_def, String[])
+    end
+
+    message_ids = Set{Int}()
+    message_names = Set{String}()
+    for message in schema.messages
+        if message.id in message_ids
+            validation_error(state, "message template id already exists: $(message.id)")
+        end
+        if message.name in message_names
+            validation_error(state, "message name already exists: $(message.name)")
+        end
+        push!(message_ids, message.id)
+        push!(message_names, message.name)
+        validate_message!(state, schema, message)
+    end
 end
 
 function parse_presence(value::Union{Nothing, String})
@@ -341,6 +876,7 @@ function parse_enum_type(
     name = given_name === nothing ? node["name"] : given_name
     encoding_type_name = node["encodingType"]
     encoding_type = parse_primitive_type(encoding_type_name)
+    encoding_type_length = 1
     ref_null_value = nothing
     ref_min_value = nothing
     ref_max_value = nothing
@@ -351,6 +887,8 @@ function parse_enum_type(
             ref_null_value = haskey(ref_node, "nullValue") ? ref_node["nullValue"] : nothing
             ref_min_value = haskey(ref_node, "minValue") ? ref_node["minValue"] : nothing
             ref_max_value = haskey(ref_node, "maxValue") ? ref_node["maxValue"] : nothing
+            length_attr = haskey(ref_node, "length") ? ref_node["length"] : nothing
+            encoding_type_length = length_attr === nothing ? 1 : parse(Int, length_attr)
         end
     end
     presence = parse_presence(haskey(node, "presence") ? node["presence"] : nothing)
@@ -406,7 +944,9 @@ function parse_enum_type(
         presence,
         description,
         semantic_type,
+        encoding_type_name,
         encoding_type,
+        encoding_type_length,
         values,
         offset_attribute,
         since_version,
@@ -425,10 +965,13 @@ function parse_set_type(
     name = given_name === nothing ? node["name"] : given_name
     encoding_type_name = node["encodingType"]
     encoding_type = parse_primitive_type(encoding_type_name)
+    encoding_type_length = 1
     if encoding_type == IR.PrimitiveType.NONE && type_nodes_by_name !== nothing
         ref_node = get(type_nodes_by_name, encoding_type_name, nothing)
         if ref_node !== nothing && nodename(ref_node) == "type"
             encoding_type = parse_primitive_type(ref_node["primitiveType"])
+            length_attr = haskey(ref_node, "length") ? ref_node["length"] : nothing
+            encoding_type_length = length_attr === nothing ? 1 : parse(Int, length_attr)
         end
     end
     presence = parse_presence(haskey(node, "presence") ? node["presence"] : nothing)
@@ -456,7 +999,9 @@ function parse_set_type(
         presence,
         description,
         semantic_type,
+        encoding_type_name,
         encoding_type,
+        encoding_type_length,
         choices,
         offset_attribute,
         since_version,
@@ -572,7 +1117,12 @@ function get_types_package_attribute(node)
     return nothing
 end
 
-function parse_xml_schema(xml_content::String)
+function parse_xml_schema(
+    xml_content::String;
+    validate::Bool=true,
+    warnings_fatal::Bool=false,
+    suppress_warnings::Bool=false
+)
     doc = parsexml(xml_content)
     root_node = root(doc)
     if nodename(root_node) != "messageSchema"
@@ -587,11 +1137,16 @@ function parse_xml_schema(xml_content::String)
     header_type = haskey(root_node, "headerType") ? root_node["headerType"] : "messageHeader"
     description = haskey(root_node, "description") ? root_node["description"] : ""
 
+    state = validate ? ValidationState(warnings_fatal=warnings_fatal, suppress_warnings=suppress_warnings) : nothing
     type_nodes_by_name = Dict{String, EzXML.Node}()
     for types_element in findall("types", root_node)
         for child in eachelement(types_element)
             if haskey(child, "name")
-                type_nodes_by_name[child["name"]] = child
+                name = child["name"]
+                if state !== nothing && haskey(type_nodes_by_name, name)
+                    validation_warning(state, "type already exists for name: $(name)")
+                end
+                type_nodes_by_name[name] = child
             end
         end
     end
@@ -603,7 +1158,7 @@ function parse_xml_schema(xml_content::String)
 
     messages = parse_messages(root_node, types_by_name)
 
-    return XmlMessageSchema(
+    schema = XmlMessageSchema(
         package_name,
         description,
         schema_id,
@@ -614,6 +1169,8 @@ function parse_xml_schema(xml_content::String)
         types_by_name,
         messages
     )
+    validate && validate_schema!(schema; warnings_fatal=warnings_fatal, suppress_warnings=suppress_warnings)
+    return schema
 end
 
 function parse_messages(root_node, types_by_name::Dict{String, XmlType})
@@ -894,8 +1451,18 @@ end
 
 Parse SBE XML content and generate the IR.
 """
-function generate_ir_xml(xml_content::AbstractString)
-    schema = parse_xml_schema(xml_content)
+function generate_ir_xml(
+    xml_content::AbstractString;
+    validate::Bool=true,
+    warnings_fatal::Bool=false,
+    suppress_warnings::Bool=false
+)
+    schema = parse_xml_schema(
+        xml_content;
+        validate=validate,
+        warnings_fatal=warnings_fatal,
+        suppress_warnings=suppress_warnings
+    )
     return generate_ir(schema)
 end
 
@@ -904,9 +1471,19 @@ end
 
 Read an SBE XML schema file and generate the IR.
 """
-function generate_ir_file(path::AbstractString)
+function generate_ir_file(
+    path::AbstractString;
+    validate::Bool=true,
+    warnings_fatal::Bool=false,
+    suppress_warnings::Bool=false
+)
     xml_content = read(path, String)
-    return generate_ir_xml(xml_content)
+    return generate_ir_xml(
+        xml_content;
+        validate=validate,
+        warnings_fatal=warnings_fatal,
+        suppress_warnings=suppress_warnings
+    )
 end
 
 function capture_types!(ir::IR.Ir, tokens::Vector{IR.Token}, begin_index::Int=1, end_index::Int=length(tokens))

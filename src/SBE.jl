@@ -256,6 +256,9 @@ will detect that the module already exists and return its name without regenerat
 macro load_schema(args...)
     xml_path = nothing
     module_name_expr = :(nothing)
+    validate_expr = :(true)
+    warnings_fatal_expr = :(false)
+    suppress_warnings_expr = :(false)
 
     for arg in args
         if arg isa Expr && arg.head == :parameters
@@ -264,6 +267,12 @@ macro load_schema(args...)
                     module_name_expr = kw.args[2]
                 elseif kw isa Expr && (kw.head == :(=) || kw.head == :kw) && kw.args[1] == :module
                     module_name_expr = kw.args[2]
+                elseif kw isa Expr && (kw.head == :(=) || kw.head == :kw) && kw.args[1] == :validate
+                    validate_expr = kw.args[2]
+                elseif kw isa Expr && (kw.head == :(=) || kw.head == :kw) && kw.args[1] == :warnings_fatal
+                    warnings_fatal_expr = kw.args[2]
+                elseif kw isa Expr && (kw.head == :(=) || kw.head == :kw) && kw.args[1] == :suppress_warnings
+                    suppress_warnings_expr = kw.args[2]
                 else
                     error("Unsupported @load_schema keyword argument: $(kw)")
                 end
@@ -278,7 +287,12 @@ macro load_schema(args...)
     return quote
         let xml_file = $(esc(xml_path))
             xml_content = read(xml_file, String)
-            schema = SBE.parse_xml_schema(xml_content)
+            schema = SBE.parse_xml_schema(
+                xml_content;
+                validate=$(esc(validate_expr)),
+                warnings_fatal=$(esc(warnings_fatal_expr)),
+                suppress_warnings=$(esc(suppress_warnings_expr))
+            )
             module_name_override = $(esc(module_name_expr))
             if module_name_override === nothing || module_name_override == "" || module_name_override == Symbol("")
                 module_name = SBE.module_name_from_package(schema.package_name)
@@ -289,7 +303,13 @@ macro load_schema(args...)
             # Check if already exists
             if !isdefined(Main, module_name)
                 # Generate and load
-                code = SBE.generate(xml_file; module_name=module_name)
+                code = SBE.generate(
+                    xml_file;
+                    module_name=module_name,
+                    validate=$(esc(validate_expr)),
+                    warnings_fatal=$(esc(warnings_fatal_expr)),
+                    suppress_warnings=$(esc(suppress_warnings_expr))
+                )
                 Base.include_string(Main, code)
             end
             # If already exists, silently return the existing module name
