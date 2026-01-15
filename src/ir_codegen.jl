@@ -435,10 +435,14 @@ function generate_composite_member_expr(
             return decode_array($julia_type, m.buffer, m.offset + $(token.offset), $array_len)
         end
 
-        @inline function $member_name(m::$decoder_name, ::Type{NTuple{N,T}}) where {N,T<:Real}
-            N == $array_len || throw(ArgumentError("Expected NTuple{$array_len,<:Real}"))
+        @inline function $member_name(m::$decoder_name, ::Type{T}) where {T<:NTuple}
+            Base.isconcretetype(T) || throw(ArgumentError("NTuple type must be concrete"))
+            elem_type = Base.tuple_type_head(T)
+            elem_type <: Real || throw(ArgumentError("NTuple element type must be Real"))
+            len = fieldcount(T)
+            len == $array_len || throw(ArgumentError("Expected NTuple{$array_len,<:Real}"))
             x = decode_array($julia_type, m.buffer, m.offset + $(token.offset), $array_len)
-            return ntuple(i -> x[i], Val(N))
+            return ntuple(i -> x[i], Val(len))
         end
 
         @inline function $(Symbol(member_name, :!))(m::$encoder_name)
@@ -449,8 +453,12 @@ function generate_composite_member_expr(
             copyto!($(Symbol(member_name, :!))(m), val)
         end
 
-        @inline function $(Symbol(member_name, :!))(m::$encoder_name, val::NTuple{N,T}) where {N,T<:Real}
-            N == $array_len || throw(ArgumentError("Expected NTuple{$array_len,<:Real}"))
+        @inline function $(Symbol(member_name, :!))(m::$encoder_name, val::T) where {T<:NTuple}
+            Base.isconcretetype(T) || throw(ArgumentError("NTuple type must be concrete"))
+            elem_type = Base.tuple_type_head(T)
+            elem_type <: Real || throw(ArgumentError("NTuple element type must be Real"))
+            len = fieldcount(T)
+            len == $array_len || throw(ArgumentError("Expected NTuple{$array_len,<:Real}"))
             dest = $(Symbol(member_name, :!))(m)
             @inbounds for i in 1:$array_len
                 dest[i] = val[i]
@@ -906,13 +914,17 @@ function generate_encoded_field_expr(
                 return decode_array($julia_type, m.buffer, m.offset + $(field_token.offset), $array_len)
             end
 
-            @inline function $field_name(m::$decoder_name, ::Type{NTuple{N,T}}) where {N,T<:Real}
-                N == $array_len || throw(ArgumentError("Expected NTuple{$array_len,<:Real}"))
+            @inline function $field_name(m::$decoder_name, ::Type{T}) where {T<:NTuple}
+                Base.isconcretetype(T) || throw(ArgumentError("NTuple type must be concrete"))
+                elem_type = Base.tuple_type_head(T)
+                elem_type <: Real || throw(ArgumentError("NTuple element type must be Real"))
+                len = fieldcount(T)
+                len == $array_len || throw(ArgumentError("Expected NTuple{$array_len,<:Real}"))
                 if m.acting_version < $(version_expr(ir, field_token.version))
-                    return ntuple(_ -> $julia_type_symbol($(null_val)), Val(N))
+                    return ntuple(_ -> $julia_type_symbol($(null_val)), Val(len))
                 end
                 x = decode_array($julia_type, m.buffer, m.offset + $(field_token.offset), $array_len)
-                return ntuple(i -> x[i], Val(N))
+                return ntuple(i -> x[i], Val(len))
             end
 
             @inline function $(Symbol(field_name, :!))(m::$encoder_name)
@@ -923,8 +935,12 @@ function generate_encoded_field_expr(
                 copyto!($(Symbol(field_name, :!))(m), val)
             end
 
-            @inline function $(Symbol(field_name, :!))(m::$encoder_name, val::NTuple{N,T}) where {N,T<:Real}
-                N == $array_len || throw(ArgumentError("Expected NTuple{$array_len,<:Real}"))
+            @inline function $(Symbol(field_name, :!))(m::$encoder_name, val::T) where {T<:NTuple}
+                Base.isconcretetype(T) || throw(ArgumentError("NTuple type must be concrete"))
+                elem_type = Base.tuple_type_head(T)
+                elem_type <: Real || throw(ArgumentError("NTuple element type must be Real"))
+                len = fieldcount(T)
+                len == $array_len || throw(ArgumentError("Expected NTuple{$array_len,<:Real}"))
                 dest = $(Symbol(field_name, :!))(m)
                 @inbounds for i in 1:$array_len
                     dest[i] = val[i]
@@ -939,10 +955,14 @@ function generate_encoded_field_expr(
                 return decode_array($julia_type, m.buffer, m.offset + $(field_token.offset), $array_len)
             end
 
-            @inline function $field_name(m::$decoder_name, ::Type{NTuple{N,T}}) where {N,T<:Real}
-                N == $array_len || throw(ArgumentError("Expected NTuple{$array_len,<:Real}"))
+            @inline function $field_name(m::$decoder_name, ::Type{T}) where {T<:NTuple}
+                Base.isconcretetype(T) || throw(ArgumentError("NTuple type must be concrete"))
+                elem_type = Base.tuple_type_head(T)
+                elem_type <: Real || throw(ArgumentError("NTuple element type must be Real"))
+                len = fieldcount(T)
+                len == $array_len || throw(ArgumentError("Expected NTuple{$array_len,<:Real}"))
                 x = decode_array($julia_type, m.buffer, m.offset + $(field_token.offset), $array_len)
-                return ntuple(i -> x[i], Val(N))
+                return ntuple(i -> x[i], Val(len))
             end
 
             @inline function $(Symbol(field_name, :!))(m::$encoder_name)
@@ -953,8 +973,12 @@ function generate_encoded_field_expr(
                 copyto!($(Symbol(field_name, :!))(m), val)
             end
 
-            @inline function $(Symbol(field_name, :!))(m::$encoder_name, val::NTuple{N,T}) where {N,T<:Real}
-                N == $array_len || throw(ArgumentError("Expected NTuple{$array_len,<:Real}"))
+            @inline function $(Symbol(field_name, :!))(m::$encoder_name, val::T) where {T<:NTuple}
+                Base.isconcretetype(T) || throw(ArgumentError("NTuple type must be concrete"))
+                elem_type = Base.tuple_type_head(T)
+                elem_type <: Real || throw(ArgumentError("NTuple element type must be Real"))
+                len = fieldcount(T)
+                len == $array_len || throw(ArgumentError("Expected NTuple{$array_len,<:Real}"))
                 dest = $(Symbol(field_name, :!))(m)
                 @inbounds for i in 1:$array_len
                     dest[i] = val[i]

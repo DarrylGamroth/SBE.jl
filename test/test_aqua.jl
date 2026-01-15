@@ -12,3 +12,7 @@ using SBE
         stale_deps=false
     )
 end
+
+@testset "Aqua Generated Modules" begin
+    Aqua.test_unbound_args(Baseline)
+end
