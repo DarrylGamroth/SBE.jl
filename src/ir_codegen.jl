@@ -1357,9 +1357,12 @@ function generate_var_data_expr(
         @inline function $accessor_name(m::$decoder_name, ::Type{AbstractArray{T}}) where {T<:Real}
             return reinterpret(T, $(returns_string ? bytes_accessor : accessor_name)(m))
         end
-        @inline function $accessor_name(m::$decoder_name, ::Type{NTuple{N,T}}) where {N,T<:Real}
-            x = reinterpret(T, $(returns_string ? bytes_accessor : accessor_name)(m))
-            return ntuple(i -> x[i], Val(N))
+        @inline function $accessor_name(m::$decoder_name, ::Type{T}) where {T<:NTuple}
+            Base.isconcretetype(T) || throw(ArgumentError("NTuple type must be concrete"))
+            elem_type = Base.tuple_type_head(T)
+            elem_type <: Real || throw(ArgumentError("NTuple element type must be Real"))
+            x = reinterpret(elem_type, $(returns_string ? bytes_accessor : accessor_name)(m))
+            return ntuple(i -> x[i], Val(fieldcount(T)))
         end
         @inline function $accessor_name(m::$decoder_name, ::Type{T}) where {T<:Nothing}
             $skip_name(m)

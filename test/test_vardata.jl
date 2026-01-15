@@ -101,6 +101,21 @@ using SBE
         
         @test collect(result) == data
     end
+
+    @testset "Type Conversions - NTuple" begin
+        buffer = zeros(UInt8, 1024)
+        encoder = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(encoder, buffer, 0)
+
+        data = UInt8[0x01, 0x02, 0x03, 0x04]
+        Baseline.Car.manufacturer!(encoder, data)
+
+        decoder = Baseline.Car.Decoder(typeof(buffer))
+        Baseline.Car.wrap!(decoder, buffer, 0)
+        result = Baseline.Car.manufacturer(decoder, NTuple{4,UInt8})
+
+        @test result == (0x01, 0x02, 0x03, 0x04)
+    end
     
     @testset "Type Conversions - Symbol" begin
         buffer = zeros(UInt8, 1024)
