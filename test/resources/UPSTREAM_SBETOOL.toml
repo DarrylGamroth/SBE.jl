@@ -1,0 +1,6 @@
+repository = "https://github.com/aeron-io/simple-binary-encoding"
+version = "1.37.1"
+tag = "1.37.1"
+commit = "2e78afe5addbc5f701e2d7f4528a8444bf25dd5b"
+resource_path = "sbe-tool/src/test/resources"
+fixture_count = 79

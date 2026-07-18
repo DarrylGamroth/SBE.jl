@@ -145,6 +145,14 @@ using SBE
         @test Baseline.Car.manufacturer_length(decoder) == 0
         @test Baseline.Car.manufacturer(decoder, String) == ""
     end
+
+    @testset "Invalid Buffer Length" begin
+        buffer = zeros(UInt8, 1024)
+        encoder = Baseline.Car.Encoder(typeof(buffer))
+        Baseline.Car.wrap_and_apply_header!(encoder, buffer, 0)
+
+        @test_throws ArgumentError Baseline.Car.manufacturer_buffer!(encoder, -1)
+    end
     
     @testset "Multiple Fields in Sequence" begin
         buffer = zeros(UInt8, 1024)

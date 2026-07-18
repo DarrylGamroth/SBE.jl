@@ -1,12 +1,7 @@
 using Test
 using SBE
 
-module JsonPrinterGenerated
-    include(joinpath(@__DIR__, "generated", "JsonPrinterBaseline.jl"))
-    using .Baseline
-end
-
-const JBaseline = JsonPrinterGenerated.Baseline
+const JBaseline = JsonPrinterBaseline
 
 function encode_test_message(buffer::AbstractVector{UInt8})
     enc = JBaseline.Car.Encoder(typeof(buffer))

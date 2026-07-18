@@ -152,7 +152,9 @@ Encode a single value of type T into the buffer at the given offset (0-based).
 Uses little-endian byte order (SBE default).
 """
 @inline function encode_value_le(::Type{T}, buffer, offset, value) where {T}
-    @inbounds reinterpret(T, view(buffer, offset+1:offset+sizeof(T)))[] = htol(T(value))
+    indices = offset+1:offset+sizeof(T)
+    @boundscheck checkbounds(buffer, indices)
+    @inbounds reinterpret(T, view(buffer, indices))[] = htol(T(value))
 end
 
 """
@@ -162,7 +164,9 @@ Decode a single value of type T from the buffer at the given offset (0-based).
 Uses little-endian byte order (SBE default).
 """
 @inline function decode_value_le(::Type{T}, buffer, offset) where {T}
-    @inbounds ltoh(reinterpret(T, view(buffer, offset+1:offset+sizeof(T)))[])
+    indices = offset+1:offset+sizeof(T)
+    @boundscheck checkbounds(buffer, indices)
+    @inbounds return ltoh(reinterpret(T, view(buffer, indices))[])
 end
 
 """
@@ -194,7 +198,9 @@ Encode a single value of type T into the buffer at the given offset (0-based).
 Uses big-endian byte order.
 """
 @inline function encode_value_be(::Type{T}, buffer, offset, value) where {T}
-    @inbounds reinterpret(T, view(buffer, offset+1:offset+sizeof(T)))[] = hton(T(value))
+    indices = offset+1:offset+sizeof(T)
+    @boundscheck checkbounds(buffer, indices)
+    @inbounds reinterpret(T, view(buffer, indices))[] = hton(T(value))
 end
 
 """
@@ -204,7 +210,9 @@ Decode a single value of type T from the buffer at the given offset (0-based).
 Uses big-endian byte order.
 """
 @inline function decode_value_be(::Type{T}, buffer, offset) where {T}
-    @inbounds ntoh(reinterpret(T, view(buffer, offset+1:offset+sizeof(T)))[])
+    indices = offset+1:offset+sizeof(T)
+    @boundscheck checkbounds(buffer, indices)
+    @inbounds return ntoh(reinterpret(T, view(buffer, indices))[])
 end
 
 """
@@ -323,9 +331,8 @@ function generate(
     end
 
     # Parse XML and generate IR
-    xml_content = read(xml_path, String)
-    schema = parse_xml_schema(
-        xml_content;
+    schema = parse_xml_schema_file(
+        xml_path;
         validate=validate,
         warnings_fatal=warnings_fatal,
         suppress_warnings=suppress_warnings
@@ -369,9 +376,8 @@ function generate(
     end
 
     # Parse XML and generate IR
-    xml_content = read(xml_path, String)
-    schema = parse_xml_schema(
-        xml_content;
+    schema = parse_xml_schema_file(
+        xml_path;
         validate=validate,
         warnings_fatal=warnings_fatal,
         suppress_warnings=suppress_warnings
@@ -383,4 +389,60 @@ function generate(
 
     # Convert to code string and return
     return expr_to_code_string(module_expr)
+end
+
+"""
+    generate_from_ir(ir::IR.Ir; module_name=nothing) -> String
+    generate_from_ir(ir_path::AbstractString; module_name=nothing) -> String
+
+Generate Julia source code from an in-memory SBE IR or a Java-compatible `.sbeir`
+file. The returned source defines the generated schema module but does not evaluate
+it; use [`@load_sbeir`](@ref) for expansion-time loading or write the source to a
+file for normal `include`/precompilation workflows.
+"""
+function generate_from_ir(
+    ir::IR.Ir;
+    module_name::Union{Nothing, Symbol, String}=nothing
+)
+    module_expr = generate_ir_module_expr(ir; module_name=module_name)
+    return expr_to_code_string(module_expr)
+end
+
+function generate_from_ir(
+    ir_path::AbstractString;
+    module_name::Union{Nothing, Symbol, String}=nothing
+)
+    return generate_from_ir(decode_ir(ir_path); module_name=module_name)
+end
+
+"""
+    generate_from_ir(ir, output_path; module_name=nothing) -> String
+    generate_from_ir(ir_path, output_path; module_name=nothing) -> String
+
+Generate Julia source code from an in-memory SBE IR or `.sbeir` file and write it
+to `output_path`. Parent directories are created as needed. The output path is
+returned.
+"""
+function generate_from_ir(
+    ir::IR.Ir,
+    output_path::AbstractString;
+    module_name::Union{Nothing, Symbol, String}=nothing
+)
+    code = generate_from_ir(ir; module_name=module_name)
+    output_dir = dirname(output_path)
+    !isempty(output_dir) && !isdir(output_dir) && mkpath(output_dir)
+    write(output_path, code)
+    return String(output_path)
+end
+
+function generate_from_ir(
+    ir_path::AbstractString,
+    output_path::AbstractString;
+    module_name::Union{Nothing, Symbol, String}=nothing
+)
+    return generate_from_ir(
+        decode_ir(ir_path),
+        output_path;
+        module_name=module_name
+    )
 end

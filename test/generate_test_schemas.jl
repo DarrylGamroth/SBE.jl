@@ -1,27 +1,19 @@
 """
-Pre-generate all test schemas using SBE.generate()
+Generate the Julia codecs used by the test suite into a temporary directory.
 
-This script generates Julia code from all SBE XML schemas used in the test suite.
-Run this whenever schemas change or before running tests.
-
-Usage:
-    julia --project=. test/generate_test_schemas.jl
+Generation is deliberately fail-fast: a missing schema, generation exception, or
+empty output is a test setup failure. The returned dictionary maps fixture names
+to absolute generated-source paths.
 """
 
 using SBE
 
-# Test directory
-test_dir = @__DIR__
-generated_dir = joinpath(test_dir, "generated")
+const TEST_SCHEMA_DIR = @__DIR__
 
-# Ensure generated directory exists
-mkpath(generated_dir)
-
-println("Generating test schemas...")
-println("=" ^ 70)
+test_fixture_module_name(fixture_name::Symbol) = Symbol("TestFixture", fixture_name)
 
 # List of schemas to generate
-schemas = [
+const TEST_SCHEMAS = [
     ("example-schema.xml", "Baseline.jl", "Baseline"),
     ("example-extension-schema.xml", "Extension.jl", "Extension"),
     ("example-optional-schema.xml", "Optional.jl", "Optional"),
@@ -78,38 +70,44 @@ schemas = [
     (joinpath("resources", "issue849.xml"), "Issue849.jl", "Issue849"),
 ]
 
-for (schema_file, output_file, module_name) in schemas
-    schema_path = joinpath(test_dir, schema_file)
-    output_path = joinpath(generated_dir, output_file)
-    
-    if !isfile(schema_path)
-        @warn "Schema not found: $schema_path"
-        continue
+function generate_test_schemas(
+    output_dir::AbstractString=mktempdir(; prefix="sbe-jl-tests-");
+    verbose::Bool=false,
+)
+    mkpath(output_dir)
+    generated = Dict{Symbol, String}()
+
+    for (schema_file, output_file, fixture_name) in TEST_SCHEMAS
+        schema_path = joinpath(TEST_SCHEMA_DIR, schema_file)
+        output_path = joinpath(output_dir, output_file)
+
+        isfile(schema_path) || error("Test schema not found: $schema_path")
+        verbose && println("Generating $fixture_name from $schema_file")
+
+        result = SBE.generate(
+            schema_path,
+            output_path;
+            module_name=test_fixture_module_name(Symbol(fixture_name)),
+            suppress_warnings=true,
+        )
+        result == output_path || error(
+            "Unexpected output path for $fixture_name: expected $output_path, got $result",
+        )
+        isfile(output_path) || error("Generated file not created: $output_path")
+        filesize(output_path) > 0 || error("Generated file is empty: $output_path")
+
+        generated[Symbol(fixture_name)] = output_path
     end
-    
-    try
-        println("Generating $module_name...")
-        println("  Schema: $schema_file")
-        println("  Output: generated/$output_file")
-        
-        SBE.generate(schema_path, output_path)
-        
-        # Verify the file was created and has content
-        if isfile(output_path)
-            size_kb = filesize(output_path) / 1024
-            println("  ✓ Generated successfully ($(round(size_kb, digits=1)) KB)")
-        else
-            @error "  ✗ Failed to create file"
-        end
-        
-    catch e
-        @error "Failed to generate $module_name" exception=(e, catch_backtrace())
-    end
-    println()
+
+    return generated
 end
 
-println("=" ^ 70)
-println("Generation complete!")
-println()
-println("Generated files are in: $generated_dir")
-println("Include them in tests with: include(\"generated/Baseline.jl\")")
+if abspath(PROGRAM_FILE) == @__FILE__
+    output_dir = if isempty(ARGS)
+        mktempdir(; prefix="sbe-jl-tests-", cleanup=false)
+    else
+        abspath(only(ARGS))
+    end
+    generate_test_schemas(output_dir; verbose=true)
+    println("Generated test codecs in: $output_dir")
+end

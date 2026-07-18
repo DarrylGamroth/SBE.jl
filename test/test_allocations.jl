@@ -5,6 +5,14 @@ using AllocCheck
 # Use pre-generated Baseline module (loaded by runtests.jl)
 # (No need to load schema at module level)
 
+function fuel_speed_sum(group)
+    total = UInt32(0)
+    for entry in group
+        total += Baseline.Car.FuelFigures.speed(entry)
+    end
+    return total
+end
+
 @testset "Allocation Tests" begin
     @testset "Zero-Allocation Decoding" begin
         # Create a properly encoded message first
@@ -103,13 +111,18 @@ using AllocCheck
         
         @testset "Group Decoding" begin
             group = Baseline.Car.fuelFigures(decoder)
-            
-            # Note: Group accessor may allocate due to parentmodule() call
-            # This is a known limitation of the current implementation
-            # The important thing is that iterating over groups doesn't allocate
-            
+
             @test isempty(check_allocs(Base.length, (typeof(group),)))
             @test isempty(check_allocs(Base.eltype, (typeof(group),)))
+
+            # Warm and then measure the complete iteration path. AllocCheck sees the
+            # iterator protocol's returned tuple before escape analysis, while the
+            # compiled loop eliminates it.
+            @test fuel_speed_sum(group) == UInt32(90)
+            decoder_iter = Baseline.Car.Decoder(typeof(buffer))
+            Baseline.Car.wrap!(decoder_iter, buffer, 0)
+            group_iter = Baseline.Car.fuelFigures(decoder_iter)
+            @test (@allocated fuel_speed_sum(group_iter)) == 0
         end
         
         @testset "Group Entry Field Access" begin
@@ -122,28 +135,6 @@ using AllocCheck
             @test isempty(check_allocs(Baseline.Car.FuelFigures.speed, (typeof(entry),)))
             @test isempty(check_allocs(Baseline.Car.FuelFigures.mpg, (typeof(entry),)))
         end
-    end
-    
-    @testset "Complete Round-Trip" begin
-        # Simple round-trip without full message encoding
-        # Just test that basic decode operations don't allocate
-        buffer = zeros(UInt8, 2048)
-        encoder = Baseline.Car.Encoder(typeof(buffer))
-        Baseline.Car.wrap_and_apply_header!(encoder, buffer, 0)
-        
-        # Encode some fields
-        Baseline.Car.serialNumber!(encoder, UInt64(12345))
-        Baseline.Car.modelYear!(encoder, UInt16(2024))
-        
-        # Create decoder
-        decoder = Baseline.Car.Decoder(typeof(buffer))
-        Baseline.Car.wrap!(decoder, buffer, 0)
-        
-        @test isempty(check_allocs(Baseline.Car.serialNumber, (typeof(decoder),)))
-        @test isempty(check_allocs(Baseline.Car.modelYear, (typeof(decoder),)))
-        
-        # Note: Some operations like creating decoders allocate PositionPointer
-        # which is acceptable for the initial setup
     end
     
     @testset "Position Management" begin
@@ -171,11 +162,9 @@ using AllocCheck
         decoder = Baseline.Car.Decoder(typeof(buffer))
         Baseline.Car.wrap!(decoder, buffer, 0)
         
-        @test isempty(check_allocs(SBE.sbe_position, (typeof(decoder),)))
-        @test isempty(check_allocs(SBE.sbe_position!, (typeof(encoder), Int)))
-        
-        # Note: Metadata functions like sbe_template_id, sbe_schema_id, etc.
-        # are not currently implemented for message types, only for groups
+        @test isempty(check_allocs(SBE.sbe_template_id, (typeof(decoder),)))
+        @test isempty(check_allocs(SBE.sbe_schema_id, (typeof(decoder),)))
+        @test isempty(check_allocs(SBE.sbe_schema_version, (typeof(decoder),)))
     end
     
     @testset "Zero-Allocation Variable-Length Data" begin

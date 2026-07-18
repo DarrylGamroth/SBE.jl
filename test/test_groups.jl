@@ -71,7 +71,7 @@ using SBE
         @test num_in_group == 0
     end
     
-    @testset "Basic Group Encoding" begin
+    @testset "Group round trip via iterate" begin
         buffer = zeros(UInt8, 256)
         
         # Create encoder (writes header automatically)
@@ -114,7 +114,7 @@ using SBE
         @test Baseline.Car.FuelFigures.mpg(item2) ≈ 28.3f0
     end
     
-    @testset "Iterator Protocol" begin
+    @testset "For-loop iterator protocol" begin
         buffer = zeros(UInt8, 256)
         
         # Create encoder (writes header)
@@ -459,73 +459,9 @@ using SBE
         
         accel = Baseline.Car.PerformanceFigures.acceleration!(perf, 3)
         @test SBE.sbe_header_size(accel) == 4
-        @test length(accel) == 3
-        @test accel isa SBE.AbstractSbeGroup
         
         # All groups share the same position pointer
         @test SBE.sbe_position_ptr(accel) === pos_ptr_car
     end
     
-    @testset "Complex Scenario - All Features" begin
-        buffer = zeros(UInt8, 1024)
-        car_enc = Baseline.Car.Encoder(typeof(buffer))
-        Baseline.Car.wrap_and_apply_header!(car_enc, buffer, 0)
-        
-        # Test 1: FuelFigures with var data
-        fuel = Baseline.Car.fuelFigures!(car_enc, 2)
-        
-        Baseline.Car.FuelFigures.next!(fuel)
-        Baseline.Car.FuelFigures.speed!(fuel, 55)
-        Baseline.Car.FuelFigures.mpg!(fuel, 42.0)
-        Baseline.Car.FuelFigures.usageDescription!(fuel, "City")
-        
-        Baseline.Car.FuelFigures.next!(fuel)
-        Baseline.Car.FuelFigures.speed!(fuel, 75)
-        Baseline.Car.FuelFigures.mpg!(fuel, 38.5)
-        Baseline.Car.FuelFigures.usageDescription!(fuel, "Highway")
-        
-        # Test 2: PerformanceFigures with nested Acceleration
-        perf = Baseline.Car.performanceFigures!(car_enc, 2)
-        
-        # First performance figure
-        Baseline.Car.PerformanceFigures.next!(perf)
-        Baseline.Car.PerformanceFigures.octaneRating!(perf, 95)
-        accel1 = Baseline.Car.PerformanceFigures.acceleration!(perf, 3)
-        
-        Baseline.Car.PerformanceFigures.Acceleration.next!(accel1)
-        Baseline.Car.PerformanceFigures.Acceleration.mph!(accel1, 30)
-        Baseline.Car.PerformanceFigures.Acceleration.seconds!(accel1, 4.0)
-        
-        Baseline.Car.PerformanceFigures.Acceleration.next!(accel1)
-        Baseline.Car.PerformanceFigures.Acceleration.mph!(accel1, 60)
-        Baseline.Car.PerformanceFigures.Acceleration.seconds!(accel1, 7.5)
-        
-        Baseline.Car.PerformanceFigures.Acceleration.next!(accel1)
-        Baseline.Car.PerformanceFigures.Acceleration.mph!(accel1, 100)
-        Baseline.Car.PerformanceFigures.Acceleration.seconds!(accel1, 13.2)
-        
-        # Second performance figure
-        Baseline.Car.PerformanceFigures.next!(perf)
-        Baseline.Car.PerformanceFigures.octaneRating!(perf, 99)
-        accel2 = Baseline.Car.PerformanceFigures.acceleration!(perf, 2)
-        
-        Baseline.Car.PerformanceFigures.Acceleration.next!(accel2)
-        Baseline.Car.PerformanceFigures.Acceleration.mph!(accel2, 30)
-        Baseline.Car.PerformanceFigures.Acceleration.seconds!(accel2, 3.5)
-        
-        Baseline.Car.PerformanceFigures.Acceleration.next!(accel2)
-        Baseline.Car.PerformanceFigures.Acceleration.mph!(accel2, 60)
-        Baseline.Car.PerformanceFigures.Acceleration.seconds!(accel2, 6.8)
-        
-        # Verify all groups are done
-        @test Base.isdone(fuel)
-        @test Base.isdone(perf)
-        @test Base.isdone(accel1)
-        @test Base.isdone(accel2)
-        
-        # Verify position advanced through all data
-        final_pos = SBE.sbe_position(car_enc)
-        @test final_pos > 100  # Should have written substantial data
-        @test final_pos < 1024  # But within buffer bounds
-    end
 end

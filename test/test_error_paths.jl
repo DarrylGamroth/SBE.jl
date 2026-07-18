@@ -13,10 +13,11 @@ function expect_error(f::Function, needle::AbstractString)
 end
 
 @testset "Error Paths" begin
-    expect_error(
-        () -> SBE.parse_xml_schema("<badSchema/>"),
-        "Expected root element 'messageSchema'"
-    )
+    @testset "XML schema validation" begin
+        expect_error(
+            () -> SBE.parse_xml_schema("<badSchema/>"),
+            "Expected root element 'messageSchema'",
+        )
 
     enum_out_of_range = """
     <sbe:messageSchema xmlns:sbe="http://fixprotocol.io/2016/sbe" id="1" version="0">
@@ -161,6 +162,19 @@ end
         "Offset provides insufficient space at field: b"
     )
 
+    explicit_zero_overlap = """
+    <sbe:messageSchema xmlns:sbe="http://fixprotocol.io/2016/sbe" id="1" version="0">
+        <sbe:message name="BadZeroOffset" id="1">
+            <field name="a" id="1" type="uint32"/>
+            <field name="b" id="2" type="uint8" offset="0"/>
+        </sbe:message>
+    </sbe:messageSchema>
+    """
+    expect_error(
+        () -> SBE.parse_xml_schema(explicit_zero_overlap),
+        "Offset provides insufficient space at field: b"
+    )
+
     missing_field_type = """
     <sbe:messageSchema xmlns:sbe="http://fixprotocol.io/2016/sbe" id="1" version="0">
         <sbe:message name="MissingType" id="1">
@@ -172,8 +186,10 @@ end
         () -> SBE.parse_xml_schema(missing_field_type),
         "could not find type: Missing"
     )
+    end
 
-    invalid_value_ref = """
+    @testset "IR generation validation" begin
+        invalid_value_ref = """
     <sbe:messageSchema xmlns:sbe="http://fixprotocol.io/2016/sbe" id="1" version="0" headerType="hdr">
         <types>
             <composite name="hdr">
@@ -196,46 +212,63 @@ end
         () -> SBE.generate_ir(SBE.parse_xml_schema(invalid_value_ref)),
         "valueRef for validValue name not found: SELL"
     )
-
-    expect_error(
-        () -> SBE.generate("does-not-exist.xml"),
-        "Schema file not found: does-not-exist.xml"
-    )
-    expect_error(
-        () -> SBE.generate("does-not-exist.xml", "out.jl"),
-        "Schema file not found: does-not-exist.xml"
-    )
-
-    quoted = Expr(:block)
-    expect_error(
-        () -> SBE.extract_expr_from_quote(quoted),
-        "Failed to extract expression from quote block"
-    )
-    expect_error(
-        () -> SBE.extract_expr_from_quote(Expr(:block, :(x = 1)), :module),
-        "Failed to extract :module expression from quote block"
-    )
-
-    struct DummyGroup <: SBE.AbstractSbeGroup
-        count::Int
-        index::Int
-        position_ptr::SBE.PositionPointer
-        offset::Int
     end
-    SBE.sbe_acting_block_length(::DummyGroup) = 0
 
-    g = DummyGroup(1, 1, SBE.PositionPointer(), 0)
-    expect_error(
-        () -> SBE.next!(g),
-        "index >= count"
-    )
+    @testset "File generation" begin
+        expect_error(
+            () -> SBE.generate("does-not-exist.xml"),
+            "Schema file not found: does-not-exist.xml",
+        )
+        expect_error(
+            () -> SBE.generate("does-not-exist.xml", "out.jl"),
+            "Schema file not found: does-not-exist.xml",
+        )
+    end
 
-    buffer = zeros(UInt8, 12)
-    reinterpret(Int32, buffer)[1] = 0
-    reinterpret(Int32, buffer)[2] = 1
-    reinterpret(Int32, buffer)[3] = 0
-    expect_error(
-        () -> SBE.decode_ir(buffer),
-        "Unknown IR version: 1"
-    )
+    @testset "Expression extraction" begin
+        quoted = Expr(:block)
+        expect_error(
+            () -> SBE.extract_expr_from_quote(quoted),
+            "Failed to extract expression from quote block",
+        )
+        expect_error(
+            () -> SBE.extract_expr_from_quote(Expr(:block, :(x = 1)), :module),
+            "Failed to extract :module expression from quote block",
+        )
+    end
+
+    @testset "Group iteration" begin
+        struct DummyGroup <: SBE.AbstractSbeGroup
+            count::Int
+            index::Int
+            position_ptr::SBE.PositionPointer
+            offset::Int
+        end
+        SBE.sbe_acting_block_length(::DummyGroup) = 0
+
+        g = DummyGroup(1, 1, SBE.PositionPointer(), 0)
+        expect_error(
+            () -> SBE.next!(g),
+            "index >= count",
+        )
+    end
+
+    @testset "Primitive bounds checks" begin
+        short_buffer = UInt8[0x01]
+        @test_throws BoundsError SBE.decode_value_le(UInt64, short_buffer, 0)
+        @test_throws BoundsError SBE.encode_value_le(UInt64, short_buffer, 0, 1)
+        @test_throws BoundsError SBE.decode_value_be(UInt64, short_buffer, 0)
+        @test_throws BoundsError SBE.encode_value_be(UInt64, short_buffer, 0, 1)
+    end
+
+    @testset "IR decoding" begin
+        buffer = zeros(UInt8, 12)
+        reinterpret(Int32, buffer)[1] = 0
+        reinterpret(Int32, buffer)[2] = 1
+        reinterpret(Int32, buffer)[3] = 0
+        expect_error(
+            () -> SBE.decode_ir(buffer),
+            "Unknown IR version: 1",
+        )
+    end
 end

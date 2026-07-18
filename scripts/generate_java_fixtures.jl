@@ -21,7 +21,7 @@ end
 
 function main()
     root_dir = normpath(joinpath(@__DIR__, ".."))
-    sbe_version = get(ENV, "SBE_VERSION", "1.36.2")
+    sbe_version = get(ENV, "SBE_VERSION", "1.37.1")
     sbe_cache_dir = get(ENV, "SBE_CACHE_DIR", joinpath(homedir(), ".cache", "sbe"))
     sbe_group = "uk/co/real-logic"
     sbe_artifact = "sbe-all"
@@ -33,6 +33,8 @@ function main()
     schema = joinpath(root_dir, "test", "example-schema.xml")
     ext_schema = joinpath(root_dir, "test", "example-extension-schema.xml")
     codegen_schema = joinpath(root_dir, "test", "resources", "java-code-generation-schema.xml")
+    ir_schema = joinpath(root_dir, "test", "resources", "ir-basic-schema.xml")
+    ir_fixture_out = joinpath(root_dir, "test", "resources", "ir-basic-schema.sbeir")
 
     out_dir = joinpath(root_dir, "test", "java-fixtures", "generated")
     class_dir = joinpath(root_dir, "test", "java-fixtures", "classes")
@@ -60,10 +62,16 @@ function main()
     javac = java_executable("javac")
     java_opts = ["--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED"]
     codegen_opts = ["-Dsbe.keyword.append.token=_", "-Dsbe.target.language=java", "-Dsbe.output.dir=$(out_dir)"]
+    ir_opts = [
+        "-Dsbe.generate.stubs=false",
+        "-Dsbe.generate.ir=true",
+        "-Dsbe.output.dir=$(dirname(ir_fixture_out))",
+    ]
 
     run(Cmd([java; java_opts; codegen_opts; ["-jar", sbe_jar, schema]...]))
     run(Cmd([java; java_opts; codegen_opts; ["-jar", sbe_jar, ext_schema]...]))
     run(Cmd([java; java_opts; codegen_opts; ["-jar", sbe_jar, codegen_schema]...]))
+    run(Cmd([java; java_opts; ir_opts; ["-jar", sbe_jar, ir_schema]...]))
 
     java_sources = collect_java_sources(out_dir)
     generator_sources = [
@@ -86,6 +94,7 @@ function main()
     println("Wrote fixture to $(fixture_out)")
     println("Wrote fixture to $(ext_fixture_out)")
     println("Wrote fixture to $(codegen_fixture_out)")
+    println("Wrote fixture to $(ir_fixture_out)")
 end
 
 main()

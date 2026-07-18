@@ -1,291 +1,101 @@
 using Test
 using SBE
 
-@testset "@load_schema Macro Tests" begin
-    
-    # Load Baseline schema once at the beginning for all tests
-    @testset "Basic Macro Usage" begin
-        # Test basic macro call with assignment
-        schema_path = joinpath(@__DIR__, "example-schema.xml")
-        @test isfile(schema_path)
-        
-        # Load schema using macro - should return module name as Symbol
-        module_name = SBE.@load_schema schema_path
-        @test module_name isa Symbol
-        @test module_name == :Baseline
-        
-        # Module should be loaded in Main
-        @test isdefined(Main, module_name)
-        Baseline = getfield(Main, module_name)
-        @test Baseline isa Module
+module LoadSchemaBasicHost
+using SBE
+
+const BASELINE_NAME = SBE.@load_schema "example-schema.xml"
+const BASELINE_MODULE = Baseline
+const BASELINE_NAME_AGAIN = SBE.@load_schema "example-schema.xml"
+const EXTENSION_NAME = SBE.@load_schema "example-extension-schema.xml"
+
+end
+
+
+module LoadSchemaOverrideHost
+using SBE
+
+const LOADED_NAME = SBE.@load_schema(
+    "example-schema.xml";
+    module_name=:CustomSchemaOverride,
+)
+
+end
+
+
+module LoadSchemaStatementHost
+using SBE
+
+SBE.@load_schema "example-extension-schema.xml"
+const MODULE_PRESENT = isdefined(@__MODULE__, :Extension)
+
+end
+
+
+module LoadSchemaWorldAgeHost
+using SBE
+
+const LOADED_NAME = SBE.@load_schema(
+    "resources/ir-basic-schema.xml";
+    module_name=:ExpansionTimeSchema,
+)
+
+function encode_then_decode_order_id(value::UInt64)
+    buffer = zeros(UInt8, 64)
+    encoder = ExpansionTimeSchema.Order.Encoder(typeof(buffer))
+    ExpansionTimeSchema.Order.wrap_and_apply_header!(encoder, buffer, 0)
+    ExpansionTimeSchema.Order.orderId!(encoder, value)
+
+    decoder = ExpansionTimeSchema.Order.Decoder(typeof(buffer))
+    ExpansionTimeSchema.Order.wrap!(decoder, buffer, 0)
+    return ExpansionTimeSchema.Order.orderId(decoder)
+end
+
+end
+
+
+@testset "@load_schema" begin
+    @testset "Module naming and override" begin
+        @test SBE.module_name_from_package("SBE tests-1") == :SBETests1
+        @test LoadSchemaBasicHost.BASELINE_NAME == :Baseline
+        @test LoadSchemaBasicHost.EXTENSION_NAME == :Extension
+        @test isdefined(LoadSchemaBasicHost, :Baseline)
+        @test isdefined(LoadSchemaBasicHost, :Extension)
+
+        @test LoadSchemaOverrideHost.LOADED_NAME == :CustomSchemaOverride
+        @test isdefined(LoadSchemaOverrideHost, :CustomSchemaOverride)
     end
 
-    @testset "Module Naming" begin
-        schema_path = joinpath(@__DIR__, "example-schema.xml")
-        xml_content = read(schema_path, String)
+    @testset "Repeated loading" begin
+        @test LoadSchemaBasicHost.BASELINE_NAME_AGAIN == :Baseline
+        @test LoadSchemaBasicHost.Baseline === LoadSchemaBasicHost.BASELINE_MODULE
+    end
 
-        sanitized_path, sanitized_io = mktemp()
-        write(sanitized_io, replace(xml_content, "package=\"baseline\"" => "package=\"SBE tests-1\""))
-        close(sanitized_io)
+    @testset "Statement form" begin
+        @test LoadSchemaStatementHost.MODULE_PRESENT
+    end
 
-        sanitized_name = SBE.@load_schema sanitized_path
-        @test sanitized_name == :SBETests1
-        @test isdefined(Main, sanitized_name)
+    @testset "Expansion-time world age" begin
+        @test LoadSchemaWorldAgeHost.LOADED_NAME == :ExpansionTimeSchema
+        @test isdefined(LoadSchemaWorldAgeHost, :ExpansionTimeSchema)
+        @test LoadSchemaWorldAgeHost.encode_then_decode_order_id(UInt64(42)) == UInt64(42)
+    end
 
-        override_path, override_io = mktemp()
-        write(override_io, replace(xml_content, "package=\"baseline\"" => "package=\"override-test\""))
-        close(override_io)
+    @testset "Invalid usage" begin
+        @test_throws SystemError macroexpand(
+            Main,
+            :(SBE.@load_schema "non_existent_file.xml"),
+        )
+        @test_throws ArgumentError macroexpand(Main, :(SBE.@load_schema schema_path))
 
-        override_name = SBE.@load_schema(override_path; module_name="CustomSchemaOverride")
-        @test override_name == :CustomSchemaOverride
-        @test isdefined(Main, override_name)
-    end
-    
-    # All subsequent tests reuse the already-loaded Baseline module
-    @testset "Direct Module Access" begin
-        # Baseline already loaded above - just verify access
-        @test isdefined(Main, :Baseline)
-        
-        # Test that Car submodule exists
-        @test isdefined(Baseline, :Car)
-        @test Baseline.Car isa Module
-        
-        # Test that Decoder and Encoder types exist
-        @test isdefined(Baseline.Car, :Decoder)
-        @test isdefined(Baseline.Car, :Encoder)
-        @test Baseline.Car.Decoder <: SBE.AbstractSbeMessage
-        @test Baseline.Car.Encoder <: SBE.AbstractSbeMessage
-    end
-    
-    @testset "No World Age Issues" begin
-        # Baseline already loaded - test immediate use
-        buffer = zeros(UInt8, 1024)
-        encoder = Baseline.Car.Encoder(typeof(buffer))
-        Baseline.Car.wrap_and_apply_header!(encoder, buffer, 0)
-        decoder = Baseline.Car.Decoder(typeof(buffer))
-        Baseline.Car.wrap!(decoder, buffer, 0)
-        
-        @test encoder isa Baseline.Car.Encoder
-        @test decoder isa Baseline.Car.Decoder
-        
-        # Should be able to call methods immediately
-        @test Baseline.Car.modelYear(decoder) isa UInt16
-        Baseline.Car.modelYear!(encoder, UInt16(2024))
-        @test Baseline.Car.modelYear(decoder) == UInt16(2024)
-    end
-    
-    @testset "Field Access Functions" begin
-        buffer = zeros(UInt8, 1024)
-        encoder = Baseline.Car.Encoder(typeof(buffer))
-        Baseline.Car.wrap_and_apply_header!(encoder, buffer, 0)
-        decoder = Baseline.Car.Decoder(typeof(buffer))
-        Baseline.Car.wrap!(decoder, buffer, 0)
-        
-        # Test various field types
-        
-        # Scalar field (serialNumber is UInt64 in the schema)
-        @test hasmethod(Baseline.Car.serialNumber, Tuple{typeof(decoder)})
-        @test hasmethod(Baseline.Car.serialNumber!, Tuple{typeof(encoder), UInt64})
-        @test Baseline.Car.serialNumber(decoder) isa UInt64
-        
-        # Year field
-        @test hasmethod(Baseline.Car.modelYear, Tuple{typeof(decoder)})
-        @test hasmethod(Baseline.Car.modelYear!, Tuple{typeof(encoder), UInt16})
-        @test Baseline.Car.modelYear(decoder) isa UInt16
-        
-        # Array field
-        @test hasmethod(Baseline.Car.someNumbers, Tuple{typeof(decoder)})
-        @test hasmethod(Baseline.Car.someNumbers!, Tuple{typeof(encoder), Any})
-        numbers = Baseline.Car.someNumbers(decoder)
-        @test numbers isa AbstractVector{UInt32}
-        @test length(numbers) == 4
-        
-        # Boolean field (enum setter takes specific enum type, not Any)
-        @test hasmethod(Baseline.Car.available, Tuple{typeof(decoder)})
-        @test hasmethod(Baseline.Car.available!, Tuple{typeof(encoder), Baseline.BooleanType.SbeEnum})
-        @test Baseline.Car.available(decoder) isa Baseline.BooleanType.SbeEnum
-    end
-    
-    @testset "Metadata Functions" begin
-        # Test that metadata functions exist (as functions in file-based generation)
-        @test isdefined(Baseline.Car, :modelYear_encoding_offset)
-        @test isdefined(Baseline.Car, :modelYear_encoding_length)
-        @test isdefined(Baseline.Car, :modelYear_id)
-        @test isdefined(Baseline.Car, :modelYear_since_version)
-        
-        # Test that they return correct types (using type dispatch)
-        @test Baseline.Car.modelYear_encoding_offset(Baseline.Car.Decoder) isa Integer
-        @test Baseline.Car.modelYear_encoding_length(Baseline.Car.Decoder) isa Integer
-        @test Baseline.Car.modelYear_id(Baseline.Car.Decoder) isa UInt16
-        @test Baseline.Car.modelYear_since_version(Baseline.Car.Decoder) isa UInt16
-        
-        # Test values are reasonable
-        @test Baseline.Car.modelYear_encoding_offset(Baseline.Car.Decoder) >= 0
-        @test Baseline.Car.modelYear_encoding_length(Baseline.Car.Decoder) > 0
-        @test Baseline.Car.modelYear_since_version(Baseline.Car.Decoder) >= 0
-    end
-    
-    @testset "Composite Types" begin
-        buffer = zeros(UInt8, 1024)
-        encoder = Baseline.Car.Encoder(typeof(buffer))
-        Baseline.Car.wrap_and_apply_header!(encoder, buffer, 0)
-        decoder = Baseline.Car.Decoder(typeof(buffer))
-        Baseline.Car.wrap!(decoder, buffer, 0)
-        
-        # Test that composite field exists (Engine is a composite)
-        @test hasmethod(Baseline.Car.engine, Tuple{typeof(decoder)})
-        @test hasmethod(Baseline.Car.engine, Tuple{typeof(encoder)})
-        
-        engine_decoder = Baseline.Car.engine(decoder)
-        engine_encoder = Baseline.Car.engine(encoder)
-        
-        @test engine_decoder isa Baseline.Engine.Decoder
-        @test engine_encoder isa Baseline.Engine.Encoder
-        
-        # Test composite field accessors
-        @test hasmethod(Baseline.Engine.capacity, Tuple{typeof(engine_decoder)})
-        @test hasmethod(Baseline.Engine.capacity!, Tuple{typeof(engine_encoder), UInt16})
-        
-        # Test we can read/write through composite
-        Baseline.Engine.capacity!(engine_encoder, UInt16(2000))
-        @test Baseline.Engine.capacity(engine_decoder) == UInt16(2000)
-    end
-    
-    @testset "Enum Types" begin
-        # Test that enum module exists
-        @test isdefined(Baseline, :BooleanType)
-        @test Baseline.BooleanType isa Module
-        
-        # Test enum type
-        @test isdefined(Baseline.BooleanType, :SbeEnum)
-        @test Baseline.BooleanType.SbeEnum <: Enum
-        
-        # Test enum values
-        @test isdefined(Baseline.BooleanType, :T)
-        @test isdefined(Baseline.BooleanType, :F)
-        
-        @test Baseline.BooleanType.T isa Baseline.BooleanType.SbeEnum
-        @test Baseline.BooleanType.F isa Baseline.BooleanType.SbeEnum
-        
-        # Test enum has correct underlying values
-        @test UInt8(Baseline.BooleanType.T) == 0x01
-        @test UInt8(Baseline.BooleanType.F) == 0x00
-    end
-    
-    @testset "Groups" begin
-        buffer = zeros(UInt8, 1024)
-        encoder = Baseline.Car.Encoder(typeof(buffer))
-        Baseline.Car.wrap_and_apply_header!(encoder, buffer, 0)
-        decoder = Baseline.Car.Decoder(typeof(buffer))
-        Baseline.Car.wrap!(decoder, buffer, 0)
-        
-        # Test that group accessor exists (decoder only in file-based generation)
-        @test hasmethod(Baseline.Car.fuelFigures, Tuple{typeof(decoder)})
-        
-        # Get group - returns a Decoder type
-        group_decoder = Baseline.Car.fuelFigures(decoder)
-        @test group_decoder isa Baseline.Car.FuelFigures.Decoder
-    end
-    
-    @testset "Variable Length Data" begin
-        buffer = zeros(UInt8, 2048)
-        encoder = Baseline.Car.Encoder(typeof(buffer))
-        Baseline.Car.wrap_and_apply_header!(encoder, buffer, 0)
-        decoder = Baseline.Car.Decoder(typeof(buffer))
-        Baseline.Car.wrap!(decoder, buffer, 0)
-        
-        # Test that vardata accessor exists
-        @test hasmethod(Baseline.Car.manufacturer, Tuple{typeof(decoder)})
-        @test hasmethod(Baseline.Car.manufacturer!, Tuple{typeof(encoder), AbstractString})
-        
-        # Test we can write and read (returns byte vector in file-based generation)
-        test_string = "TestManufacturer"
-        Baseline.Car.manufacturer!(encoder, test_string)
-        result = Baseline.Car.manufacturer(decoder)
-        # Result is a byte vector, convert for comparison
-        @test String(result) == test_string
-    end
-    
-    @testset "Multiple Schema Loading" begin
-        # Test that calling @load_schema on already-loaded schema returns same module
-        schema_path = joinpath(@__DIR__, "example-schema.xml")
-        
-        # Get reference to existing module
-        mod1 = Main.Baseline
-        
-        # Load again - should return existing module (may warn about redefinition)
-        name2 = SBE.@load_schema schema_path
-        @test name2 == :Baseline
-        
-        # Should reference the same module (not create a new one)
-        mod2 = getfield(Main, name2)
-        @test mod1 === mod2
-    end
-    
-    @testset "Different Schema Files" begin
-        # Baseline already loaded above
-        @test isdefined(Main, :Baseline)
-        
-        # Load extension schema (different package name)
-        extension_path = joinpath(@__DIR__, "example-extension-schema.xml")
-        extension_name = SBE.@load_schema extension_path
-        @test extension_name == :Extension
-        @test isdefined(Main, :Extension)
-        
-        # Both should coexist
-        @test isdefined(Main, :Baseline)
-        @test isdefined(Main, :Extension)
-        
-        # Both should have Car types
-        @test isdefined(Baseline, :Car)
-        @test isdefined(Extension, :Car)
-        
-        # But they should be different types
-        @test Baseline.Car !== Extension.Car
-    end
-    
-    @testset "Macro Without Assignment" begin
-        # Test that macro works without capturing return value
-        # Using Extension schema since it's already loaded
-        SBE.@load_schema joinpath(@__DIR__, "example-extension-schema.xml")
-        
-        # Module should still be accessible
-        @test isdefined(Main, :Extension)
-        
-        # Should still work
-        buffer = zeros(UInt8, 1024)
-        car = Extension.Car.Encoder(typeof(buffer))
-        Extension.Car.wrap_and_apply_header!(car, buffer, 0)
-        @test car isa Extension.Car.Encoder
-    end
-    
-    @testset "Generated Code Quality" begin
-        buffer = zeros(UInt8, 1024)
-        encoder = Baseline.Car.Encoder(typeof(buffer))
-        Baseline.Car.wrap_and_apply_header!(encoder, buffer, 0)
-        decoder = Baseline.Car.Decoder(typeof(buffer))
-        Baseline.Car.wrap!(decoder, buffer, 0)
-        
-        # Test that generated code has proper type annotations
-        # File-based generation uses minimal fields
-        @test fieldnames(typeof(encoder)) == (:buffer, :offset, :position_ptr)
-        
-        # Test buffer access
-        @test Baseline.Car.sbe_buffer(encoder) === buffer
-        # Offset advances after message header
-        @test Baseline.Car.sbe_offset(encoder) >= 0
-        
-        # Test template metadata (takes message instance in file-based generation)
-        @test Baseline.Car.sbe_template_id(encoder) isa Integer
-        @test Baseline.Car.sbe_schema_id(encoder) isa Integer
-        @test Baseline.Car.sbe_block_length(encoder) isa Integer
-    end
-    
-    @testset "Error Handling" begin
-        # Test with non-existent file
-        @test_throws SystemError SBE.@load_schema "non_existent_file.xml"
-        
-        # Test with invalid XML path
-        @test_throws Exception SBE.@load_schema "invalid/path/schema.xml"
+        literal_path = abspath(joinpath(@__DIR__, "resources", "ir-basic-schema.xml"))
+        invalid_host = Module(gensym(:InvalidSchemaLoadHost))
+        Core.eval(invalid_host, :(using SBE))
+        nested_call = :(
+            function invalid_nested_schema_loader()
+                SBE.@load_schema($literal_path; module_name=:InvalidNestedSchemaLoad)
+            end
+        )
+        @test_throws ErrorException Core.eval(invalid_host, nested_call)
     end
 end

@@ -1,16 +1,7 @@
 using Test
-
-# SBE should already be loaded by runtests.jl
-# If running standalone, load it
-if !isdefined(Main, :SBE)
-    using Pkg
-    Pkg.activate(joinpath(@__DIR__, ".."))
-    using SBE
-end
+using SBE
 
 @testset "Display Methods" begin
-    # Use pre-generated Baseline module (loaded by runtests.jl)
-    
     @testset "Message Display" begin
         buffer = zeros(UInt8, 2048)
         encoder = Baseline.Car.Encoder(typeof(buffer))

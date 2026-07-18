@@ -2,18 +2,23 @@
 
 [![CI](https://github.com/DarrylGamroth/SBE.jl/actions/workflows/ci.yml/badge.svg)](https://github.com/DarrylGamroth/SBE.jl/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/DarrylGamroth/SBE.jl/branch/main/graph/badge.svg)](https://app.codecov.io/gh/DarrylGamroth/SBE.jl)
+[![Aqua QA](https://juliatesting.github.io/Aqua.jl/dev/assets/badge.svg)](https://github.com/JuliaTesting/Aqua.jl)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
 A high-performance Julia implementation of the [Simple Binary Encoding (SBE)](https://github.com/aeron-io/simple-binary-encoding) protocol for low-latency financial messaging.
 
 ## Overview
 
-SBE.jl generates zero-allocation, type-stable Julia code from SBE XML schemas. The implementation uses flyweight patterns to operate directly on byte buffers without intermediate object allocation, making it suitable for high-frequency trading and other performance-critical applications.
+SBE.jl generates type-stable Julia flyweight codecs from SBE XML schemas. Warmed,
+steady-state field access, group iteration, and raw variable-data operations are
+designed to run without heap allocation. Codec setup and materializing owned values
+such as `String` can allocate.
 
 ## Features
 
-- **Zero Allocation**: Direct buffer access using views and reinterpret
+- **Allocation-Conscious**: Reusable flyweights and zero-copy buffer views for hot paths
 - **Type Stable**: All types known at code generation time
-- **Full SBE Support**: Messages, groups, variable-length data, enums, sets, composites
+- **SBE Schema Support**: Messages, groups, variable-length data, enums, sets, and composites
 - **Version Handling**: Schema versioning with `sinceVersion` and `acting_version`
 - **Endianness**: Little-endian (default) and big-endian byte order
 - **Character Encodings**: ASCII and UTF-8 with zero-copy StringView
@@ -25,25 +30,30 @@ SBE.jl generates zero-allocation, type-stable Julia code from SBE XML schemas. T
 ```julia
 using SBE
 
-# Load schema and generate types at parse time
+# Top-level macro call: generate during expansion and define the codec module here.
 baseline_name = @load_schema "example-schema.xml"
-Baseline = getfield(Main, baseline_name)
+Baseline = getfield(@__MODULE__, baseline_name)
 ```
 
 You can override the generated module name:
 
 ```julia
 custom_name = @load_schema("example-schema.xml"; module_name="CustomSchema")
-CustomSchema = getfield(Main, custom_name)
+CustomSchema = getfield(@__MODULE__, custom_name)
 ```
+
+`@load_schema` must be used at top level with a literal path. In a source file,
+relative paths are resolved relative to that file; at the REPL they are resolved
+relative to the working directory. The macro emits the generated codec module into
+the calling module before later functions are defined, avoiding world-age problems
+without `Base.invokelatest`.
 
 ### Encoding a Message
 
 ```julia
 # Create buffer and encoder
 buffer = zeros(UInt8, 512)
-car = Baseline.Car.Encoder(typeof(buffer))
-Baseline.Car.wrap_and_apply_header!(car, buffer, 0)
+car = Baseline.Car.Encoder(buffer)
 
 # Set message fields
 Baseline.Car.serialNumber!(car, 12345)
@@ -85,8 +95,7 @@ encoded_length = SBE.sbe_encoded_length(car)
 
 ```julia
 # Create decoder from buffer
-car_decoder = Baseline.Car.Decoder(typeof(buffer))
-Baseline.Car.wrap!(car_decoder, buffer, 0)
+car_decoder = Baseline.Car.Decoder(buffer)
 
 # Read fields
 serial = Baseline.Car.serialNumber(car_decoder)
@@ -119,6 +128,24 @@ end
 manufacturer = Baseline.Car.manufacturer(car_decoder)
 model = Baseline.Car.model(car_decoder)
 activation = Baseline.Car.activationCode(car_decoder)
+```
+
+Generated setters return their encoder, fixed-length text rejects values that do
+not fit, and fields declared as ASCII reject non-ASCII strings. Repeating groups
+and variable-length data share a stateful cursor: access them in schema order and
+do not retain group entries as independent objects. Generated modules, codec
+types, fields, groups, enums, and set choices include schema-derived docstrings,
+so Julia's `?` help and editor hover documentation describe these contracts.
+
+For allocation-sensitive reuse, construct an unwrapped flyweight from the buffer
+type and wrap it repeatedly:
+
+```julia
+car = Baseline.Car.Encoder(typeof(buffer))
+Baseline.Car.wrap_and_apply_header!(car, buffer)
+
+car_decoder = Baseline.Car.Decoder(typeof(buffer))
+Baseline.Car.wrap!(car_decoder, buffer)
 ```
 
 ### Nested Groups
@@ -156,7 +183,7 @@ end
 
 ## IR API
 
-SBE.jl exposes a stable Intermediate Representation (IR) surface for tooling:
+SBE.jl exposes a public Intermediate Representation (IR) surface for tooling:
 
 ```julia
 ir = SBE.generate_ir_file("example-schema.xml")
@@ -164,12 +191,35 @@ messages = SBE.IR.ir_messages(ir)
 schema_id = SBE.IR.ir_id(ir)
 ```
 
+Java-produced `.sbeir` files can be decoded and used to generate the same Julia
+codec source as XML-derived IR:
+
+```julia
+# Generate source or a normal includable Julia file.
+code = SBE.generate_from_ir("example-schema.sbeir"; module_name=:Baseline)
+SBE.generate_from_ir(
+    "example-schema.sbeir",
+    "generated/Baseline.jl";
+    module_name=:Baseline,
+)
+
+# Or generate and define the module at expansion time.
+baseline_name = SBE.@load_sbeir(
+    "example-schema.sbeir";
+    module_name=:Baseline,
+)
+```
+
+`@load_sbeir` has the same top-level, literal-path, caller-module, and world-age
+semantics as `@load_schema`. SBE.jl does not currently serialize IR back to
+`.sbeir`.
+
 ## Benchmarks
 
 Benchmarks cover encode-only, decode-only, and round-trip paths:
 
 ```bash
-julia --project=benchmark -e 'using Pkg; Pkg.develop(path=".."); Pkg.instantiate()'
+julia --project=benchmark -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
 julia --project=benchmark benchmark/benchmarks.jl
 ```
 
@@ -193,7 +243,8 @@ Validation can be configured during parsing and generation:
 ```julia
 SBE.generate("example-schema.xml", "generated/Baseline.jl"; warnings_fatal=true)
 SBE.parse_xml_schema(read("example-schema.xml", String); suppress_warnings=true)
-Baseline = @load_schema("example-schema.xml"; warnings_fatal=true)
+baseline_name = @load_schema("example-schema.xml"; warnings_fatal=true)
+Baseline = getfield(@__MODULE__, baseline_name)
 ```
 
 This approach:
@@ -205,7 +256,8 @@ This approach:
 ## Documentation
 
 - **[Usage Guide](docs/USAGE.md)** - Comprehensive API guide and examples
-- **[spec.md](spec.md)** - Architecture plan and parity checklist
+- **[SbeTool Compatibility](docs/SBETOOL_COMPATIBILITY.md)** - Pinned upstream evidence and support boundaries
+- **[Architecture](docs/ARCHITECTURE.md)** - XML/IR/code-generation pipeline and support boundaries
 
 ## Testing
 
@@ -213,35 +265,52 @@ This approach:
 # Run all tests
 julia --project -e 'using Pkg; Pkg.test()'
 
-# Run specific test
-julia --project test/test_groups.jl
+# Run one or more test files through the shared fixture runner
+julia --project -e 'using Pkg; Pkg.test(test_args=["test_groups"])'
+julia --project -e 'using Pkg; Pkg.test(test_args=["test_groups", "test_vardata"])'
 
 # Generate Java fixtures (used for parity tests)
 julia --project=. scripts/generate_java_fixtures.jl
 ```
 
-Current status: **1043 tests passing**
+The runner generates test codecs into a fresh temporary directory and loads each
+fixture once in an isolated module. The suite covers generated-code behavior,
+validation, Java interoperability, and QA checks.
 
 ## Performance
 
-SBE.jl achieves **zero allocation** for message encoding/decoding:
-- Direct buffer access via views
-- No intermediate object creation
-- Type-stable code generation
-- Optimal memory layout
+SBE.jl targets **zero heap allocation after warmup** for reusable flyweight hot
+paths. Fixed fields, raw buffer views, repeating-group iteration, and variable-data
+byte access operate directly on caller-owned storage. Creating codec state (including
+its position pointer) and requesting owned results such as `String` may allocate.
+
+- Reuse codecs with `wrap!` and `wrap_and_apply_header!` in allocation-sensitive loops.
+- Prefer raw byte or `StringView` accessors when an owned `String` is unnecessary.
+- Use the benchmark suite and committed allocation tests for representative evidence.
 
 See `docs/USAGE.md` for usage notes and performance considerations.
 
 ## Binary Compatibility
 
-SBE.jl is binary-compatible with the official sbe-tool:
-- Can decode messages encoded by sbe-tool
-- sbe-tool can decode messages encoded by SBE.jl
-- Identical byte layouts for all types
+SBE.jl is tested for binary interoperability with SbeTool 1.37.1:
+- Decodes the Java fixtures produced by SbeTool
+- Produces messages accepted by the generated Java codecs
+- Matches all 79 upstream fixture acceptance decisions and the normalized IR for all
+  66 fixtures accepted by both tools
+- Resolves the relative XInclude case exercised by the upstream parser suite
 
-See `docs/USAGE.md` for compatibility and generator details.
+The complete pinned fixture, schema, and IR differential can be rerun with
+`scripts/check_sbetool_schema_compat.jl` against an SbeTool checkout and jar.
+
+See `docs/SBETOOL_COMPATIBILITY.md` for the evidence ledger and explicit support
+boundaries. This is an interoperability claim, not formal FIX conformance certification.
 
 ## References
 
 - [SBE Specification](https://github.com/aeron-io/simple-binary-encoding)
 - [FIX SBE Documentation](https://github.com/FIXTradingCommunity/fix-simple-binary-encoding)
+
+## License
+
+SBE.jl is licensed under the [Apache License 2.0](LICENSE). Copyright 2025-2026
+Rubus Technologies Inc.; see [NOTICE](NOTICE).

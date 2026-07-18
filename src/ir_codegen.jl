@@ -14,6 +14,7 @@ end
 
 struct IrEnumDef
     name::String
+    description::String
     encoding_type::IR.PrimitiveType.T
     null_value::Union{Nothing, IR.PrimitiveValue}
     values::Vector{IrEnumValue}
@@ -26,6 +27,7 @@ end
 
 struct IrCompositeDef
     name::String
+    description::String
     members::Vector{IrCompositeMember}
     encoded_length::Int
     semantic_type::Union{Nothing, String}
@@ -41,51 +43,12 @@ end
 
 struct IrSetDef
     name::String
+    description::String
     encoding_type::IR.PrimitiveType.T
     choices::Vector{IrSetChoice}
     since_version::Int
     offset::Int
 end
-
-const JULIA_KEYWORDS = Set([
-    "abstract",
-    "baremodule",
-    "begin",
-    "break",
-    "catch",
-    "const",
-    "continue",
-    "do",
-    "else",
-    "elseif",
-    "end",
-    "export",
-    "false",
-    "finally",
-    "for",
-    "function",
-    "global",
-    "if",
-    "import",
-    "let",
-    "local",
-    "macro",
-    "module",
-    "mutable",
-    "new",
-    "primitive",
-    "quote",
-    "return",
-    "struct",
-    "true",
-    "try",
-    "using",
-    "where",
-    "while",
-    "_",
-    "Enum",
-    "Set",
-])
 
 const RESERVED_IDENTIFIERS = Set([
     "Any",
@@ -158,6 +121,201 @@ function format_choice_name(name::String)
         return format_struct_name(name)
     end
     return format_property_name(name)
+end
+
+function generated_doc_expr(documentation::String, documented_expr)
+    return Expr(
+        :macrocall,
+        Expr(:., :Base, QuoteNode(Symbol("@doc"))),
+        LineNumberNode(0, Symbol("ir_codegen")),
+        documentation,
+        documented_expr
+    )
+end
+
+function generated_binding_doc_expr(documentation::String, binding)
+    return generated_doc_expr(documentation, binding)
+end
+
+function description_or_default(description::String, default::String)
+    stripped = strip(description)
+    return isempty(stripped) ? default : stripped
+end
+
+function presence_name(token::IR.Token)
+    presence = token.encoding.presence
+    presence == IR.Presence.CONSTANT && return "constant"
+    presence == IR.Presence.OPTIONAL && return "optional"
+    return "required"
+end
+
+function schema_metadata_doc(token::IR.Token; kind::String="field")
+    metadata = "SBE $kind `$(token.name)`: id=$(token.id), presence=$(presence_name(token)), sinceVersion=$(token.version)"
+    token.deprecated > 0 && (metadata *= ", deprecated=$(token.deprecated)")
+    return metadata * "."
+end
+
+function field_accessor_doc(field_tokens::Vector{IR.Token})
+    field_token = field_tokens[1]
+    value_token = field_tokens[2]
+    accessor = format_property_name(field_token.name)
+    description = description_or_default(
+        field_token.description,
+        "Access the `$(field_token.name)` field."
+    )
+    encoder_signature = if value_token.signal == IR.Signal.BEGIN_SET ||
+                           value_token.signal == IR.Signal.BEGIN_COMPOSITE
+        "\n    $accessor(encoder)"
+    elseif value_token.encoding.presence != IR.Presence.CONSTANT
+        "\n    $(accessor)!(encoder, value) -> encoder"
+    else
+        ""
+    end
+    return """
+        $accessor(decoder)$encoder_signature
+
+    $description
+
+    $(schema_metadata_doc(field_token))
+    """
+end
+
+function field_has_setter(field_tokens::Vector{IR.Token})
+    value_token = field_tokens[2]
+    return (value_token.signal == IR.Signal.ENCODING ||
+            value_token.signal == IR.Signal.BEGIN_ENUM) &&
+           value_token.encoding.presence != IR.Presence.CONSTANT
+end
+
+function var_data_accessor_doc(var_data_tokens::Vector{IR.Token})
+    field_token = var_data_tokens[1]
+    data_token = find_first_token("varData", var_data_tokens, 1)
+    accessor = format_property_name(field_token.name)
+    encoding = data_token.encoding.character_encoding
+    encoding_note = encoding === nothing ? "binary data" : "$encoding text"
+    default_return = data_token.encoding.primitive_type == IR.PrimitiveType.CHAR ?
+        "AbstractString" : "AbstractVector{UInt8}"
+    description = description_or_default(
+        field_token.description,
+        "Access the `$(field_token.name)` variable-length $encoding_note field."
+    )
+    return """
+        $accessor(decoder) -> $default_return
+        $accessor(decoder, String) -> String
+        $(accessor)!(encoder, value) -> encoder
+
+    $description
+
+    $(schema_metadata_doc(field_token; kind="variable-data field")) Reading or writing advances the shared message position. Access variable-length fields and repeating groups in schema order.
+    """
+end
+
+
+function group_accessor_doc(group_token::IR.Token)
+    accessor = format_property_name(group_token.name)
+    description = description_or_default(
+        group_token.description,
+        "Access the `$(group_token.name)` repeating group."
+    )
+    return """
+        $accessor(decoder)
+        $(accessor)!(encoder, count)
+
+    $description
+
+    $(schema_metadata_doc(group_token; kind="repeating group")) Accessing or iterating the group advances the shared message position. Iteration reuses one mutable flyweight entry; do not retain entries as independent values.
+    """
+end
+
+
+function composite_member_accessor_doc(token::IR.Token; has_setter::Bool=true)
+    accessor = format_property_name(token.name)
+    description = description_or_default(
+        token.description,
+        "Access the `$(token.name)` composite member."
+    )
+    setter_signature = !has_setter || token.encoding.presence == IR.Presence.CONSTANT ? "" :
+        "\n    $(accessor)!(encoder, value) -> encoder"
+    return """
+        $accessor(decoder)$setter_signature
+
+    $description
+
+    $(schema_metadata_doc(token; kind="composite member"))
+    """
+end
+
+
+function codec_type_doc(
+    type_name::AbstractString,
+    description::String,
+    kind::String;
+    extra::String=""
+)
+    body = description_or_default(description, "Generated SBE $kind `$type_name`.")
+    suffix = isempty(extra) ? "" : "\n\n$extra"
+    return "$body$suffix"
+end
+
+
+function message_codec_doc(msg_token::IR.Token, ir::IR.Ir)
+    body = description_or_default(
+        msg_token.description,
+        "Generated SBE message codec `$(msg_token.name)`."
+    )
+    return """
+    $body
+
+    Template ID $(msg_token.id), schema ID $(ir.id), schema version $(ir.version), fixed block length $(msg_token.encoded_length) bytes.
+
+    This is a zero-copy flyweight codec. Fixed fields support random access; repeating groups and variable-length data share a mutable cursor and must be traversed in schema order.
+    """
+end
+
+
+function group_codec_doc(group_token::IR.Token)
+    body = description_or_default(
+        group_token.description,
+        "Generated codec for the `$(group_token.name)` repeating group."
+    )
+    return """
+    $body
+
+    Iteration advances the parent message cursor and reuses one mutable flyweight entry. Consume fields before advancing and do not retain entries as independent values.
+    """
+end
+
+
+function schema_module_doc(ir::IR.Ir, module_name::Symbol)
+    body = description_or_default(
+        ir.description,
+        "Generated SBE codec module `$module_name`."
+    )
+    return """
+    $body
+
+    SBE package `$(ir.package_name)`, schema ID $(ir.id), schema version $(ir.version), semantic version `$(ir.semantic_version)`, byte order `$(ir.byte_order)`.
+    """
+end
+
+
+function character_encoding_kind(encoding::Union{Nothing, String})
+    encoding === nothing && return :raw
+    normalized = uppercase(replace(strip(encoding), '_' => '-', ' ' => '-'))
+    normalized in ("ASCII", "US-ASCII") && return :ascii
+    normalized in ("UTF8", "UTF-8") && return :utf8
+    return :unsupported
+end
+
+function string_encoding_guard_expr(encoding::Union{Nothing, String}, value_name::Symbol)
+    kind = character_encoding_kind(encoding)
+    if kind == :ascii
+        return :(@boundscheck isascii($value_name) || throw(ArgumentError("value is not valid ASCII")))
+    elseif kind == :utf8 || kind == :raw
+        return :(nothing)
+    end
+    message = "unsupported character encoding: $encoding"
+    return :(throw(ArgumentError($message)))
 end
 
 function relative_using_expr(depth::Int, name::Symbol)
@@ -258,7 +416,7 @@ function enum_def_from_tokens(tokens::Vector{IR.Token})
             push!(values, IrEnumValue(token.name, literal, token.description, token.version, token.deprecated))
         end
     end
-    return IrEnumDef(enum_name, encoding_type, null_value, values)
+    return IrEnumDef(enum_name, begin_token.description, encoding_type, null_value, values)
 end
 
 function composite_def_from_tokens(tokens::Vector{IR.Token})
@@ -284,6 +442,7 @@ function composite_def_from_tokens(tokens::Vector{IR.Token})
 
     return IrCompositeDef(
         composite_name,
+        begin_token.description,
         members,
         begin_token.encoded_length,
         begin_token.encoding.semantic_type
@@ -384,7 +543,10 @@ function generate_composite_member_expr(
                 return decode_value($julia_type, m.buffer, m.offset + $(token.offset))
             end
 
-            @inline $(Symbol(member_name, :!))(m::$encoder_name, val) = encode_value($julia_type, m.buffer, m.offset + $(token.offset), val)
+            @inline function $(Symbol(member_name, :!))(m::$encoder_name, val)
+                encode_value($julia_type, m.buffer, m.offset + $(token.offset), val)
+                return m
+            end
 
             export $member_name, $(Symbol(member_name, :!))
         end)
@@ -393,6 +555,11 @@ function generate_composite_member_expr(
 
     is_char_array = primitive_type == IR.PrimitiveType.CHAR
     if is_char_array
+        string_guard = string_encoding_guard_expr(
+            something(token.encoding.character_encoding, "ASCII"),
+            :value
+        )
+        length_error = "value exceeds fixed encoded length $array_len"
         push!(exprs, :(using StringViews: StringView))
         push!(exprs, quote
             @inline function $member_name(m::$decoder_name)
@@ -407,22 +574,27 @@ function generate_composite_member_expr(
             end
 
             @inline function $(Symbol(member_name, :!))(m::$encoder_name, value::AbstractString)
+                $string_guard
                 bytes = codeunits(value)
                 dest = encode_array($julia_type, m.buffer, m.offset + $(token.offset), $array_len)
-                len = min(Base.length(bytes), Base.length(dest))
+                len = Base.length(bytes)
+                @boundscheck len <= Base.length(dest) || throw(ArgumentError($length_error))
                 copyto!(dest, 1, bytes, 1, len)
                 if len < Base.length(dest)
                     fill!(view(dest, len+1:Base.length(dest)), 0x00)
                 end
+                return m
             end
 
             @inline function $(Symbol(member_name, :!))(m::$encoder_name, value::AbstractVector{UInt8})
                 dest = encode_array($julia_type, m.buffer, m.offset + $(token.offset), $array_len)
-                len = min(Base.length(value), Base.length(dest))
+                len = Base.length(value)
+                @boundscheck len <= Base.length(dest) || throw(ArgumentError($length_error))
                 copyto!(dest, 1, value, 1, len)
                 if len < Base.length(dest)
                     fill!(view(dest, len+1:Base.length(dest)), 0x00)
                 end
+                return m
             end
 
             export $member_name, $(Symbol(member_name, :!))
@@ -451,6 +623,7 @@ function generate_composite_member_expr(
 
         @inline function $(Symbol(member_name, :!))(m::$encoder_name, val)
             copyto!($(Symbol(member_name, :!))(m), val)
+            return m
         end
 
         @inline function $(Symbol(member_name, :!))(m::$encoder_name, val::T) where {T<:NTuple}
@@ -463,6 +636,7 @@ function generate_composite_member_expr(
             @inbounds for i in 1:$array_len
                 dest[i] = val[i]
             end
+            return m
         end
 
         export $member_name, $(Symbol(member_name, :!))
@@ -508,7 +682,10 @@ function generate_composite_enum_accessor(
 
         @inline function $(Symbol(member_name, :!))(m::$encoder_name, val)
             encode_value($julia_type_symbol, m.buffer, m.offset + $offset, $julia_type_symbol(val))
+            return m
         end
+
+        export $member_name, $(Symbol(member_name, :!))
     end)
 
     return exprs
@@ -550,6 +727,8 @@ function generate_composite_set_accessor(
         @inline function $member_name(m::$encoder_name)
             return $set_module.Encoder(m.buffer, m.offset + $offset)
         end
+
+        export $member_name
     end)
 
     return exprs
@@ -589,6 +768,8 @@ function generate_composite_composite_accessor(
         @inline function $member_name(m::$encoder_name)
             return $composite_module.Encoder(m.buffer, m.offset + $offset)
         end
+
+        export $member_name
     end)
 
     return exprs
@@ -602,6 +783,7 @@ function generate_composite_expr(composite_def::IrCompositeDef, ir::IR.Ir)
     version_type_symbol = header_field_type(ir, "version")
 
     field_exprs = Expr[]
+    field_doc_exprs = Expr[]
     var_data_exprs = Expr[]
     skip_calls = Expr[]
     group_exprs = Expr[]
@@ -611,6 +793,29 @@ function generate_composite_expr(composite_def::IrCompositeDef, ir::IR.Ir)
 
     for member in composite_def.members
         tokens = member.tokens
+        member_name = composite_member_field_name(tokens[1].name)
+        has_setter = member.signal == IR.Signal.ENCODING ||
+            member.signal == IR.Signal.BEGIN_ENUM
+        documentation = composite_member_accessor_doc(
+            tokens[1];
+            has_setter=has_setter
+        )
+        push!(
+            field_doc_exprs,
+            generated_binding_doc_expr(
+                documentation,
+                member_name
+            )
+        )
+        if has_setter && tokens[1].encoding.presence != IR.Presence.CONSTANT
+            push!(
+                field_doc_exprs,
+                generated_binding_doc_expr(
+                    documentation,
+                    Symbol(member_name, :!)
+                )
+            )
+        end
         if member.signal == IR.Signal.ENCODING
             append!(field_exprs, generate_composite_member_expr(tokens[1], abstract_type_name, decoder_name, encoder_name, ir))
         elseif member.signal == IR.Signal.BEGIN_ENUM
@@ -659,6 +864,19 @@ function generate_composite_expr(composite_def::IrCompositeDef, ir::IR.Ir)
                 offset::Int64
             end
 
+            $(generated_binding_doc_expr(
+                "Abstract flyweight type for the generated `$(composite_def.name)` composite codec.",
+                abstract_type_name
+            ))
+            $(generated_binding_doc_expr(
+                "Zero-copy decoder for the `$(composite_def.name)` SBE composite.",
+                decoder_name
+            ))
+            $(generated_binding_doc_expr(
+                "Zero-copy encoder for the `$(composite_def.name)` SBE composite.",
+                encoder_name
+            ))
+
             @inline function $decoder_name(buffer::AbstractArray{UInt8})
                 $decoder_name(buffer, Int64(0), $(version_expr(ir, ir.version)))
             end
@@ -694,12 +912,22 @@ function generate_composite_expr(composite_def::IrCompositeDef, ir::IR.Ir)
             end
 
             $(field_exprs...)
+            $(field_doc_exprs...)
 
             export $abstract_type_name, $decoder_name, $encoder_name
         end
     end
 
-    return extract_expr_from_quote(composite_quoted, :module)
+    module_expr = extract_expr_from_quote(composite_quoted, :module)
+    return generated_doc_expr(
+        codec_type_doc(
+            composite_def.name,
+            composite_def.description,
+            "composite";
+            extra="Encoded length: $(composite_def.encoded_length) bytes."
+        ),
+        module_expr
+    )
 end
 
 function split_components(tokens::Vector{IR.Token}, signal::IR.Signal.T, start_index::Int)
@@ -808,7 +1036,10 @@ function generate_encoded_field_expr(
                     return decode_value($julia_type, m.buffer, m.offset + $(field_token.offset))
                 end
 
-                @inline $(Symbol(field_name, :!))(m::$encoder_name, val) = encode_value($julia_type, m.buffer, m.offset + $(field_token.offset), val)
+                @inline function $(Symbol(field_name, :!))(m::$encoder_name, val)
+                    encode_value($julia_type, m.buffer, m.offset + $(field_token.offset), val)
+                    return m
+                end
 
                 export $field_name, $(Symbol(field_name, :!))
             end)
@@ -818,7 +1049,10 @@ function generate_encoded_field_expr(
                     return decode_value($julia_type, m.buffer, m.offset + $(field_token.offset))
                 end
 
-                @inline $(Symbol(field_name, :!))(m::$encoder_name, val) = encode_value($julia_type, m.buffer, m.offset + $(field_token.offset), val)
+                @inline function $(Symbol(field_name, :!))(m::$encoder_name, val)
+                    encode_value($julia_type, m.buffer, m.offset + $(field_token.offset), val)
+                    return m
+                end
 
                 export $field_name, $(Symbol(field_name, :!))
             end)
@@ -828,6 +1062,11 @@ function generate_encoded_field_expr(
 
     is_char_array = primitive_type == IR.PrimitiveType.CHAR
     if is_char_array
+        string_guard = string_encoding_guard_expr(
+            something(encoding_token.encoding.character_encoding, "ASCII"),
+            :value
+        )
+        length_error = "value exceeds fixed encoded length $array_len"
         push!(exprs, :(using StringViews: StringView))
         if field_token.version > 0
             null_val = encoding_literal(encoding_token.encoding.null_value, primitive_type, IR.primitive_type_null)
@@ -847,22 +1086,27 @@ function generate_encoded_field_expr(
                 end
 
                 @inline function $(Symbol(field_name, :!))(m::$encoder_name, value::AbstractString)
+                    $string_guard
                     bytes = codeunits(value)
                     dest = encode_array($julia_type, m.buffer, m.offset + $(field_token.offset), $array_len)
-                    len = min(Base.length(bytes), Base.length(dest))
+                    len = Base.length(bytes)
+                    @boundscheck len <= Base.length(dest) || throw(ArgumentError($length_error))
                     copyto!(dest, 1, bytes, 1, len)
                     if len < Base.length(dest)
                         fill!(view(dest, len+1:Base.length(dest)), 0x00)
                     end
+                    return m
                 end
 
                 @inline function $(Symbol(field_name, :!))(m::$encoder_name, value::AbstractVector{UInt8})
                     dest = encode_array($julia_type, m.buffer, m.offset + $(field_token.offset), $array_len)
-                    len = min(Base.length(value), Base.length(dest))
+                    len = Base.length(value)
+                    @boundscheck len <= Base.length(dest) || throw(ArgumentError($length_error))
                     copyto!(dest, 1, value, 1, len)
                     if len < Base.length(dest)
                         fill!(view(dest, len+1:Base.length(dest)), 0x00)
                     end
+                    return m
                 end
 
                 export $field_name, $(Symbol(field_name, :!))
@@ -881,22 +1125,27 @@ function generate_encoded_field_expr(
                 end
 
                 @inline function $(Symbol(field_name, :!))(m::$encoder_name, value::AbstractString)
+                    $string_guard
                     bytes = codeunits(value)
                     dest = encode_array($julia_type, m.buffer, m.offset + $(field_token.offset), $array_len)
-                    len = min(Base.length(bytes), Base.length(dest))
+                    len = Base.length(bytes)
+                    @boundscheck len <= Base.length(dest) || throw(ArgumentError($length_error))
                     copyto!(dest, 1, bytes, 1, len)
                     if len < Base.length(dest)
                         fill!(view(dest, len+1:Base.length(dest)), 0x00)
                     end
+                    return m
                 end
 
                 @inline function $(Symbol(field_name, :!))(m::$encoder_name, value::AbstractVector{UInt8})
                     dest = encode_array($julia_type, m.buffer, m.offset + $(field_token.offset), $array_len)
-                    len = min(Base.length(value), Base.length(dest))
+                    len = Base.length(value)
+                    @boundscheck len <= Base.length(dest) || throw(ArgumentError($length_error))
                     copyto!(dest, 1, value, 1, len)
                     if len < Base.length(dest)
                         fill!(view(dest, len+1:Base.length(dest)), 0x00)
                     end
+                    return m
                 end
 
                 export $field_name, $(Symbol(field_name, :!))
@@ -933,6 +1182,7 @@ function generate_encoded_field_expr(
 
             @inline function $(Symbol(field_name, :!))(m::$encoder_name, val)
                 copyto!($(Symbol(field_name, :!))(m), val)
+                return m
             end
 
             @inline function $(Symbol(field_name, :!))(m::$encoder_name, val::T) where {T<:NTuple}
@@ -945,6 +1195,7 @@ function generate_encoded_field_expr(
                 @inbounds for i in 1:$array_len
                     dest[i] = val[i]
                 end
+                return m
             end
 
             export $field_name, $(Symbol(field_name, :!))
@@ -971,6 +1222,7 @@ function generate_encoded_field_expr(
 
             @inline function $(Symbol(field_name, :!))(m::$encoder_name, val)
                 copyto!($(Symbol(field_name, :!))(m), val)
+                return m
             end
 
             @inline function $(Symbol(field_name, :!))(m::$encoder_name, val::T) where {T<:NTuple}
@@ -983,6 +1235,7 @@ function generate_encoded_field_expr(
                 @inbounds for i in 1:$array_len
                     dest[i] = val[i]
                 end
+                return m
             end
 
             export $field_name, $(Symbol(field_name, :!))
@@ -1099,6 +1352,7 @@ function generate_enum_field_expr(
 
             @inline function $(Symbol(field_name, :!))(m::$encoder_name, value::$enum_module.SbeEnum)
                 encode_value($julia_type_symbol, m.buffer, m.offset + $offset, $julia_type_symbol(value))
+                return m
             end
 
             export $field_name, $(Symbol(field_name, :!))
@@ -1118,6 +1372,7 @@ function generate_enum_field_expr(
 
         @inline function $(Symbol(field_name, :!))(m::$encoder_name, value::$enum_module.SbeEnum)
             encode_value($julia_type_symbol, m.buffer, m.offset + $offset, $julia_type_symbol(value))
+            return m
         end
 
         export $field_name, $(Symbol(field_name, :!))
@@ -1239,6 +1494,10 @@ function generate_var_data_expr(
     max_literal = encoding_literal(length_token.encoding.max_value, length_token.encoding.primitive_type, IR.primitive_type_max)
     returns_string = var_data_token.encoding.primitive_type == IR.PrimitiveType.CHAR
     bytes_accessor = Symbol(string(accessor_name, "_bytes"))
+    string_guard = string_encoding_guard_expr(
+        var_data_token.encoding.character_encoding,
+        :src
+    )
 
     exprs = Expr[]
 
@@ -1277,14 +1536,25 @@ function generate_var_data_expr(
 
     push!(exprs, quote
         @inline function $length_name_setter(m::$encoder_name, n)
-            @boundscheck n > $max_literal && throw(ArgumentError("length exceeds schema limit"))
+            @boundscheck (n < 0 || n > $max_literal) && throw(ArgumentError("length outside schema limit"))
             @boundscheck checkbounds(m.buffer, sbe_position(m) + $header_length + n)
             return encode_value($length_type, m.buffer, sbe_position(m), $length_type_symbol(n))
         end
     end)
 
+    skip_missing_guard = if since_version > 0
+        quote
+            if sbe_acting_version(m) < $(version_expr(ir, since_version))
+                return $length_type_symbol(0)
+            end
+        end
+    else
+        :(nothing)
+    end
+
     push!(exprs, quote
         @inline function $skip_name(m::$decoder_name)
+            $skip_missing_guard
             len = $length_name(m)
             pos = sbe_position(m) + $header_length
             sbe_position!(m, pos + len)
@@ -1292,9 +1562,21 @@ function generate_var_data_expr(
         end
     end)
 
+    empty_view_guard = if since_version > 0
+        quote
+            if sbe_acting_version(m) < $(version_expr(ir, since_version))
+                pos = sbe_position(m)
+                return view(m.buffer, pos+1:pos)
+            end
+        end
+    else
+        :(nothing)
+    end
+
     if returns_string
         push!(exprs, quote
             @inline function $bytes_accessor(m::$decoder_name)
+                $empty_view_guard
                 len = $length_name(m)
                 pos = sbe_position(m) + $header_length
                 sbe_position!(m, pos + len)
@@ -1309,6 +1591,7 @@ function generate_var_data_expr(
     else
         push!(exprs, quote
             @inline function $accessor_name(m::$decoder_name)
+                $empty_view_guard
                 len = $length_name(m)
                 pos = sbe_position(m) + $header_length
                 sbe_position!(m, pos + len)
@@ -1334,6 +1617,7 @@ function generate_var_data_expr(
             sbe_position!(m, pos + len)
             dest = view(m.buffer, pos+1:pos+len)
             copyto!(dest, reinterpret(UInt8, src))
+            return m
         end
     end)
 
@@ -1345,24 +1629,30 @@ function generate_var_data_expr(
             sbe_position!(m, pos + len)
             dest = view(m.buffer, pos+1:pos+len)
             copyto!(dest, reinterpret(NTuple{len,UInt8}, src))
+            return m
         end
     end)
 
     push!(exprs, quote
         @inline function $accessor_setter(m::$encoder_name, src::AbstractString)
+            $string_guard
             len = sizeof(src)
             $length_name_setter(m, len)
             pos = sbe_position(m) + $header_length
             sbe_position!(m, pos + len)
             dest = view(m.buffer, pos+1:pos+len)
             copyto!(dest, codeunits(src))
+            return m
         end
     end)
 
     push!(exprs, quote
         @inline $accessor_setter(m::$encoder_name, src::Symbol) = $accessor_setter(m, to_string(src))
         @inline $accessor_setter(m::$encoder_name, src::Real) = $accessor_setter(m, Tuple(src))
-        @inline $accessor_setter(m::$encoder_name, ::Nothing) = $buffer_name(m, 0)
+        @inline function $accessor_setter(m::$encoder_name, ::Nothing)
+            $buffer_name(m, 0)
+            return m
+        end
     end)
 
     push!(exprs, quote
@@ -1392,6 +1682,13 @@ function generate_var_data_expr(
             $skip_name(m)
             return nothing
         end
+    end)
+
+    documentation = var_data_accessor_doc(var_data_tokens)
+    push!(exprs, generated_binding_doc_expr(documentation, accessor_name))
+    push!(exprs, generated_binding_doc_expr(documentation, accessor_setter))
+    push!(exprs, quote
+        export $accessor_name, $accessor_setter
     end)
 
     return exprs
@@ -1432,6 +1729,7 @@ function generate_group_expr(
     var_data, _ = split_components(group_tokens, IR.Signal.BEGIN_VAR_DATA, idx)
 
     field_exprs = Expr[]
+    field_doc_exprs = Expr[]
     enum_imports = Set{Symbol}()
     composite_imports = Set{Symbol}([dimension_module_name])
     group_exprs = Expr[]
@@ -1440,6 +1738,23 @@ function generate_group_expr(
 
     for field_tokens in fields
         inner = field_tokens[2]
+        documentation = field_accessor_doc(field_tokens)
+        push!(
+            field_doc_exprs,
+            generated_binding_doc_expr(
+                documentation,
+                composite_member_field_name(field_tokens[1].name)
+            )
+        )
+        if field_has_setter(field_tokens)
+            push!(
+                field_doc_exprs,
+                generated_binding_doc_expr(
+                    documentation,
+                    Symbol(composite_member_field_name(field_tokens[1].name), :!)
+                )
+            )
+        end
         if inner.signal == IR.Signal.ENCODING
             append!(field_exprs, generate_encoded_field_expr(field_tokens, abstract_type_name, decoder_name, encoder_name, ir))
         elseif inner.signal == IR.Signal.BEGIN_ENUM
@@ -1536,6 +1851,19 @@ function generate_group_expr(
                     $count_type_symbol(count), $count_type_symbol(index))
             end
         end
+
+        $(generated_binding_doc_expr(
+            "Abstract flyweight type for the generated `$(group_token.name)` repeating-group codec.",
+            abstract_type_name
+        ))
+        $(generated_binding_doc_expr(
+            "Stateful zero-copy decoder for the `$(group_token.name)` repeating group. Iteration reuses this object for each entry.",
+            decoder_name
+        ))
+        $(generated_binding_doc_expr(
+            "Stateful zero-copy encoder for the `$(group_token.name)` repeating group.",
+            encoder_name
+        ))
 
         @inline function $decoder_name(buffer, position_ptr::PositionPointer, acting_version)
             dimensions = $dimension_decoder(buffer, position_ptr[])
@@ -1644,9 +1972,15 @@ function generate_group_expr(
             return g.count
         end
 
+        $(generated_binding_doc_expr(
+            "Set the encoded group count to the number of entries written and return the resulting count.",
+            :reset_count_to_index!
+        ))
+
         export reset_count_to_index!
 
         $(field_exprs...)
+        $(field_doc_exprs...)
         $(var_data_exprs...)
         $(group_exprs...)
 
@@ -1659,7 +1993,10 @@ function generate_group_expr(
         end
     end
 
-    group_body = extract_expr_from_quote(group_quoted, :module)
+    group_body = generated_doc_expr(
+        group_codec_doc(group_token),
+        extract_expr_from_quote(group_quoted, :module)
+    )
 
     accessor_name = Symbol(format_property_name(group_name))
     accessor_name_encoder = Symbol(string(accessor_name, "!"))
@@ -1687,7 +2024,16 @@ function generate_group_expr(
             $(Symbol(accessor_name, :_id))(::$parent_abstract_type) = $(template_id_expr(ir, group_id))
             $(Symbol(accessor_name, :_since_version))(::$parent_abstract_type) = $(version_expr(ir, since_version))
             $(Symbol(accessor_name, :_in_acting_version))(m::$parent_abstract_type) = sbe_acting_version(m) >= $(version_expr(ir, since_version))
-            export $accessor_name, $(Symbol(accessor_name, "!")), $accessor_name_encoder, $group_module_name
+            $(generated_binding_doc_expr(group_accessor_doc(group_token), accessor_name))
+            $(generated_binding_doc_expr(
+                group_accessor_doc(group_token),
+                Symbol(accessor_name, "!")
+            ))
+            $(generated_binding_doc_expr(
+                "Create the `$(group_token.name)` group encoder with `count` entries.",
+                accessor_group_count
+            ))
+            export $accessor_name, $(Symbol(accessor_name, "!")), $accessor_group_count, $group_module_name
         end)
     else
         push!(parent_accessors, quote
@@ -1704,7 +2050,16 @@ function generate_group_expr(
             $(Symbol(accessor_name, :_id))(::$parent_abstract_type) = $(template_id_expr(ir, group_id))
             $(Symbol(accessor_name, :_since_version))(::$parent_abstract_type) = $(version_expr(ir, since_version))
             $(Symbol(accessor_name, :_in_acting_version))(m::$parent_abstract_type) = sbe_acting_version(m) >= $(version_expr(ir, since_version))
-            export $accessor_name, $(Symbol(accessor_name, "!")), $accessor_name_encoder, $group_module_name
+            $(generated_binding_doc_expr(group_accessor_doc(group_token), accessor_name))
+            $(generated_binding_doc_expr(
+                group_accessor_doc(group_token),
+                Symbol(accessor_name, "!")
+            ))
+            $(generated_binding_doc_expr(
+                "Create the `$(group_token.name)` group encoder with `count` entries.",
+                accessor_group_count
+            ))
+            export $accessor_name, $(Symbol(accessor_name, "!")), $accessor_group_count, $group_module_name
         end)
     end
 
@@ -1719,6 +2074,7 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
     encoder_name = :Encoder
     header_module = Symbol(format_struct_name(ir.header_structure.tokens[1].name))
     version_type_symbol = header_field_type(ir, "version")
+    header_mismatch_prefix = "SBE header mismatch: expected template/schema $(msg_token.id)/$(ir.id), got "
 
     body = IR.get_message_body(message_tokens)
     fields, idx = split_components(collect(body), IR.Signal.BEGIN_FIELD, 1)
@@ -1728,6 +2084,7 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
     endian_imports = generate_encoded_types_expr(ir.byte_order)
 
     field_exprs = Expr[]
+    field_doc_exprs = Expr[]
     enum_imports = Set{Symbol}()
     composite_imports = Set{Symbol}()
     group_exprs = Expr[]
@@ -1737,6 +2094,23 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
 
     for field_tokens in fields
         inner = field_tokens[2]
+        documentation = field_accessor_doc(field_tokens)
+        push!(
+            field_doc_exprs,
+            generated_binding_doc_expr(
+                documentation,
+                composite_member_field_name(field_tokens[1].name)
+            )
+        )
+        if field_has_setter(field_tokens)
+            push!(
+                field_doc_exprs,
+                generated_binding_doc_expr(
+                    documentation,
+                    Symbol(composite_member_field_name(field_tokens[1].name), :!)
+                )
+            )
+        end
         if inner.signal == IR.Signal.ENCODING
             append!(field_exprs, generate_encoded_field_expr(field_tokens, abstract_type_name, decoder_name, encoder_name, ir))
         elseif inner.signal == IR.Signal.BEGIN_ENUM
@@ -1782,7 +2156,7 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
         import SBE: sbe_buffer, sbe_offset, sbe_position_ptr, sbe_position, sbe_position!
         import SBE: sbe_block_length, sbe_template_id, sbe_schema_id, sbe_schema_version
         import SBE: sbe_acting_block_length, sbe_acting_version, sbe_rewind!
-        import SBE: sbe_encoded_length, sbe_decoded_length, sbe_semantic_type
+        import SBE: sbe_encoded_length, sbe_decoded_length, sbe_semantic_type, sbe_description
         abstract type $abstract_type_name{T} <: AbstractSbeMessage{T} end
 
         using ..$header_module
@@ -1826,6 +2200,29 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
             end
         end
 
+        $(generated_binding_doc_expr(
+            "Abstract flyweight type for the generated `$(msg_token.name)` message codec.",
+            abstract_type_name
+        ))
+        $(generated_binding_doc_expr(
+            """
+                Decoder(buffer, offset=0; header=MessageHeader.Decoder(buffer, offset))
+                Decoder(typeof(buffer))
+
+            Zero-copy decoder for `$(msg_token.name)`. The buffer constructor validates and consumes the SBE message header. The type constructor creates an unwrapped reusable flyweight for use with `wrap!`.
+            """,
+            decoder_name
+        ))
+        $(generated_binding_doc_expr(
+            """
+                Encoder(buffer, offset=0; header=MessageHeader.Encoder(buffer, offset))
+                Encoder(typeof(buffer))
+
+            Zero-copy encoder for `$(msg_token.name)`. The buffer constructor writes the SBE message header. The type constructor creates an unwrapped reusable flyweight for use with `wrap!` or `wrap_and_apply_header!`.
+            """,
+            encoder_name
+        ))
+
         @inline function $decoder_name(::Type{T}) where {T<:AbstractArray{UInt8}}
             return $decoder_name{T}()
         end
@@ -1846,9 +2243,14 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
 
         @inline function wrap!(m::$decoder_name, buffer::AbstractArray, offset::Integer=0;
             header=$header_module.Decoder(buffer, offset))
-            if $header_module.templateId(header) != $(template_id_expr(ir, msg_token.id)) ||
-               $header_module.schemaId(header) != $(schema_id_expr(ir, ir.id))
-                throw(DomainError("Template id or schema id mismatch"))
+            actual_template_id = $header_module.templateId(header)
+            actual_schema_id = $header_module.schemaId(header)
+            if actual_template_id != $(template_id_expr(ir, msg_token.id)) ||
+               actual_schema_id != $(schema_id_expr(ir, ir.id))
+                throw(ArgumentError(
+                    $header_mismatch_prefix *
+                    string(actual_template_id) * "/" * string(actual_schema_id)
+                ))
             end
             return wrap!(m, buffer, offset + sbe_encoded_length(header),
                 $header_module.blockLength(header), $header_module.version(header))
@@ -1870,6 +2272,25 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
             return wrap!(m, buffer, offset + sbe_encoded_length(header))
         end
 
+        @inline function $decoder_name(buffer::T, offset::Integer=0;
+            header=$header_module.Decoder(buffer, offset)) where {T<:AbstractArray{UInt8}}
+            return wrap!($decoder_name(T), buffer, offset; header=header)
+        end
+
+        @inline function $encoder_name(buffer::T, offset::Integer=0;
+            header=$header_module.Encoder(buffer, offset)) where {T<:AbstractArray{UInt8}}
+            return wrap_and_apply_header!($encoder_name(T), buffer, offset; header=header)
+        end
+
+        $(generated_binding_doc_expr(
+            "Wrap a reusable decoder around a buffer. The header-aware method validates template and schema IDs; the five-argument method accepts an already-decoded block length and acting version.",
+            :wrap!
+        ))
+        $(generated_binding_doc_expr(
+            "Write the message header and wrap a reusable encoder around the message body.",
+            :wrap_and_apply_header!
+        ))
+
         sbe_buffer(m::$abstract_type_name) = m.buffer
         sbe_offset(m::$abstract_type_name) = m.offset
         sbe_position_ptr(m::$abstract_type_name) = m.position_ptr
@@ -1884,6 +2305,8 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
         sbe_schema_version(::$abstract_type_name) = $(version_expr(ir, ir.version))
         sbe_schema_version(::Type{<:$abstract_type_name})  = $(version_expr(ir, ir.version))
         sbe_semantic_type(::$abstract_type_name) = $(msg_token.encoding.semantic_type === nothing ? "" : msg_token.encoding.semantic_type)
+        sbe_description(::$abstract_type_name) = $(msg_token.description)
+        sbe_description(::Type{<:$abstract_type_name}) = $(msg_token.description)
         sbe_acting_block_length(m::$decoder_name) = m.acting_block_length
         sbe_acting_block_length(::$encoder_name) = $(block_length_expr(ir, msg_token.encoded_length))
         sbe_acting_version(m::$decoder_name) = m.acting_version
@@ -1893,7 +2316,29 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
 
         Base.sizeof(m::$abstract_type_name) = sbe_encoded_length(m)
 
+        @inline function Base.show(io::IO, m::$abstract_type_name)
+            print(io, string(typeof(m)), "(offset=", sbe_offset(m),
+                ", position=", sbe_position(m),
+                ", acting_block_length=", sbe_acting_block_length(m),
+                ", acting_version=", sbe_acting_version(m),
+                ", template_id=", sbe_template_id(m),
+                ", schema_id=", sbe_schema_id(m),
+                ", schema_version=", sbe_schema_version(m), ")")
+        end
+
+        @inline function Base.show(io::IO, ::MIME"application/json", m::$abstract_type_name)
+            print(io, "{\"type\":\"", $(string(message_name)), "\",",
+                "\"offset\":", sbe_offset(m), ",",
+                "\"position\":", sbe_position(m), ",",
+                "\"acting_block_length\":", sbe_acting_block_length(m), ",",
+                "\"acting_version\":", sbe_acting_version(m), ",",
+                "\"template_id\":", sbe_template_id(m), ",",
+                "\"schema_id\":", sbe_schema_id(m), ",",
+                "\"schema_version\":", sbe_schema_version(m), "}")
+        end
+
         $(field_exprs...)
+        $(field_doc_exprs...)
         $(group_exprs...)
         $(group_accessors...)
         $(var_data_exprs...)
@@ -1915,7 +2360,10 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
     end
     end
 
-    return extract_expr_from_quote(message_quoted, :module)
+    return generated_doc_expr(
+        message_codec_doc(msg_token, ir),
+        extract_expr_from_quote(message_quoted, :module)
+    )
 end
 
 function set_def_from_tokens(tokens::Vector{IR.Token})
@@ -1929,7 +2377,14 @@ function set_def_from_tokens(tokens::Vector{IR.Token})
             push!(choices, IrSetChoice(token.name, bit_position, token.description, token.version, token.deprecated))
         end
     end
-    return IrSetDef(set_name, encoding_type, choices, begin_token.version, begin_token.offset)
+    return IrSetDef(
+        set_name,
+        begin_token.description,
+        encoding_type,
+        choices,
+        begin_token.version,
+        begin_token.offset
+    )
 end
 
 function generate_enum_expr(enum_def::IrEnumDef)
@@ -1954,7 +2409,7 @@ function generate_enum_expr(enum_def::IrEnumDef)
 
     push!(enum_values, :(NULL_VALUE = $encoding_type_symbol($null_value)))
 
-    return Expr(
+    enum_expr = Expr(
         :macrocall,
         Symbol("@enumx"),
         LineNumberNode(0, Symbol("ir_codegen")),
@@ -1962,6 +2417,41 @@ function generate_enum_expr(enum_def::IrEnumDef)
         Expr(:(::), enum_name, encoding_type_symbol),
         Expr(:block, enum_values...)
     )
+
+    documented_enum = generated_doc_expr(
+        codec_type_doc(
+            enum_def.name,
+            enum_def.description,
+            "enum";
+            extra="Encoded as `$(encoding_type_symbol)`."
+        ),
+        enum_expr
+    )
+    value_docs = Expr[]
+    for value in enum_def.values
+        value_name = Symbol(sanitize_identifier(value.name))
+        description = description_or_default(
+            value.description,
+            "`$(value.name)` value of the `$(enum_def.name)` SBE enum."
+        )
+        details = "Encoded value: `$(value.literal)`; sinceVersion=$(value.since_version)"
+        value.deprecated > 0 && (details *= "; deprecated=$(value.deprecated)")
+        push!(
+            value_docs,
+            generated_binding_doc_expr(
+                "$description\n\n$details.",
+                Expr(:., enum_name, QuoteNode(value_name))
+            )
+        )
+    end
+    push!(
+        value_docs,
+        generated_binding_doc_expr(
+            "Null or not-present value for the `$(enum_def.name)` SBE enum.",
+            Expr(:., enum_name, QuoteNode(:NULL_VALUE))
+        )
+    )
+    return Expr(:block, documented_enum, value_docs...)
 end
 
 function header_field_type(ir::IR.Ir, field_name::String)
@@ -2020,6 +2510,7 @@ function generate_set_expr(set_def::IrSetDef, ir::IR.Ir)
     encoding_size = sizeof(encoding_type)
 
     choice_exprs = Expr[]
+    choice_doc_exprs = Expr[]
     for choice in set_def.choices
         choice_func_name = Symbol(format_choice_name(choice.name))
         choice_func_name_set = Symbol(string(choice_func_name, "!"))
@@ -2041,6 +2532,28 @@ function generate_set_expr(set_def::IrSetDef, ir::IR.Ir)
         end)
 
         push!(choice_exprs, :(export $choice_func_name, $choice_func_name_set))
+        choice_description = description_or_default(
+            choice.description,
+            "Read or update the `$(choice.name)` bit in the `$(set_def.name)` SBE set."
+        )
+        choice_details = "Bit $(choice.bit_position); sinceVersion=$(choice.since_version)"
+        choice.deprecated > 0 && (choice_details *= "; deprecated=$(choice.deprecated)")
+        documentation = """
+            $choice_func_name(set) -> Bool
+            $(choice_func_name)!(set, value::Bool) -> set
+
+        $choice_description
+
+        $choice_details.
+        """
+        push!(
+            choice_doc_exprs,
+            generated_binding_doc_expr(documentation, choice_func_name)
+        )
+        push!(
+            choice_doc_exprs,
+            generated_binding_doc_expr(documentation, choice_func_name_set)
+        )
     end
 
     endian_imports = generate_encoded_types_expr(ir.byte_order)
@@ -2064,6 +2577,19 @@ function generate_set_expr(set_def::IrSetDef, ir::IR.Ir)
                 buffer::T
                 offset::Int
             end
+
+            $(generated_binding_doc_expr(
+                "Abstract flyweight type for the generated `$(set_def.name)` SBE set codec.",
+                abstract_type_name
+            ))
+            $(generated_binding_doc_expr(
+                "Zero-copy decoder for the `$(set_def.name)` SBE set.",
+                decoder_name
+            ))
+            $(generated_binding_doc_expr(
+                "Zero-copy encoder for the `$(set_def.name)` SBE set.",
+                encoder_name
+            ))
 
             @inline function $decoder_name(buffer::AbstractVector{UInt8})
                 $decoder_name(buffer, Int64(0), $(version_expr(ir, ir.version)))
@@ -2107,13 +2633,35 @@ function generate_set_expr(set_def::IrSetDef, ir::IR.Ir)
             end
 
             $(choice_exprs...)
+            $(choice_doc_exprs...)
+
+            $(generated_binding_doc_expr(
+                "Clear all choices in this set and return the encoder.",
+                :clear!
+            ))
+            $(generated_binding_doc_expr(
+                "Return `true` when no choices are set.",
+                :is_empty
+            ))
+            $(generated_binding_doc_expr(
+                "Return the raw encoded integer value of this set.",
+                :raw_value
+            ))
 
             export $abstract_type_name, $decoder_name, $encoder_name
             export clear!, is_empty, raw_value
         end
     end
 
-    return extract_expr_from_quote(set_quoted, :module)
+    return generated_doc_expr(
+        codec_type_doc(
+            set_def.name,
+            set_def.description,
+            "set";
+            extra="Encoded as `$(encoding_type_symbol)`."
+        ),
+        extract_expr_from_quote(set_quoted, :module)
+    )
 end
 
 function find_first_token(name::String, tokens::Vector{IR.Token}, start_index::Int=1)
@@ -2217,9 +2765,21 @@ function generate_ir_module_expr(ir::IR.Ir; module_name::Union{Nothing, Symbol, 
     module_expr = extract_expr_from_quote(module_quoted, :module)
     strip_interpolations!(module_expr)
     normalize_dotted_exprs!(module_expr)
+    documented_module = generated_doc_expr(
+        schema_module_doc(ir, module_name),
+        module_expr
+    )
 
     if alias_name != module_name
-        return Expr(:block, module_expr, :(const $alias_name = $module_name))
+        return Expr(
+            :block,
+            documented_module,
+            :(const $alias_name = $module_name),
+            generated_binding_doc_expr(
+                "Compatibility alias for the generated `$module_name` schema module.",
+                alias_name
+            )
+        )
     end
-    return module_expr
+    return documented_module
 end

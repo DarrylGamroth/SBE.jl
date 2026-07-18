@@ -1,12 +1,135 @@
 using Test
 using SBE
 
-const SBE_VERSION = get(ENV, "SBE_VERSION", "1.36.2")
+const SBE_VERSION = get(ENV, "SBE_VERSION", "1.37.1")
 const SBE_JAR_PATH = get(
     ENV,
     "SBE_JAR_PATH",
     joinpath(homedir(), ".cache", "sbe", "sbe-all-$(SBE_VERSION).jar")
 )
+
+const TEST_SBE_IR_CODEC_NAME = SBE.@load_schema(
+    "../src/resources/sbe-ir.xml";
+    module_name=:TestSbeIrCodec
+)
+
+empty_string_to_nothing(value::String) = isempty(value) ? nothing : value
+
+function generated_sbe_ir_summary(buffer::AbstractVector{UInt8})
+    mod = TestSbeIrCodec
+    position = SBE.PositionPointer()
+    frame = mod.FrameCodec.Decoder(typeof(buffer))
+    frame.position_ptr = position
+    mod.FrameCodec.wrap!(
+        frame,
+        buffer,
+        0,
+        mod.FrameCodec.sbe_block_length(mod.FrameCodec.Decoder),
+        mod.FrameCodec.sbe_schema_version(mod.FrameCodec.Decoder)
+    )
+    frame_summary = (
+        id=mod.FrameCodec.irId(frame),
+        ir_version=mod.FrameCodec.irVersion(frame),
+        schema_version=mod.FrameCodec.schemaVersion(frame),
+        package_name=String(mod.FrameCodec.packageName(frame)),
+        namespace_name=empty_string_to_nothing(String(mod.FrameCodec.namespaceName(frame))),
+        semantic_version=empty_string_to_nothing(String(mod.FrameCodec.semanticVersion(frame)))
+    )
+
+    token_summaries = NamedTuple[]
+    token_block_length = mod.TokenCodec.sbe_block_length(mod.TokenCodec.Decoder)
+    token_schema_version = mod.TokenCodec.sbe_schema_version(mod.TokenCodec.Decoder)
+    offset = position[]
+    while offset < length(buffer)
+        token_position = SBE.PositionPointer(offset)
+        token = mod.TokenCodec.Decoder(typeof(buffer))
+        token.position_ptr = token_position
+        mod.TokenCodec.wrap!(
+            token,
+            buffer,
+            offset,
+            token_block_length,
+            token_schema_version
+        )
+
+        scalars = (
+            offset=mod.TokenCodec.tokenOffset(token),
+            encoded_length=mod.TokenCodec.tokenSize(token),
+            id=mod.TokenCodec.fieldId(token),
+            version=mod.TokenCodec.tokenVersion(token),
+            component_token_count=mod.TokenCodec.componentTokenCount(token),
+            signal=SBE.IrDecoder.map_signal(UInt8(mod.TokenCodec.signal(token))),
+            primitive_type=SBE.IrDecoder.map_primitive_type(UInt8(mod.TokenCodec.primitiveType(token))),
+            byte_order=SBE.IrDecoder.map_byte_order(UInt8(mod.TokenCodec.byteOrder(token))),
+            presence=SBE.IrDecoder.map_presence(UInt8(mod.TokenCodec.presence(token))),
+            deprecated=mod.TokenCodec.deprecated(token)
+        )
+        name = String(mod.TokenCodec.name(token))
+        mod.TokenCodec.constValue(token)
+        mod.TokenCodec.minValue(token)
+        mod.TokenCodec.maxValue(token)
+        mod.TokenCodec.nullValue(token)
+        character_encoding = empty_string_to_nothing(
+            String(mod.TokenCodec.characterEncoding(token))
+        )
+        epoch = empty_string_to_nothing(String(mod.TokenCodec.epoch(token)))
+        time_unit = empty_string_to_nothing(String(mod.TokenCodec.timeUnit(token)))
+        semantic_type = empty_string_to_nothing(String(mod.TokenCodec.semanticType(token)))
+        description = String(mod.TokenCodec.description(token))
+        referenced_name = empty_string_to_nothing(String(mod.TokenCodec.referencedName(token)))
+        package_name = empty_string_to_nothing(String(mod.TokenCodec.packageName(token)))
+
+        push!(
+            token_summaries,
+            merge(
+                scalars,
+                (;
+                    name,
+                    character_encoding,
+                    epoch,
+                    time_unit,
+                    semantic_type,
+                    description,
+                    referenced_name,
+                    package_name
+                )
+            )
+        )
+        offset = token_position[]
+    end
+    return frame_summary, token_summaries, offset
+end
+
+function serialized_token_summary(token::SBE.IR.Token)
+    return (
+        offset=token.offset,
+        encoded_length=token.encoded_length,
+        id=token.id,
+        version=token.version,
+        component_token_count=token.component_token_count,
+        signal=token.signal,
+        primitive_type=token.encoding.primitive_type,
+        byte_order=token.encoding.byte_order,
+        presence=token.encoding.presence,
+        deprecated=token.deprecated,
+        name=token.name,
+        character_encoding=token.encoding.character_encoding,
+        epoch=token.encoding.epoch,
+        time_unit=token.encoding.time_unit,
+        semantic_type=token.encoding.semantic_type,
+        description=token.description,
+        referenced_name=token.referenced_name,
+        package_name=token.package_name
+    )
+end
+
+function serialized_ir_tokens(ir::SBE.IR.Ir)
+    tokens = copy(ir.header_structure.tokens)
+    for message_id in sort!(collect(keys(ir.messages_by_id)))
+        append!(tokens, ir.messages_by_id[message_id])
+    end
+    return tokens
+end
 
 function normalize_primitive_value(
     primitive_type::SBE.IR.PrimitiveType.T,
@@ -93,7 +216,26 @@ function compare_ir_tokens!(actual::SBE.IR.Ir, expected::SBE.IR.Ir)
     end
 end
 
-@testset "SBE IR Dogfooding" begin
+@testset "Generated SBE IR codec dogfooding" begin
+    @test TEST_SBE_IR_CODEC_NAME == :TestSbeIrCodec
+    ir_path = joinpath(@__DIR__, "resources", "ir-basic-schema.sbeir")
+    buffer = read(ir_path)
+    ir = SBE.decode_ir(buffer)
+    frame, tokens, final_offset = generated_sbe_ir_summary(buffer)
+
+    @test frame == (
+        id=ir.id,
+        ir_version=Int32(0),
+        schema_version=ir.version,
+        package_name=ir.package_name,
+        namespace_name=ir.namespace_name,
+        semantic_version=isempty(ir.semantic_version) ? nothing : ir.semantic_version
+    )
+    @test tokens == serialized_token_summary.(serialized_ir_tokens(ir))
+    @test final_offset == length(buffer)
+end
+
+@testset "Java SBE IR parity" begin
     java = Sys.which("java")
     java_opts = ["--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED"]
     if java === nothing || !isfile(SBE_JAR_PATH)
@@ -115,10 +257,6 @@ end
         xml_ir = SBE.generate_ir(xml_schema)
 
         ir_manual = SBE.decode_ir(ir_path)
-        ir_generated = SBE.decode_ir_generated(ir_path)
-
         compare_ir_tokens!(ir_manual, xml_ir)
-        compare_ir_tokens!(ir_generated, xml_ir)
-        compare_ir_tokens!(ir_generated, ir_manual)
     end
 end

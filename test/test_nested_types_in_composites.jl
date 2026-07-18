@@ -1,9 +1,6 @@
 using Test
 using SBE
 
-# Include the generated Baseline schema
-include("generated/Baseline.jl")
-
 @testset "Nested Types in Composites" begin
     @testset "Nested Enum in Composite - BoostType" begin
         # Test 1: Enum type exists

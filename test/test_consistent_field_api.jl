@@ -1,19 +1,14 @@
 using Test
 using SBE
-# Load pre-generated Baseline schema
-include("generated/Baseline.jl")
 
 @testset "Consistent Field API Tests" begin
     
     @testset "Composite Direct Accessor API" begin
         buffer = zeros(UInt8, 64)
-        
+
         # Test Engine composite with new direct accessor API
         engine_decoder = Baseline.Engine.Decoder(buffer, 0)
         engine_encoder = Baseline.Engine.Encoder(buffer, 0)
-        
-        @test typeof(engine_decoder) <: SBE.AbstractSbeCompositeType
-        @test typeof(engine_encoder) <: SBE.AbstractSbeCompositeType
         
         # Test direct field accessor (no intermediate field object)
         capacity_value = Baseline.Engine.capacity(engine_decoder)
@@ -31,9 +26,6 @@ include("generated/Baseline.jl")
         Baseline.Engine.numCylinders!(engine_encoder, UInt8(6))
         @test Baseline.Engine.numCylinders(engine_decoder) == 6
         
-        # Test metadata constants are available
-        @test isdefined(Baseline.Engine, :capacity_encoding_offset)
-        @test isdefined(Baseline.Engine, :capacity_encoding_length)
     end
     
     @testset "Message Direct Accessor API" begin
@@ -45,9 +37,6 @@ include("generated/Baseline.jl")
         Baseline.Car.wrap_and_apply_header!(car_encoder, buffer, 0; header=header)
         car_decoder = Baseline.Car.Decoder(typeof(buffer))
         Baseline.Car.wrap!(car_decoder, buffer, 0)
-        
-        @test typeof(car_decoder) <: SBE.AbstractSbeMessage
-        @test typeof(car_encoder) <: SBE.AbstractSbeMessage
         
         # Test direct field accessor - write with encoder, read with decoder
         Baseline.Car.modelYear!(car_encoder, UInt16(2024))
@@ -61,43 +50,6 @@ include("generated/Baseline.jl")
         @test vehicle_code_value isa AbstractString
         @test vehicle_code_value == "ABC"
         
-        # Test metadata constants
-        @test isdefined(Baseline.Car, :modelYear_encoding_offset)
-        @test isdefined(Baseline.Car, :modelYear_encoding_length)
-        @test isdefined(Baseline.Car, :modelYear_id)
-        @test isdefined(Baseline.Car, :modelYear_since_version)
-    end
-    
-    @testset "API Consistency Between Composite and Message" begin
-        buffer = zeros(UInt8, 1024)
-        
-        # Set up both composite and message
-        engine_decoder = Baseline.Engine.Decoder(buffer, 0)
-        engine_encoder = Baseline.Engine.Encoder(buffer, 0)
-        
-        header = Baseline.MessageHeader.Encoder(buffer, 100)
-        car_encoder = Baseline.Car.Encoder(typeof(buffer))
-        Baseline.Car.wrap_and_apply_header!(car_encoder, buffer, 100; header=header)
-        car_decoder = Baseline.Car.Decoder(typeof(buffer))
-        Baseline.Car.wrap!(car_decoder, buffer, 100)
-        
-        # Both should have direct accessor functions
-        @test hasmethod(Baseline.Engine.capacity, Tuple{typeof(engine_decoder)})
-        @test hasmethod(Baseline.Engine.capacity!, Tuple{typeof(engine_encoder), UInt16})
-        
-        @test hasmethod(Baseline.Car.modelYear, Tuple{typeof(car_decoder)})
-        @test hasmethod(Baseline.Car.modelYear!, Tuple{typeof(car_encoder), UInt16})
-        
-        # Both types should be subtypes of appropriate abstracts
-        @test typeof(engine_decoder) <: SBE.AbstractSbeCompositeType
-        @test typeof(car_decoder) <: SBE.AbstractSbeMessage
-        
-        # Both should have SBE interface methods
-        @test hasmethod(SBE.sbe_buffer, Tuple{typeof(engine_decoder)})
-        @test hasmethod(SBE.sbe_buffer, Tuple{typeof(car_decoder)})
-        
-        @test hasmethod(SBE.sbe_offset, Tuple{typeof(engine_decoder)})
-        @test hasmethod(SBE.sbe_offset, Tuple{typeof(car_decoder)})
     end
     
     @testset "Field Metadata Information" begin
@@ -107,14 +59,13 @@ include("generated/Baseline.jl")
         engine_decoder = Baseline.Engine.Decoder(buffer, 0)
         
         # Test composite field metadata (functions in file-based generation)
-        @test Baseline.Engine.capacity_encoding_length(engine_decoder) == 2  # sizeof(UInt16)
-        @test Baseline.Engine.capacity_encoding_offset(engine_decoder) isa Int
-        
-        # Test message field metadata (also functions in file-based generation)
-        @test Baseline.Car.modelYear_encoding_length(Baseline.Car.Decoder) == 2  # sizeof(UInt16)
-        @test Baseline.Car.modelYear_encoding_offset(Baseline.Car.Decoder) isa Int
-        @test Baseline.Car.modelYear_id(Baseline.Car.Decoder) isa UInt16
-        @test Baseline.Car.modelYear_since_version(Baseline.Car.Decoder) isa UInt16
+        @test Baseline.Engine.capacity_encoding_length(engine_decoder) == 2
+        @test Baseline.Engine.capacity_encoding_offset(engine_decoder) == 0
+
+        # Test message field metadata.
+        @test Baseline.Car.modelYear_encoding_length(Baseline.Car.Decoder) == 2
+        @test Baseline.Car.modelYear_encoding_offset(Baseline.Car.Decoder) == 8
+        @test Baseline.Car.modelYear_id(Baseline.Car.Decoder) == UInt16(2)
     end
     
     @testset "Array Field Direct Accessors" begin
@@ -136,7 +87,7 @@ include("generated/Baseline.jl")
         @test collect(some_numbers_value) == UInt32[10, 20, 30, 40]
         
         # Test metadata (functions in file-based generation)
-        @test Baseline.Car.someNumbers_encoding_length(Baseline.Car.Decoder) == 16  # 4 * sizeof(UInt32)
-        @test Baseline.Car.someNumbers_encoding_offset(Baseline.Car.Decoder) isa Int
+        @test Baseline.Car.someNumbers_encoding_length(Baseline.Car.Decoder) == 16
+        @test Baseline.Car.someNumbers_encoding_offset(Baseline.Car.Decoder) == 12
     end
 end

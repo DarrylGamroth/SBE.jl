@@ -2,7 +2,7 @@ module SBE
 
 # Load dependencies
 using EnumX
-using EzXML
+import XML
 using MappedArrays
 using StringViews
 using UnsafeArrays
@@ -187,7 +187,7 @@ include("ir_generator.jl")
 
 # IR decoding from .sbeir
 include("ir_decoder.jl")
-import .IrDecoder: decode_ir, decode_ir_generated
+import .IrDecoder: decode_ir
 
 # IR code generation utilities
 include("ir_codegen.jl")
@@ -195,137 +195,228 @@ include("ir_codegen.jl")
 # Code generation utilities (includes abstract types and runtime support)
 include("codegen_utils.jl")
 
-# Generated SBE IR codecs (dogfooding bootstrap)
-const SBE_IR_SCHEMA_PATH = joinpath(@__DIR__, "resources", "sbe-ir.xml")
-const SBE_IR_GENERATED_PATH = joinpath(@__DIR__, "generated", "sbe_ir.jl")
-if isfile(SBE_IR_GENERATED_PATH)
-    include("generated/sbe_ir.jl")
-end
-
 # ============================================================================
-# @load_schema Macro - Primary User API
+# Expansion-time schema loading
 # ============================================================================
 
 """
     @load_schema xml_path; module_name=nothing
 
-Macro to load an SBE schema at parse time, avoiding world age issues.
+Generate an SBE schema during macro expansion and emit its codec module as
+ordinary top-level Julia syntax.
 
-This macro generates code at parse time, then uses `include_string()` to load
-it into the calling module. Because the `include_string()` happens at parse time,
-there are no world age issues when accessing the generated module.
+`xml_path` must be a string literal. Relative paths in source files are resolved
+relative to the file containing the macro call; at the REPL they are resolved
+relative to the working directory. The macro must be used at top level. The
+generated module is installed in the calling module and its name is returned as
+a `Symbol`.
+
+Because the generated definitions are evaluated as a top-level form, functions
+defined afterward see the codec methods in their world age and can call them
+normally without `Base.invokelatest`.
 
 # Arguments
-- `xml_path`: Path to the SBE XML schema file (can be a string or expression)
-- `module_name`: Optional override for the generated module name (String or Symbol)
+- `xml_path`: Literal path to the SBE XML schema file
+- `module_name`: Optional literal override for the generated module name
 
 # Returns
-The macro expands to code that loads the schema and returns the module name as a Symbol.
+The generated module name as a `Symbol`.
 
 # Example
 ```julia
 using SBE
 
-# Load schema at parse time - no world age issues!
+# Load during expansion; paths are relative to this source file.
 module_name = SBE.@load_schema "test/example-schema.xml"
 # => :Baseline
 
-# Access the module immediately
-Baseline = getfield(Main, module_name)
+# Access it in the calling module.
+Baseline = getfield(@__MODULE__, module_name)
 
 # Or use directly
 buffer = zeros(UInt8, 1024)
-car = Main.Baseline.Car.Encoder(buffer, 0)
+car = Baseline.Car.Encoder(buffer, 0)
 ```
 
 # Advantages
-- No world age warnings
-- Code is evaluated at parse time
+- Generated methods predate functions defined after the macro call
+- Code is generated during expansion and evaluated as a top-level form
 - Clean, simple syntax
 - No temporary files
 - Idempotent: calling multiple times with the same schema is safe (uses existing module)
 
 # Notes
-Modules are loaded into the `Main` namespace and cannot be redefined without restarting
-Julia. If you call `@load_schema` multiple times with the same schema file, the macro
-will detect that the module already exists and return its name without regenerating.
+Generated modules cannot be redefined in a running Julia session. If the target name
+already identifies a module when the macro is expanded, the macro reuses it. Use
+[`generate`](@ref) when the schema path is only known at runtime; evaluate the
+resulting file at top level or cross the dynamic-loading boundary with
+`Base.invokelatest`.
 
 # See Also
 - `generate(xml_path)` - Generate code as string
 """
+function _macro_literal_path(value, source::LineNumberNode, macro_name::String)
+    value isa String || throw(ArgumentError(
+        "$macro_name requires a string literal path; use the corresponding " *
+        "generation function when the path is only known at runtime"
+    ))
+    isabspath(value) && return normpath(value)
+
+    source_file = String(source.file)
+    base_dir = source_file == "none" || isempty(source_file) ?
+        pwd() : dirname(abspath(source_file))
+    return normpath(joinpath(base_dir, value))
+end
+
+function _macro_literal_module_name(value, macro_name::String)
+    value === :nothing && return nothing
+    value isa String && return value
+    value isa QuoteNode && value.value isa Symbol && return value.value
+    throw(ArgumentError("$macro_name module_name must be a literal String, Symbol, or nothing"))
+end
+
+function _macro_literal_bool(value, macro_name::String, keyword::Symbol)
+    value isa Bool && return value
+    throw(ArgumentError("$macro_name $keyword must be a literal Bool"))
+end
+
+function _macro_module_name(package_name::String, override)
+    if override === nothing || override == "" || override == Symbol("")
+        return module_name_from_package(package_name)
+    end
+    return Symbol(sanitize_identifier(String(override)))
+end
+
+function _generated_module_expansion(
+    caller::Module,
+    module_name::Symbol,
+    code::String,
+    source_path::String
+)
+    Base.include_dependency(source_path)
+    if isdefined(caller, module_name)
+        getfield(caller, module_name) isa Module || error(
+            "cannot load generated module $module_name: caller already defines a non-module binding"
+        )
+        return Expr(:toplevel, QuoteNode(module_name))
+    end
+
+    expansion = Meta.parseall(
+        code;
+        filename=source_path * ".generated.jl",
+        lineno=1
+    )
+    expansion.head == :toplevel || error("generated code is not a top-level expression")
+    push!(expansion.args, QuoteNode(module_name))
+    return expansion
+end
+
 macro load_schema(args...)
-    xml_path = nothing
-    module_name_expr = :(nothing)
-    validate_expr = :(true)
-    warnings_fatal_expr = :(false)
-    suppress_warnings_expr = :(false)
+    xml_path_expr = nothing
+    module_name_expr = :nothing
+    validate_expr = true
+    warnings_fatal_expr = false
+    suppress_warnings_expr = false
 
     for arg in args
         if arg isa Expr && arg.head == :parameters
             for kw in arg.args
-                if kw isa Expr && (kw.head == :(=) || kw.head == :kw) && kw.args[1] == :module_name
-                    module_name_expr = kw.args[2]
-                elseif kw isa Expr && (kw.head == :(=) || kw.head == :kw) && kw.args[1] == :module
-                    module_name_expr = kw.args[2]
-                elseif kw isa Expr && (kw.head == :(=) || kw.head == :kw) && kw.args[1] == :validate
-                    validate_expr = kw.args[2]
-                elseif kw isa Expr && (kw.head == :(=) || kw.head == :kw) && kw.args[1] == :warnings_fatal
-                    warnings_fatal_expr = kw.args[2]
-                elseif kw isa Expr && (kw.head == :(=) || kw.head == :kw) && kw.args[1] == :suppress_warnings
-                    suppress_warnings_expr = kw.args[2]
+                kw isa Expr && (kw.head == :(=) || kw.head == :kw) ||
+                    error("Unsupported @load_schema argument: $kw")
+                name, value = kw.args
+                if name == :module_name || name == :module
+                    module_name_expr = value
+                elseif name == :validate
+                    validate_expr = value
+                elseif name == :warnings_fatal
+                    warnings_fatal_expr = value
+                elseif name == :suppress_warnings
+                    suppress_warnings_expr = value
                 else
-                    error("Unsupported @load_schema keyword argument: $(kw)")
+                    error("Unsupported @load_schema keyword argument: $name")
                 end
             end
+        elseif xml_path_expr === nothing
+            xml_path_expr = arg
         else
-            xml_path = arg
+            error("@load_schema accepts exactly one XML path")
         end
     end
 
-    xml_path === nothing && error("@load_schema requires an XML path")
+    xml_path_expr === nothing && error("@load_schema requires an XML path")
+    xml_path = _macro_literal_path(xml_path_expr, __source__, "@load_schema")
+    module_name_override = _macro_literal_module_name(module_name_expr, "@load_schema")
+    validate = _macro_literal_bool(validate_expr, "@load_schema", :validate)
+    warnings_fatal = _macro_literal_bool(
+        warnings_fatal_expr,
+        "@load_schema",
+        :warnings_fatal
+    )
+    suppress_warnings = _macro_literal_bool(
+        suppress_warnings_expr,
+        "@load_schema",
+        :suppress_warnings
+    )
 
-    return quote
-        let xml_file = $(esc(xml_path))
-            xml_content = read(xml_file, String)
-            schema = SBE.parse_xml_schema(
-                xml_content;
-                validate=$(esc(validate_expr)),
-                warnings_fatal=$(esc(warnings_fatal_expr)),
-                suppress_warnings=$(esc(suppress_warnings_expr))
-            )
-            module_name_override = $(esc(module_name_expr))
-            if module_name_override === nothing || module_name_override == "" || module_name_override == Symbol("")
-                module_name = SBE.module_name_from_package(schema.package_name)
-            else
-                module_name = Symbol(SBE.sanitize_identifier(String(module_name_override)))
+    schema = parse_xml_schema_file(
+        xml_path;
+        validate=validate,
+        warnings_fatal=warnings_fatal,
+        suppress_warnings=suppress_warnings
+    )
+    module_name = _macro_module_name(schema.package_name, module_name_override)
+    ir = generate_ir(schema)
+    code = generate_from_ir(ir; module_name=module_name)
+    return esc(_generated_module_expansion(__module__, module_name, code, xml_path))
+end
+
+"""
+    @load_sbeir ir_path; module_name=nothing
+
+Decode a Java-compatible `.sbeir` file and generate Julia codecs during macro
+expansion. The macro emits the codec module as top-level syntax. The path and
+optional module name must be literals. Path resolution, caller-module placement,
+top-level use, idempotence, and world-age behavior are the same as for
+[`@load_schema`](@ref).
+"""
+macro load_sbeir(args...)
+    ir_path_expr = nothing
+    module_name_expr = :nothing
+
+    for arg in args
+        if arg isa Expr && arg.head == :parameters
+            for kw in arg.args
+                kw isa Expr && (kw.head == :(=) || kw.head == :kw) ||
+                    error("Unsupported @load_sbeir argument: $kw")
+                name, value = kw.args
+                if name == :module_name || name == :module
+                    module_name_expr = value
+                else
+                    error("Unsupported @load_sbeir keyword argument: $name")
+                end
             end
-
-            # Check if already exists
-            if !isdefined(Main, module_name)
-                # Generate and load
-                code = SBE.generate(
-                    xml_file;
-                    module_name=module_name,
-                    validate=$(esc(validate_expr)),
-                    warnings_fatal=$(esc(warnings_fatal_expr)),
-                    suppress_warnings=$(esc(suppress_warnings_expr))
-                )
-                Base.include_string(Main, code)
-            end
-            # If already exists, silently return the existing module name
-            # (modules cannot be redefined without restarting Julia)
-
-            module_name
+        elseif ir_path_expr === nothing
+            ir_path_expr = arg
+        else
+            error("@load_sbeir accepts exactly one IR path")
         end
     end
+
+    ir_path_expr === nothing && error("@load_sbeir requires an IR path")
+    ir_path = _macro_literal_path(ir_path_expr, __source__, "@load_sbeir")
+    module_name_override = _macro_literal_module_name(module_name_expr, "@load_sbeir")
+    ir = decode_ir(ir_path)
+    module_name = _macro_module_name(ir.package_name, module_name_override)
+    code = generate_from_ir(ir; module_name=module_name)
+    return esc(_generated_module_expansion(__module__, module_name, code, ir_path))
 end
 
 # Backwards-compatible alias for schema parsing.
 parse_sbe_schema(xml_content::AbstractString) = parse_xml_schema(xml_content)
 
 # Re-export important types and functions that users need
-export @load_schema, parse_xml_schema, parse_sbe_schema
-export generate, generate_ir, generate_ir_xml, generate_ir_file
+export @load_schema, @load_sbeir, parse_xml_schema, parse_xml_schema_file, parse_sbe_schema
+export generate, generate_from_ir, generate_ir, generate_ir_xml, generate_ir_file
 export IR  # Stable IR module surface
 
 # Export position pointer type
@@ -346,7 +437,6 @@ export sbe_rewind!, sbe_decoded_length, sbe_semantic_type, sbe_description
 # Export utility functions
 export to_string
 
-# Export utility functions for testing (with underscore prefix they're still internal)
-export decode_ir, decode_ir_generated
+export decode_ir
 
 end # module SBE

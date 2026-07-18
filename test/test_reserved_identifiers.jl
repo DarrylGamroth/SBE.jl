@@ -32,7 +32,9 @@ using SBE
         write(schema_path, schema_xml)
         code_str = SBE.generate(schema_path)
 
-        @test occursin("@enumx T = SbeEnum Bool_::UInt8", code_str)
+        # Docstring wrapping may change how the generated macro call is printed;
+        # assert the sanitized declaration itself instead of its full formatting.
+        @test occursin(r"@enumx\(T = SbeEnum, Bool_::UInt8", code_str)
         @test occursin("using ..Bool_", code_str)
         @test !occursin(r"\\bBool::", code_str)
     end

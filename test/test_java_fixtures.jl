@@ -1,12 +1,7 @@
 using Test
 using SBE
 
-module FixtureGenerated
-    include(joinpath(@__DIR__, "generated", "Baseline.jl"))
-    using .Baseline
-end
-
-const FixtureBaseline = FixtureGenerated.Baseline
+const FixtureBaseline = Baseline
 
 function encode_baseline_car!(buffer::Vector{UInt8})
     header = FixtureBaseline.MessageHeader.Encoder(buffer, 0)
@@ -385,7 +380,7 @@ end
 end
 
 @testset "Java Decoder Round-Trip (Julia -> Java)" begin
-    sbe_version = get(ENV, "SBE_VERSION", "1.36.2")
+    sbe_version = get(ENV, "SBE_VERSION", "1.37.1")
     jar_default = joinpath(homedir(), ".cache", "sbe", "sbe-all-$(sbe_version).jar")
     jar_path = get(ENV, "SBE_JAR_PATH", jar_default)
     class_dir = joinpath(@__DIR__, "java-fixtures", "classes")

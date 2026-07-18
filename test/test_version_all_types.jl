@@ -73,6 +73,21 @@ using SBE
         # description is version 2, so with version 1 decoder it should have 0 length
         desc_length = Versioned.Product.description_length(product_v1)
         @test desc_length == 0
+
+        # A var-data field that is not in the acting version has no length header
+        # on the wire and must not advance the shared position pointer.
+        Versioned.Product.wrap!(product_v1, buffer, 0, UInt16(14), UInt16(1))
+        for _ in Versioned.Product.tags(product_v1)
+        end
+        @test isempty(Versioned.Product.name(product_v1))
+        before_description = SBE.sbe_position(product_v1)
+        @test isempty(Versioned.Product.description(product_v1))
+        @test SBE.sbe_position(product_v1) == before_description
+        @test Versioned.Product.skip_description!(product_v1) == 0
+        @test SBE.sbe_position(product_v1) == before_description
+
+        Versioned.Product.wrap!(product_v1, buffer, 0, UInt16(14), UInt16(1))
+        @test SBE.sbe_decoded_length(product_v1) == 22
         
         # Version 2: description field should be accessible
         position_ptr_v2 = SBE.PositionPointer()

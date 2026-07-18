@@ -1,12 +1,111 @@
 """
 XML -> IR generator.
 
-This ports the reference IrGenerator behavior to Julia, using EzXML for parsing.
+This ports the reference IrGenerator behavior to Julia, using XML.jl for parsing.
 """
 
-using EzXML: parsexml, root, nodename, haskey, findall, eachelement, nodecontent
-
 abstract type XmlType end
+
+struct XmlTypeNode
+    node::XML.Node
+    package_name::Union{Nothing, String}
+end
+
+function xml_local_name(name::AbstractString)
+    separator = findlast(==(':'), name)
+    return separator === nothing ? String(name) : String(SubString(name, nextind(name, separator)))
+end
+
+xml_node_name(node::XML.Node) = xml_local_name(something(XML.tag(node), ""))
+
+xml_children_named(node::XML.Node, name::AbstractString) =
+    Iterators.filter(child -> xml_node_name(child) == name, XML.eachelement(node))
+
+function append_xml_node_content!(io::IO, node::XML.Node)
+    for child in XML.children(node)
+        child_type = XML.nodetype(child)
+        if child_type === XML.Text || child_type === XML.CData
+            print(io, something(XML.value(child), ""))
+        elseif child_type === XML.Element
+            append_xml_node_content!(io, child)
+        end
+    end
+end
+
+function xml_node_content(node::XML.Node)
+    io = IOBuffer()
+    append_xml_node_content!(io, node)
+    return String(take!(io))
+end
+
+const XINCLUDE_NAMESPACE = "http://www.w3.org/2001/XInclude"
+
+function xml_namespaces(node::XML.Node, inherited::Dict{String, String})
+    namespaces = copy(inherited)
+    attributes = XML.attributes(node)
+    attributes === nothing && return namespaces
+    for (name, value) in attributes
+        if name == "xmlns"
+            namespaces[""] = value
+        elseif startswith(name, "xmlns:")
+            namespaces[String(SubString(name, 7))] = value
+        end
+    end
+    return namespaces
+end
+
+function is_xinclude_element(node::XML.Node, namespaces::Dict{String, String})
+    XML.nodetype(node) === XML.Element || return false
+    tag = something(XML.tag(node), "")
+    separator = findlast(==(':'), tag)
+    prefix = separator === nothing ? "" : String(SubString(tag, 1, prevind(tag, separator)))
+    return xml_local_name(tag) == "include" && get(namespaces, prefix, nothing) == XINCLUDE_NAMESPACE
+end
+
+function expand_xincludes!(
+    node::XML.Node,
+    base_dir::AbstractString,
+    inherited_namespaces::Dict{String, String},
+    include_stack::Set{String},
+)
+    namespaces = xml_namespaces(node, inherited_namespaces)
+    children = XML.children(node)
+    children isa Vector || return node
+
+    for index in eachindex(children)
+        child = children[index]
+        child_namespaces = xml_namespaces(child, namespaces)
+        if is_xinclude_element(child, child_namespaces)
+            haskey(child, "href") || error("XInclude element is missing href")
+            parse_mode = haskey(child, "parse") ? child["parse"] : "xml"
+            parse_mode == "xml" || error("Unsupported XInclude parse mode: $(parse_mode)")
+            haskey(child, "xpointer") && error("XInclude xpointer is not supported")
+
+            included_path = realpath(joinpath(base_dir, child["href"]))
+            included_path in include_stack && error("Circular XInclude: $(included_path)")
+            push!(include_stack, included_path)
+            try
+                included_doc = read(included_path, XML.Node)
+                included_roots = XML.elements(included_doc)
+                length(included_roots) == 1 ||
+                    error("XInclude must contain exactly one root element: $(included_path)")
+                included_root = only(included_roots)
+                expand_xincludes!(
+                    included_root,
+                    dirname(included_path),
+                    Dict{String, String}(),
+                    include_stack,
+                )
+                children[index] = included_root
+            finally
+                delete!(include_stack, included_path)
+            end
+        else
+            expand_xincludes!(child, base_dir, child_namespaces, include_stack)
+        end
+    end
+    return node
+end
 
 mutable struct XmlEncodedType <: XmlType
     name::String
@@ -241,8 +340,9 @@ const JULIA_KEYWORDS = Set([
     "const", "continue", "do", "else", "elseif", "end",
     "export", "false", "finally", "for", "function",
     "global", "if", "import", "let", "local",
-    "macro", "module", "quote", "return", "struct",
-    "true", "try", "using", "while", "_"
+    "macro", "module", "mutable", "new", "primitive", "quote",
+    "return", "struct", "true", "try", "using", "where",
+    "while", "_", "Enum", "Set"
 ])
 
 function is_sbe_identifier(value::AbstractString, keywords::Set{String}, is_start, is_part)
@@ -464,6 +564,26 @@ function validate_max_value!(state::ValidationState, type_def::XmlEncodedType)
     end
 end
 
+function validate_group_max_value!(state::ValidationState, type_def::XmlEncodedType)
+    validate_max_value!(state, type_def)
+    if type_def.primitive_type == IR.PrimitiveType.UINT32
+        max_int = typemax(Int32)
+        if type_def.max_value === nothing
+            validation_error(
+                state,
+                "maxValue must be set for varData UINT32 type: max value allowed=$(max_int)"
+            )
+        end
+        max_value = primitive_value_numeric(type_def.max_value, type_def.primitive_type)
+        if max_value > max_int
+            validation_error(
+                state,
+                "maxValue greater than allowed for type: maxValue=$(max_value) allowed=$(max_int)"
+            )
+        end
+    end
+end
+
 function validate_group_dimension_type!(state::ValidationState, composite::XmlCompositeType)
     block_length = get(composite.member_by_name, "blockLength", nothing)
     num_in_group = get(composite.member_by_name, "numInGroup", nothing)
@@ -474,21 +594,40 @@ function validate_group_dimension_type!(state::ValidationState, composite::XmlCo
         validation_error(state, "\"blockLength\" must be unsigned type")
     elseif block_length.primitive_type != IR.PrimitiveType.UINT8 && block_length.primitive_type != IR.PrimitiveType.UINT16
         validation_warning(state, "\"blockLength\" should be UINT8 or UINT16")
-    else
-        validate_max_value!(state, block_length)
     end
+    block_length isa XmlEncodedType && is_unsigned_primitive(block_length.primitive_type) &&
+        validate_group_max_value!(state, block_length)
 
     if !(num_in_group isa XmlEncodedType)
         validation_error(state, "composite for group encodedLength encoding must have \"numInGroup\"")
     elseif !is_unsigned_primitive(num_in_group.primitive_type)
         validation_warning(state, "\"numInGroup\" should be unsigned type")
-        if num_in_group.min_value === nothing || primitive_value_numeric(num_in_group.min_value, num_in_group.primitive_type) < 0
+        if num_in_group.min_value === nothing
             validation_error(state, "\"numInGroup\" minValue must be set for signed types")
+        elseif primitive_value_numeric(num_in_group.min_value, num_in_group.primitive_type) < 0
+            min_value = primitive_value_numeric(num_in_group.min_value, num_in_group.primitive_type)
+            validation_error(
+                state,
+                "\"numInGroup\" minValue=$(min_value) must be greater than zero for signed \"numInGroup\" types"
+            )
         end
-    elseif num_in_group.primitive_type != IR.PrimitiveType.UINT8 && num_in_group.primitive_type != IR.PrimitiveType.UINT16
-        validation_warning(state, "\"numInGroup\" should be UINT8 or UINT16")
     else
-        validate_max_value!(state, num_in_group)
+        if num_in_group.primitive_type != IR.PrimitiveType.UINT8 && num_in_group.primitive_type != IR.PrimitiveType.UINT16
+            validation_warning(state, "\"numInGroup\" should be UINT8 or UINT16")
+        end
+        validate_group_max_value!(state, num_in_group)
+        if num_in_group.min_value !== nothing
+            min_value = primitive_value_numeric(num_in_group.min_value, num_in_group.primitive_type)
+            max_value = num_in_group.max_value === nothing ?
+                primitive_value_numeric(IR.primitive_type_max(num_in_group.primitive_type), num_in_group.primitive_type) :
+                primitive_value_numeric(num_in_group.max_value, num_in_group.primitive_type)
+            if min_value > max_value
+                validation_error(
+                    state,
+                    "\"numInGroup\" minValue=$(min_value) greater than maxValue=$(max_value)"
+                )
+            end
+        end
     end
 end
 
@@ -708,6 +847,14 @@ function primitive_value_from_text(
     elseif primitive_type == IR.PrimitiveType.CHAR && (length > 1 || ncodeunits(value) > 1)
         encoding = character_encoding === nothing ? "US-ASCII" : character_encoding
         return IR.PrimitiveValue(IR.PrimitiveValueRepresentation.BYTE_ARRAY, value, encoding, length)
+    elseif primitive_type == IR.PrimitiveType.CHAR
+        numeric_value = isempty(value) ? 0 : Int(codeunit(value, 1))
+        return IR.PrimitiveValue(
+            IR.PrimitiveValueRepresentation.LONG,
+            string(numeric_value),
+            nothing,
+            IR.primitive_type_size(primitive_type),
+        )
     else
         return IR.PrimitiveValue(IR.PrimitiveValueRepresentation.LONG, value, nothing, IR.primitive_type_size(primitive_type))
     end
@@ -831,7 +978,7 @@ function parse_encoded_type(
     const_value = nothing
     value_ref = haskey(node, "valueRef") ? node["valueRef"] : nothing
     if presence == IR.Presence.CONSTANT
-        text = strip(nodecontent(node))
+        text = strip(xml_node_content(node))
         if !isempty(text)
             if length_attr === nothing && primitive_type == IR.PrimitiveType.CHAR
                 length = ncodeunits(text)
@@ -869,7 +1016,7 @@ end
 function parse_enum_type(
     node,
     package_name::Union{Nothing, String},
-    type_nodes_by_name::Union{Nothing, Dict{String, EzXML.Node}}=nothing,
+    type_nodes_by_name::Union{Nothing, Dict{String, XmlTypeNode}}=nothing,
     given_name::Union{Nothing, String}=nothing,
     referenced_name::Union{Nothing, String}=nothing
 )
@@ -881,8 +1028,9 @@ function parse_enum_type(
     ref_min_value = nothing
     ref_max_value = nothing
     if encoding_type == IR.PrimitiveType.NONE && type_nodes_by_name !== nothing
-        ref_node = get(type_nodes_by_name, encoding_type_name, nothing)
-        if ref_node !== nothing && nodename(ref_node) == "type"
+        ref_type_node = get(type_nodes_by_name, encoding_type_name, nothing)
+        if ref_type_node !== nothing && xml_node_name(ref_type_node.node) == "type"
+            ref_node = ref_type_node.node
             encoding_type = parse_primitive_type(ref_node["primitiveType"])
             ref_null_value = haskey(ref_node, "nullValue") ? ref_node["nullValue"] : nothing
             ref_min_value = haskey(ref_node, "minValue") ? ref_node["minValue"] : nothing
@@ -920,12 +1068,12 @@ function parse_enum_type(
     end
 
     values = XmlValidValue[]
-    for value_node in findall("validValue", node)
+    for value_node in xml_children_named(node, "validValue")
         value_name = value_node["name"]
         value_text = if haskey(value_node, "value")
             strip(value_node["value"])
         else
-            strip(nodecontent(value_node))
+            strip(xml_node_content(value_node))
         end
         isempty(value_text) && error("Enum validValue missing value for $(name).$(value_name)")
         value_desc = haskey(value_node, "description") ? value_node["description"] : ""
@@ -958,7 +1106,7 @@ end
 function parse_set_type(
     node,
     package_name::Union{Nothing, String},
-    type_nodes_by_name::Union{Nothing, Dict{String, EzXML.Node}}=nothing,
+    type_nodes_by_name::Union{Nothing, Dict{String, XmlTypeNode}}=nothing,
     given_name::Union{Nothing, String}=nothing,
     referenced_name::Union{Nothing, String}=nothing
 )
@@ -967,8 +1115,9 @@ function parse_set_type(
     encoding_type = parse_primitive_type(encoding_type_name)
     encoding_type_length = 1
     if encoding_type == IR.PrimitiveType.NONE && type_nodes_by_name !== nothing
-        ref_node = get(type_nodes_by_name, encoding_type_name, nothing)
-        if ref_node !== nothing && nodename(ref_node) == "type"
+        ref_type_node = get(type_nodes_by_name, encoding_type_name, nothing)
+        if ref_type_node !== nothing && xml_node_name(ref_type_node.node) == "type"
+            ref_node = ref_type_node.node
             encoding_type = parse_primitive_type(ref_node["primitiveType"])
             length_attr = haskey(ref_node, "length") ? ref_node["length"] : nothing
             encoding_type_length = length_attr === nothing ? 1 : parse(Int, length_attr)
@@ -982,9 +1131,9 @@ function parse_set_type(
     deprecated = parse(Int, haskey(node, "deprecated") ? node["deprecated"] : "0")
 
     choices = XmlChoice[]
-    for choice_node in findall("choice", node)
+    for choice_node in xml_children_named(node, "choice")
         choice_name = choice_node["name"]
-        choice_text = strip(nodecontent(choice_node))
+        choice_text = strip(xml_node_content(choice_node))
         choice_desc = haskey(choice_node, "description") ? choice_node["description"] : ""
         choice_since = parse(Int, haskey(choice_node, "sinceVersion") ? choice_node["sinceVersion"] : "0")
         choice_deprecated = parse(Int, haskey(choice_node, "deprecated") ? choice_node["deprecated"] : "0")
@@ -1012,7 +1161,7 @@ end
 function parse_composite_type(
     node,
     package_name::Union{Nothing, String},
-    type_nodes_by_name::Dict{String, EzXML.Node},
+    type_nodes_by_name::Dict{String, XmlTypeNode},
     given_name::Union{Nothing, String}=nothing,
     referenced_name::Union{Nothing, String}=nothing,
     composites_path::Vector{String}=String[]
@@ -1028,8 +1177,8 @@ function parse_composite_type(
     members = XmlType[]
     member_by_name = Dict{String, XmlType}()
 
-    for child in eachelement(node)
-        child_name = nodename(child)
+    for child in XML.eachelement(node)
+        child_name = xml_node_name(child)
         if child_name == "type"
             member = parse_encoded_type(child, package_name)
         elseif child_name == "enum"
@@ -1041,15 +1190,15 @@ function parse_composite_type(
         elseif child_name == "ref"
             ref_type_name = child["type"]
             ref_name = child["name"]
-            ref_node = get(type_nodes_by_name, ref_type_name, nothing)
-            if ref_node === nothing
+            ref_type_node = get(type_nodes_by_name, ref_type_name, nothing)
+            if ref_type_node === nothing
                 error("ref type not found: $(ref_type_name)")
             end
             if ref_type_name in composites_path
                 error("ref types cannot create circular dependencies: $(ref_type_name)")
             end
             member = parse_type_node(
-                ref_node,
+                ref_type_node,
                 type_nodes_by_name,
                 ref_name,
                 ref_type_name,
@@ -1064,7 +1213,7 @@ function parse_composite_type(
                 member.since_version = parse(Int, ref_version)
             end
         else
-            continue
+            error("$(child_name) not valid within composite")
         end
         member_by_name[member.name] = member
         push!(members, member)
@@ -1086,14 +1235,15 @@ function parse_composite_type(
 end
 
 function parse_type_node(
-    node,
-    type_nodes_by_name::Dict{String, EzXML.Node},
+    type_node::XmlTypeNode,
+    type_nodes_by_name::Dict{String, XmlTypeNode},
     given_name::Union{Nothing, String}=nothing,
     referenced_name::Union{Nothing, String}=nothing,
     composites_path::Vector{String}=String[]
 )
-    package_name = get_types_package_attribute(node)
-    child_name = nodename(node)
+    node = type_node.node
+    package_name = type_node.package_name
+    child_name = xml_node_name(node)
     if child_name == "type"
         return parse_encoded_type(node, package_name, given_name, referenced_name)
     elseif child_name == "enum"
@@ -1106,27 +1256,15 @@ function parse_type_node(
     error("Unknown type node: $(child_name)")
 end
 
-function get_types_package_attribute(node)
-    parent = node.parentnode
-    while parent !== nothing
-        if nodename(parent) == "types"
-            return haskey(parent, "package") ? parent["package"] : nothing
-        end
-        parent = parent.parentnode
-    end
-    return nothing
-end
-
-function parse_xml_schema(
-    xml_content::String;
+function parse_xml_schema_document(
+    doc::XML.Node;
     validate::Bool=true,
     warnings_fatal::Bool=false,
     suppress_warnings::Bool=false
 )
-    doc = parsexml(xml_content)
-    root_node = root(doc)
-    if nodename(root_node) != "messageSchema"
-        error("Expected root element 'messageSchema', got '$(nodename(root_node))'")
+    root_node = only(XML.elements(doc))
+    if xml_node_name(root_node) != "messageSchema"
+        error("Expected root element 'messageSchema', got '$(xml_node_name(root_node))'")
     end
 
     schema_id = parse(Int, root_node["id"])
@@ -1138,22 +1276,23 @@ function parse_xml_schema(
     description = haskey(root_node, "description") ? root_node["description"] : ""
 
     state = validate ? ValidationState(warnings_fatal=warnings_fatal, suppress_warnings=suppress_warnings) : nothing
-    type_nodes_by_name = Dict{String, EzXML.Node}()
-    for types_element in findall("types", root_node)
-        for child in eachelement(types_element)
+    type_nodes_by_name = Dict{String, XmlTypeNode}()
+    for types_element in xml_children_named(root_node, "types")
+        types_package = haskey(types_element, "package") ? types_element["package"] : nothing
+        for child in XML.eachelement(types_element)
             if haskey(child, "name")
                 name = child["name"]
                 if state !== nothing && haskey(type_nodes_by_name, name)
                     validation_warning(state, "type already exists for name: $(name)")
                 end
-                type_nodes_by_name[name] = child
+                type_nodes_by_name[name] = XmlTypeNode(child, types_package)
             end
         end
     end
 
     types_by_name = Dict{String, XmlType}()
-    for (name, node) in type_nodes_by_name
-        types_by_name[name] = parse_type_node(node, type_nodes_by_name, nothing, nothing, String[])
+    for (name, type_node) in type_nodes_by_name
+        types_by_name[name] = parse_type_node(type_node, type_nodes_by_name, nothing, nothing, String[])
     end
 
     messages = parse_messages(root_node, types_by_name)
@@ -1173,16 +1312,56 @@ function parse_xml_schema(
     return schema
 end
 
+function parse_xml_schema(
+    xml_content::String;
+    validate::Bool=true,
+    warnings_fatal::Bool=false,
+    suppress_warnings::Bool=false
+)
+    doc = parse(xml_content, XML.Node)
+    return parse_xml_schema_document(
+        doc;
+        validate=validate,
+        warnings_fatal=warnings_fatal,
+        suppress_warnings=suppress_warnings,
+    )
+end
+
+"""
+    parse_xml_schema_file(path; xinclude=true, ...) -> XmlMessageSchema
+
+Parse an SBE XML schema from a file, resolving local XML XInclude elements relative
+to the file that contains them when `xinclude=true`.
+"""
+function parse_xml_schema_file(
+    path::AbstractString;
+    xinclude::Bool=true,
+    validate::Bool=true,
+    warnings_fatal::Bool=false,
+    suppress_warnings::Bool=false,
+)
+    doc = read(path, XML.Node)
+    schema_path = realpath(path)
+    if xinclude
+        expand_xincludes!(
+            doc,
+            dirname(schema_path),
+            Dict{String, String}(),
+            Set([schema_path]),
+        )
+    end
+    return parse_xml_schema_document(
+        doc;
+        validate=validate,
+        warnings_fatal=warnings_fatal,
+        suppress_warnings=suppress_warnings,
+    )
+end
+
 function parse_messages(root_node, types_by_name::Dict{String, XmlType})
     messages = XmlMessage[]
-    for xpath in ["message", "sbe:message", ".//message", ".//sbe:message"]
-        message_nodes = findall(xpath, root_node)
-        if !isempty(message_nodes)
-            for message_node in message_nodes
-                push!(messages, parse_message(message_node, types_by_name))
-            end
-            break
-        end
+    for message_node in xml_children_named(root_node, "message")
+        push!(messages, parse_message(message_node, types_by_name))
     end
     return messages
 end
@@ -1215,8 +1394,8 @@ end
 
 function parse_message_fields(node, types_by_name::Dict{String, XmlType})
     fields = XmlField[]
-    for child in eachelement(node)
-        child_name = nodename(child)
+    for child in XML.eachelement(node)
+        child_name = xml_node_name(child)
         if child_name == "field"
             push!(fields, parse_field(child, types_by_name))
         elseif child_name == "group"
@@ -1255,15 +1434,16 @@ function parse_field(node, types_by_name::Dict{String, XmlType})
         0
         )
     end
+    presence = haskey(node, "presence") ? parse_presence(node["presence"]) : type_def.presence
     return XmlField(
         node["name"],
         parse(Int, node["id"]),
         type_def,
-        parse(Int, haskey(node, "offset") ? node["offset"] : "0"),
+        parse(Int, haskey(node, "offset") ? node["offset"] : "-1"),
         0,
         haskey(node, "description") ? node["description"] : "",
         parse(Int, haskey(node, "sinceVersion") ? node["sinceVersion"] : "0"),
-        parse_presence(haskey(node, "presence") ? node["presence"] : nothing),
+        presence,
         haskey(node, "valueRef") ? node["valueRef"] : nothing,
         haskey(node, "epoch") ? node["epoch"] : nothing,
         haskey(node, "timeUnit") ? node["timeUnit"] : nothing,
@@ -1290,7 +1470,7 @@ function parse_group(node, types_by_name::Dict{String, XmlType})
         node["name"],
         parse(Int, node["id"]),
         nothing,
-        0,
+        -1,
         0,
         haskey(node, "description") ? node["description"] : "",
         parse(Int, haskey(node, "sinceVersion") ? node["sinceVersion"] : "0"),
@@ -1318,7 +1498,7 @@ function parse_data(node, types_by_name::Dict{String, XmlType})
         node["name"],
         parse(Int, node["id"]),
         type_def,
-        parse(Int, haskey(node, "offset") ? node["offset"] : "0"),
+        parse(Int, haskey(node, "offset") ? node["offset"] : "-1"),
         0,
         haskey(node, "description") ? node["description"] : "",
         parse(Int, haskey(node, "sinceVersion") ? node["sinceVersion"] : "0"),
@@ -1341,12 +1521,12 @@ function compute_and_set_offsets!(fields::Vector{XmlField}, block_length::Int)
     offset = 0
 
     for field in fields
-        if field.offset != 0 && field.offset < offset
+        if field.offset >= 0 && field.offset < offset
             error("Offset provides insufficient space at field: $(field.name)")
         end
 
         if offset != IR.VARIABLE_LENGTH
-            if field.offset != 0
+            if field.offset >= 0
                 offset = field.offset
             elseif field.dimension_type !== nothing && block_length != 0
                 offset = block_length
@@ -1473,17 +1653,19 @@ Read an SBE XML schema file and generate the IR.
 """
 function generate_ir_file(
     path::AbstractString;
+    xinclude::Bool=true,
     validate::Bool=true,
     warnings_fatal::Bool=false,
     suppress_warnings::Bool=false
 )
-    xml_content = read(path, String)
-    return generate_ir_xml(
-        xml_content;
+    schema = parse_xml_schema_file(
+        path;
+        xinclude=xinclude,
         validate=validate,
         warnings_fatal=warnings_fatal,
         suppress_warnings=suppress_warnings
     )
+    return generate_ir(schema)
 end
 
 function capture_types!(ir::IR.Ir, tokens::Vector{IR.Token}, begin_index::Int=1, end_index::Int=length(tokens))
@@ -1562,7 +1744,7 @@ function add_message_signal!(state::IrGeneratorState, message::XmlMessage, signa
     encoding = IR.Encoding(
         IR.Presence.REQUIRED,
         IR.PrimitiveType.NONE,
-        state.schema.byte_order,
+        :littleEndian,
         nothing,
         nothing,
         nothing,
@@ -1606,7 +1788,7 @@ function add_field_signal!(state::IrGeneratorState, field::XmlField, signal::IR.
     encoding = IR.Encoding(
         map_presence(field.presence),
         primitive_type,
-        state.schema.byte_order,
+        :littleEndian,
         nothing,
         nothing,
         nothing,
@@ -1669,7 +1851,7 @@ function add_composite!(state::IrGeneratorState, type_def::XmlCompositeType, cur
     encoding = IR.Encoding(
         IR.Presence.REQUIRED,
         IR.PrimitiveType.NONE,
-        state.schema.byte_order,
+        :littleEndian,
         nothing,
         nothing,
         nothing,
@@ -1822,7 +2004,7 @@ function add_set_type!(state::IrGeneratorState, type_def::XmlSetType, offset::In
     encoding = IR.Encoding(
         IR.Presence.REQUIRED,
         type_def.encoding_type,
-        state.schema.byte_order,
+        :littleEndian,
         nothing,
         nothing,
         nothing,
@@ -1919,7 +2101,7 @@ function add_encoded_type!(state::IrGeneratorState, type_def::XmlEncodedType, of
             type_def.character_encoding,
             nothing,
             nothing,
-            type_def.semantic_type
+            nothing
         )
     elseif type_def.presence == IR.Presence.OPTIONAL
         encoding = IR.Encoding(
@@ -1933,7 +2115,7 @@ function add_encoded_type!(state::IrGeneratorState, type_def::XmlEncodedType, of
             type_def.character_encoding,
             nothing,
             nothing,
-            type_def.semantic_type
+            nothing
         )
     else
         encoding = IR.Encoding(
@@ -1947,7 +2129,7 @@ function add_encoded_type!(state::IrGeneratorState, type_def::XmlEncodedType, of
             type_def.character_encoding,
             nothing,
             nothing,
-            type_def.semantic_type
+            nothing
         )
     end
 
@@ -1973,9 +2155,6 @@ function add_encoded_type!(state::IrGeneratorState, type_def::XmlEncodedType, of
     semantic = type_def.semantic_type === nothing ? field.semantic_type : type_def.semantic_type
 
     effective_presence = field.presence
-    if field.presence == IR.Presence.REQUIRED && type_def.presence != IR.Presence.REQUIRED
-        effective_presence = type_def.presence
-    end
 
     size = encoded_length(type_def)
     if effective_presence == IR.Presence.CONSTANT

@@ -2,9 +2,6 @@ using Test
 using SBE
 using AllocCheck: check_allocs
 
-# Load pre-generated Optional schema
-include("generated/Optional.jl")
-
 @testset "Optional Fields" begin
     
     @testset "Null Value Constants" begin

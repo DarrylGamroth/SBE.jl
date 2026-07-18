@@ -1,10 +1,6 @@
 using Test
 using SBE
 
-# Load the generated CompositeElements schema
-# Note: Run test/generate_test_schemas.jl first to generate this
-include(joinpath(@__DIR__, "generated", "CompositeElements.jl"))
-
 @testset "Nested Sets in Composites" begin
     @testset "Nested Set Definition - SetOne" begin
         # Test 1: Set module exists inside composite
