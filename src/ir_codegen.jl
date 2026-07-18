@@ -2427,7 +2427,13 @@ function generate_enum_expr(enum_def::IrEnumDef)
         ),
         enum_expr
     )
-    value_docs = Expr[]
+    value_docs = Expr[
+        generated_binding_doc_expr(
+            "Concrete Julia enum type for the `$(enum_def.name)` SBE enum. " *
+            "Encoded as `$(encoding_type_symbol)`.",
+            Expr(:., enum_name, QuoteNode(:SbeEnum))
+        )
+    ]
     for value in enum_def.values
         value_name = Symbol(sanitize_identifier(value.name))
         description = description_or_default(

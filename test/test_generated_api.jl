@@ -130,6 +130,9 @@ end
         manufacturer_doc = string(@doc Baseline.Car.manufacturer)
         @test occursin("UTF-8", manufacturer_doc)
         @test occursin("advances the shared message position", manufacturer_doc)
+        enum_type_doc = string(@doc Baseline.BooleanType.SbeEnum)
+        @test occursin("Concrete Julia enum type", enum_type_doc)
+        @test occursin("Encoded as `UInt8`", enum_type_doc)
         @test :manufacturer in names(Baseline.Car)
         @test :manufacturer! in names(Baseline.Car)
     end
