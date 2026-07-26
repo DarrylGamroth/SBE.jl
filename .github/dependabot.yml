@@ -11,3 +11,8 @@ updates:
       - "/benchmark"
     schedule:
       interval: "weekly"
+
+  - package-ecosystem: "maven"
+    directory: "/test/sbetool"
+    schedule:
+      interval: "weekly"

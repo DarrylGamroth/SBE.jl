@@ -380,7 +380,7 @@ end
 end
 
 @testset "Java Decoder Round-Trip (Julia -> Java)" begin
-    sbe_version = get(ENV, "SBE_VERSION", "1.37.1")
+    sbe_version = selected_sbetool_version()
     jar_default = joinpath(homedir(), ".cache", "sbe", "sbe-all-$(sbe_version).jar")
     jar_path = get(ENV, "SBE_JAR_PATH", jar_default)
     class_dir = joinpath(@__DIR__, "java-fixtures", "classes")

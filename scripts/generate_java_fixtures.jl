@@ -2,6 +2,9 @@
 
 using Downloads
 
+include("sbetool_dependency.jl")
+using .SbeToolDependency: selected_sbetool_version
+
 function java_executable(name)
     exe = Sys.which(name)
     exe === nothing && error("Missing $(name) executable in PATH.")
@@ -21,7 +24,7 @@ end
 
 function main()
     root_dir = normpath(joinpath(@__DIR__, ".."))
-    sbe_version = get(ENV, "SBE_VERSION", "1.37.1")
+    sbe_version = selected_sbetool_version()
     sbe_cache_dir = get(ENV, "SBE_CACHE_DIR", joinpath(homedir(), ".cache", "sbe"))
     sbe_group = "uk/co/real-logic"
     sbe_artifact = "sbe-all"

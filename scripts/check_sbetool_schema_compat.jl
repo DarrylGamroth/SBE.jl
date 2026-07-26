@@ -10,7 +10,7 @@ The check covers:
 Usage:
     julia --project=. scripts/check_sbetool_schema_compat.jl \
         /path/to/simple-binary-encoding/sbe-tool/src/test/resources \
-        /path/to/sbe-all-1.37.1.jar
+        /path/to/sbe-all-<version>.jar
 """
 
 using SBE

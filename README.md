@@ -292,15 +292,17 @@ See `docs/USAGE.md` for usage notes and performance considerations.
 
 ## Binary Compatibility
 
-SBE.jl is tested for binary interoperability with SbeTool 1.37.1:
+SBE.jl is tested for binary interoperability with the exact SbeTool release pinned
+in [`test/sbetool/pom.xml`](test/sbetool/pom.xml):
 - Decodes the Java fixtures produced by SbeTool
 - Produces messages accepted by the generated Java codecs
-- Matches all 79 upstream fixture acceptance decisions and the normalized IR for all
-  66 fixtures accepted by both tools
+- Matches all 83 upstream fixture acceptance decisions and the normalized IR for all
+  70 fixtures accepted by both tools
 - Resolves the relative XInclude case exercised by the upstream parser suite
 
-The complete pinned fixture, schema, and IR differential can be rerun with
-`scripts/check_sbetool_schema_compat.jl` against an SbeTool checkout and jar.
+Dependabot updates the exact Maven version through tested pull requests. The complete
+pinned fixture, schema, and IR differential can be rerun with
+`scripts/check_sbetool_schema_compat.jl` against the matching SbeTool checkout and jar.
 
 See `docs/SBETOOL_COMPATIBILITY.md` for the evidence ledger and explicit support
 boundaries. This is an interoperability claim, not formal FIX conformance certification.

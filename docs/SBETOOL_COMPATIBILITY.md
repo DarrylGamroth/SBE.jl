@@ -1,9 +1,17 @@
 # SbeTool Compatibility
 
-SBE.jl's maintained compatibility reference is SbeTool 1.37.1, tag `1.37.1`,
-commit `2e78afe5addbc5f701e2d7f4528a8444bf25dd5b`. The 79 XML resources from
+SBE.jl's maintained compatibility reference is the exact `sbe.version` in
+`test/sbetool/pom.xml`. CI uses Maven to read that version for both the `sbe-all`
+artifact and the matching upstream Git tag. Dependabot proposes Maven updates, so
+each repository commit remains reproducible while new SbeTool releases are tested
+before their version pin is merged.
+
+The current fixture baseline is SbeTool 1.39.0, tag `1.39.0`, commit
+`e773b57cac6b2008ce30dd219a33de49766c6013`. The 83 XML resources from
 `sbe-tool/src/test/resources` are vendored under `test/resources`; their source is
-recorded in `test/resources/UPSTREAM_SBETOOL.toml`.
+recorded in `test/resources/UPSTREAM_SBETOOL.toml`. If a dependency update changes
+the upstream corpus, the byte comparison fails until the fixture changes and their
+provenance are reviewed together.
 
 The compatibility gate is `scripts/check_sbetool_schema_compat.jl`. CI checks out
 the pinned upstream resources and compares them byte-for-byte with the vendored
@@ -24,10 +32,10 @@ normalization.
 
 | ID | Requirement | Implementation | Verification evidence | State |
 |---|---|---|---|---|
-| SBE-COMPAT-FIXTURE-001 | Keep the upstream SbeTool XML corpus pinned and unmodified. | 79 resources plus `UPSTREAM_SBETOOL.toml`. | CI byte comparison against tag `1.37.1`. | Verified |
-| SBE-COMPAT-SCHEMA-001 | Match SbeTool default-mode schema acceptance. | XML.jl parser and SBE validation in `src/ir_generator.jl`. | 79/79 accept/reject decisions in the compatibility gate. | Verified |
-| SBE-COMPAT-IR-001 | Match SbeTool IR for schemas accepted in default mode. | XML-to-IR generation and `.sbeir` decoding. | Normalized metadata and token equality for all 66 accepted fixtures. | Verified |
-| SBE-COMPAT-IR-CODEGEN-001 | Generate Julia codecs from Java-produced IR. | `generate_from_ir` and `@load_sbeir`. | SbeTool 1.37.1 regenerates `ir-basic-schema.sbeir`; tests generate source and exercise an expansion-time encoder/decoder from that file. | Verified for the maintained IR fixture |
+| SBE-COMPAT-FIXTURE-001 | Keep the upstream SbeTool XML corpus pinned and unmodified. | 83 resources plus `UPSTREAM_SBETOOL.toml`. | CI byte comparison against the Maven-pinned SbeTool tag. | Verified |
+| SBE-COMPAT-SCHEMA-001 | Match SbeTool default-mode schema acceptance. | XML.jl parser and SBE validation in `src/ir_generator.jl`. | 83/83 accept/reject decisions in the compatibility gate. | Verified |
+| SBE-COMPAT-IR-001 | Match SbeTool IR for schemas accepted in default mode. | XML-to-IR generation and `.sbeir` decoding. | Normalized metadata and token equality for all 70 accepted fixtures. | Verified |
+| SBE-COMPAT-IR-CODEGEN-001 | Generate Julia codecs from Java-produced IR. | `generate_from_ir` and `@load_sbeir`. | The Maven-pinned SbeTool regenerates `ir-basic-schema.sbeir`; tests generate source and exercise an expansion-time encoder/decoder from that file. | Verified for the maintained IR fixture |
 | SBE-COMPAT-XINCLUDE-001 | Resolve the relative XML include exercised by SbeTool's parser suite. | Path-aware `parse_xml_schema_file` and `generate_ir_file`. | `sub/basic-schema.xml` differential with SbeTool XInclude enabled. | Verified for the upstream relative XML case |
 | SBE-COMPAT-WIRE-001 | Decode SbeTool output and produce the same bytes. | Generated Julia codecs. | Java-produced baseline, extension, and keyword fixtures in `test/test_java_fixtures.jl`; Julia output is byte-compared with each fixture. | Verified for the three maintained fixtures |
 | SBE-COMPAT-WIRE-002 | Have a generated Java codec decode Julia output. | Baseline Julia encoder plus `VerifyCarFixture.java`. | Linux CI regenerates Java codecs and runs the Julia-to-Java baseline verifier. | Verified for the baseline fixture |
@@ -49,10 +57,25 @@ SbeTool-generated IR and codecs as the reference oracle.
 
 ## Running the gate locally
 
+Read the maintained version from the Maven test manifest:
+
+```bash
+SBE_VERSION="$(
+  mvn --batch-mode --quiet --no-transfer-progress \
+    --file test/sbetool/pom.xml \
+    help:evaluate \
+    -Dexpression=sbe.version \
+    -DforceStdout \
+    -Dstyle.color=never
+)"
+```
+
+Then use the matching upstream checkout and Maven Central artifact:
+
 ```bash
 julia --project=. scripts/check_sbetool_schema_compat.jl \
   /path/to/simple-binary-encoding/sbe-tool/src/test/resources \
-  /path/to/sbe-all-1.37.1.jar
+  "/path/to/sbe-all-${SBE_VERSION}.jar"
 ```
 
 The upstream Java baseline can be checked independently from the pinned SbeTool

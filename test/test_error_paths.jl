@@ -1,17 +1,6 @@
 using Test
 using SBE
 
-function expect_error(f::Function, needle::AbstractString)
-    err = try
-        f()
-        nothing
-    catch e
-        e
-    end
-    @test err !== nothing
-    @test occursin(needle, sprint(showerror, err))
-end
-
 @testset "Error Paths" begin
     @testset "XML schema validation" begin
         expect_error(

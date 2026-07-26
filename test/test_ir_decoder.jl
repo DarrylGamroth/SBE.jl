@@ -1,7 +1,7 @@
 using Test
 using SBE
 
-const SBE_VERSION = get(ENV, "SBE_VERSION", "1.37.1")
+const SBE_VERSION = selected_sbetool_version()
 const SBE_JAR_PATH = get(
     ENV,
     "SBE_JAR_PATH",

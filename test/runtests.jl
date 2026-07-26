@@ -1,8 +1,22 @@
 using Test
 
+include(joinpath(@__DIR__, "..", "scripts", "sbetool_dependency.jl"))
+using .SbeToolDependency: pinned_sbetool_version, selected_sbetool_version
+
 include("generate_test_schemas.jl")
 
 const GENERATED_SCHEMA_PATHS = generate_test_schemas()
+
+function expect_error(f::Function, needle::AbstractString)
+    error = try
+        f()
+        nothing
+    catch caught
+        caught
+    end
+    @test error !== nothing
+    @test occursin(needle, sprint(showerror, error))
+end
 
 function load_generated_schema(fixture_name::Symbol)
     host = Module(Symbol("Generated", fixture_name))

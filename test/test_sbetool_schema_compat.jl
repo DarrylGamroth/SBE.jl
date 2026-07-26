@@ -62,9 +62,10 @@ using SBE
     @test only(included_schema.messages).id == 50001
 
     provenance = read(joinpath(resources, "UPSTREAM_SBETOOL.toml"), String)
-    @test occursin("version = \"1.37.1\"", provenance)
-    @test occursin("commit = \"2e78afe5addbc5f701e2d7f4528a8444bf25dd5b\"", provenance)
-    @test occursin("fixture_count = 79", provenance)
+    @test pinned_sbetool_version() == "1.39.0"
+    @test occursin("version = \"$(pinned_sbetool_version())\"", provenance)
+    @test occursin("commit = \"e773b57cac6b2008ce30dd219a33de49766c6013\"", provenance)
+    @test occursin("fixture_count = 83", provenance)
 
     invalid_composite = read(
         joinpath(resources, "error-handler-invalid-composite.xml"),

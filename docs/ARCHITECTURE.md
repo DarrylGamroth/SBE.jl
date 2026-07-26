@@ -73,11 +73,12 @@ then be updated atomically with its schema and generator version.
 
 ## Compatibility boundary
 
-SbeTool 1.37.1 is the maintained reference oracle. The pinned schema differential,
-normalized IR comparison, Java wire fixtures, and explicit unsupported features are
-recorded in the [SbeTool compatibility ledger](SBETOOL_COMPATIBILITY.md). This evidence
-supports the documented schema, IR, and wire cases; it is not formal FIX conformance
-certification or a claim of parity with Java-only generator features.
+The exact SbeTool release in `test/sbetool/pom.xml` is the maintained reference
+oracle. The pinned schema differential, normalized IR comparison, Java wire fixtures,
+and explicit unsupported features are recorded in the
+[SbeTool compatibility ledger](SBETOOL_COMPATIBILITY.md). This evidence supports the
+documented schema, IR, and wire cases; it is not formal FIX conformance certification
+or a claim of parity with Java-only generator features.
 
 ## Allocation boundary
 
