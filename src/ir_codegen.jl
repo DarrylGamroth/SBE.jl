@@ -1474,7 +1474,8 @@ function generate_var_data_expr(
     abstract_type_name::Symbol,
     decoder_name::Symbol,
     encoder_name::Symbol,
-    ir::IR.Ir
+    ir::IR.Ir;
+    external_tail::Bool=false
 )
     field_token = var_data_tokens[1]
     accessor_name = Symbol(format_property_name(field_token.name))
@@ -1483,6 +1484,7 @@ function generate_var_data_expr(
     skip_name = Symbol(string("skip_", accessor_name, "!"))
     buffer_name = Symbol(string(accessor_name, "_buffer!"))
     accessor_setter = Symbol(string(accessor_name, "!"))
+    external_setter = Symbol(string(accessor_name, "_external!"))
     since_version = field_token.version
 
     length_token = find_first_token("length", var_data_tokens, 1)
@@ -1573,6 +1575,33 @@ function generate_var_data_expr(
         :(nothing)
     end
 
+    external_decode_missing_guard = if since_version > 0
+        quote
+            if sbe_acting_version(m) < $(version_expr(ir, since_version))
+                return sbe_external_tail(
+                    m.buffer,
+                    Int(sbe_position(m)),
+                    0
+                )
+            end
+        end
+    else
+        :(nothing)
+    end
+
+    external_decode_body = quote
+        $external_decode_missing_guard
+        len = $length_name(m)
+        payload_pos = Base.Checked.checked_add(
+            Int(sbe_position(m)),
+            $header_length
+        )
+        logical_end = Base.Checked.checked_add(payload_pos, Int(len))
+        tail = sbe_external_tail(m.buffer, payload_pos, Int(len))
+        sbe_position!(m, logical_end)
+        return tail
+    end
+
     if returns_string
         push!(exprs, quote
             @inline function $bytes_accessor(m::$decoder_name)
@@ -1583,6 +1612,15 @@ function generate_var_data_expr(
                 return view(m.buffer, pos+1:pos+len)
             end
         end)
+        if external_tail
+            push!(exprs, quote
+                @inline function $bytes_accessor(
+                    m::$decoder_name{T}
+                ) where {T <: SbeFrame}
+                    $external_decode_body
+                end
+            end)
+        end
         push!(exprs, quote
             @inline function $accessor_name(m::$decoder_name)
                 return StringView(rstrip_nul($bytes_accessor(m)))
@@ -1598,6 +1636,15 @@ function generate_var_data_expr(
                 return view(m.buffer, pos+1:pos+len)
             end
         end)
+        if external_tail
+            push!(exprs, quote
+                @inline function $accessor_name(
+                    m::$decoder_name{T}
+                ) where {T <: SbeFrame}
+                    $external_decode_body
+                end
+            end)
+        end
     end
 
     push!(exprs, quote
@@ -1620,6 +1667,48 @@ function generate_var_data_expr(
             return m
         end
     end)
+
+    if external_tail
+        push!(exprs, quote
+            @inline function $external_setter(
+                m::$encoder_name,
+                src::AbstractVector{UInt8}
+            )
+                Base.require_one_based_indexing(src)
+                len = length(src)
+                (len > $max_literal) &&
+                    throw(ArgumentError("length outside schema limit"))
+
+                pos = Int(sbe_position(m))
+                payload_pos = Base.Checked.checked_add(pos, $header_length)
+                logical_end = Base.Checked.checked_add(payload_pos, len)
+                @boundscheck checkbounds(m.buffer, payload_pos)
+                encode_value(
+                    $length_type,
+                    m.buffer,
+                    pos,
+                    $length_type_symbol(len)
+                )
+
+                prefix_start = Base.Checked.checked_add(
+                    Int(sbe_frame_offset(m)),
+                    1
+                )
+                prefix = view(m.buffer, prefix_start:payload_pos)
+                frame = SbeFrame(prefix, src)
+                sbe_position!(m, logical_end)
+                return frame
+            end
+
+            @inline function $external_setter(
+                m::$encoder_name,
+                src::AbstractString
+            )
+                $string_guard
+                return $external_setter(m, codeunits(src))
+            end
+        end)
+    end
 
     push!(exprs, quote
         @inline function $accessor_setter(m::$encoder_name, src::NTuple)
@@ -1687,9 +1776,25 @@ function generate_var_data_expr(
     documentation = var_data_accessor_doc(var_data_tokens)
     push!(exprs, generated_binding_doc_expr(documentation, accessor_name))
     push!(exprs, generated_binding_doc_expr(documentation, accessor_setter))
+    if external_tail
+        external_documentation = """
+            $external_setter(encoder, bytes) -> SbeFrame
+
+        Encode the length header for the terminal `$(field_token.name)` variable-data field without copying `bytes` into the encoder buffer. The returned logical frame retains the encoded prefix and external tail; pass `SBE.sbe_regions(frame)` to a scatter/gather transport or decode the frame directly.
+
+        This method is generated only for the final top-level variable-data field. Encoding cannot continue after attaching the external tail. The source must remain unchanged while the frame is in use.
+        """
+        push!(
+            exprs,
+            generated_binding_doc_expr(external_documentation, external_setter)
+        )
+    end
     push!(exprs, quote
         export $accessor_name, $accessor_setter
     end)
+    if external_tail
+        push!(exprs, :(export $external_setter))
+    end
 
     return exprs
 end
@@ -2142,18 +2247,30 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
         end)
     end
 
-    for var_data_tokens in var_data
+    for (index, var_data_tokens) in enumerate(var_data)
         name_symbol = Symbol(format_property_name(var_data_tokens[1].name))
         skip_name = Symbol(string("skip_", name_symbol, "!"))
         push!(skip_calls, :($skip_name(m)))
-        append!(var_data_exprs, generate_var_data_expr(var_data_tokens, abstract_type_name, decoder_name, encoder_name, ir))
+        append!(
+            var_data_exprs,
+            generate_var_data_expr(
+                var_data_tokens,
+                abstract_type_name,
+                decoder_name,
+                encoder_name,
+                ir;
+                external_tail=index == length(var_data)
+            )
+        )
     end
 
     message_quoted = quote
         module $message_name
         export $abstract_type_name, $decoder_name, $encoder_name
-        using SBE: AbstractSbeMessage, PositionPointer, to_string
+        using SBE: AbstractSbeMessage, PositionPointer, SbeFrame
+        using SBE: sbe_external_tail, to_string
         import SBE: sbe_buffer, sbe_offset, sbe_position_ptr, sbe_position, sbe_position!
+        import SBE: sbe_frame_offset
         import SBE: sbe_block_length, sbe_template_id, sbe_schema_id, sbe_schema_version
         import SBE: sbe_acting_block_length, sbe_acting_version, sbe_rewind!
         import SBE: sbe_encoded_length, sbe_decoded_length, sbe_semantic_type, sbe_description
@@ -2174,12 +2291,14 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
 
         mutable struct $decoder_name{T<:AbstractArray{UInt8}} <: $abstract_type_name{T}
             buffer::T
+            frame_offset::Int64
             offset::Int64
             position_ptr::PositionPointer
             acting_block_length::UInt16
             acting_version::$version_type_symbol
             function $decoder_name{T}() where {T<:AbstractArray{UInt8}}
                 obj = new{T}()
+                obj.frame_offset = Int64(0)
                 obj.offset = Int64(0)
                 obj.position_ptr = PositionPointer()
                 obj.acting_block_length = UInt16(0)
@@ -2190,10 +2309,12 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
 
         mutable struct $encoder_name{T<:AbstractArray{UInt8}} <: $abstract_type_name{T}
             buffer::T
+            frame_offset::Int64
             offset::Int64
             position_ptr::PositionPointer
             function $encoder_name{T}() where {T<:AbstractArray{UInt8}}
                 obj = new{T}()
+                obj.frame_offset = Int64(0)
                 obj.offset = Int64(0)
                 obj.position_ptr = PositionPointer()
                 return obj
@@ -2234,6 +2355,7 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
         @inline function wrap!(m::$decoder_name{T}, buffer::T, offset::Integer,
             acting_block_length::Integer, acting_version::Integer) where {T}
             m.buffer = buffer
+            m.frame_offset = Int64(offset)
             m.offset = Int64(offset)
             m.acting_block_length = UInt16(acting_block_length)
             m.acting_version = $version_type_symbol(acting_version)
@@ -2252,12 +2374,15 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
                     string(actual_template_id) * "/" * string(actual_schema_id)
                 ))
             end
-            return wrap!(m, buffer, offset + sbe_encoded_length(header),
+            result = wrap!(m, buffer, offset + sbe_encoded_length(header),
                 $header_module.blockLength(header), $header_module.version(header))
+            result.frame_offset = Int64(offset)
+            return result
         end
 
         @inline function wrap!(m::$encoder_name{T}, buffer::T, offset::Integer) where {T}
             m.buffer = buffer
+            m.frame_offset = Int64(offset)
             m.offset = Int64(offset)
             m.position_ptr[] = m.offset + $(block_length_expr(ir, msg_token.encoded_length))
             return m
@@ -2269,7 +2394,9 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
             $header_module.templateId!(header, $(template_id_expr(ir, msg_token.id)))
             $header_module.schemaId!(header, $(schema_id_expr(ir, ir.id)))
             $header_module.version!(header, $(version_expr(ir, ir.version)))
-            return wrap!(m, buffer, offset + sbe_encoded_length(header))
+            result = wrap!(m, buffer, offset + sbe_encoded_length(header))
+            result.frame_offset = Int64(offset)
+            return result
         end
 
         @inline function $decoder_name(buffer::T, offset::Integer=0;

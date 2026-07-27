@@ -22,6 +22,7 @@ such as `String` can allocate.
 - **Version Handling**: Schema versioning with `sinceVersion` and `acting_version`
 - **Endianness**: Little-endian (default) and big-endian byte order
 - **Character Encodings**: ASCII and UTF-8 with zero-copy StringView
+- **Split Frames**: Zero-copy terminal variable data across transport-owned regions
 
 ## Usage
 
@@ -90,6 +91,36 @@ Baseline.Car.activationCode!(car, "ABCD1234")
 # Get encoded length
 encoded_length = SBE.sbe_encoded_length(car)
 ```
+
+If the last top-level variable-data field already resides in another buffer,
+generated codecs can return a transport-neutral logical frame without copying
+that payload:
+
+```julia
+prefix_buffer = zeros(UInt8, 256)
+message = Telemetry.Image.Encoder(prefix_buffer)
+Telemetry.Image.timestamp!(message, timestamp)
+
+frame = Telemetry.Image.values_external!(message, image_bytes)
+regions = SBE.sbe_regions(frame)
+
+# Use `regions` with a vectored transport API.
+# A decoder can consume `frame` directly.
+decoder = Telemetry.Image.Decoder(frame)
+image_view = Telemetry.Image.values(decoder)
+```
+
+`SbeFrame` also models a fixed transport user header followed by a dynamic
+payload:
+
+```julia
+frame = SBE.SbeFrame(user_header_bytes, dynamic_payload_bytes)
+decoder = Telemetry.Image.Decoder(frame)
+```
+
+The external setter is generated only for the final top-level variable-data
+field. See the [usage guide](docs/USAGE.md#external-terminal-data-and-logical-frames)
+for lifetime, fixed-prefix, nested-frame, and length semantics.
 
 ### Decoding a Message
 

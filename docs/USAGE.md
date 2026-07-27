@@ -184,6 +184,103 @@ Baseline.Car.model!(car, "Civic")
 Baseline.Car.activationCode!(car, "ABCD1234")
 ```
 
+### External Terminal Data and Logical Frames
+
+When the final top-level variable-data field already lives in another buffer,
+the generated `{field}_external!` method encodes only its length header and
+returns an `SbeFrame`:
+
+```julia
+prefix_buffer = zeros(UInt8, 256)
+encoder = Telemetry.Image.Encoder(prefix_buffer)
+
+Telemetry.Image.timestamp!(encoder, timestamp)
+frame = Telemetry.Image.values_external!(encoder, image_bytes)
+```
+
+The prefix contains the SBE message header, fixed block, any earlier encoded
+groups or variable data, and the final variable-data length header.
+`image_bytes` remains in its original buffer:
+
+```julia
+regions = SBE.sbe_regions(frame)
+@assert regions[end] === image_bytes
+@assert SBE.sbe_wire_length(frame) == sum(length, regions)
+
+# Supply the collection to a transport's scatter/gather or vectored-send API.
+transport_offer_vector(regions)
+```
+
+For example, Aeron.jl's vectored `offer` overload accepts the collection
+directly:
+
+```julia
+Aeron.offer(publication, SBE.sbe_regions(frame))
+```
+
+`SbeFrame` is an `AbstractVector{UInt8}` representing the logical concatenation
+of its regions, so generated decoders consume it directly:
+
+```julia
+decoder = Telemetry.Image.Decoder(frame)
+image_view = Telemetry.Image.values(decoder)  # zero-copy view of image_bytes
+```
+
+Frames compose without copying. Attaching an `SbeFrame` as another message's
+terminal field creates a nested frame, while `sbe_regions` recursively returns
+the ordered physical regions needed by a transport.
+
+The external method is deliberately generated only for the final top-level
+variable-data field. Encoding cannot continue after attaching the external
+tail. Earlier variable-data fields and data inside repeating groups retain their
+normal contiguous APIs.
+
+For a transport with a fixed user header and a dynamic payload, such as a
+loan-based shared-memory transport, expose both borrowed regions as one-based
+`AbstractVector{UInt8}` values:
+
+```julia
+# These views are supplied by the transport adapter.
+user_header_bytes = borrowed_user_header_bytes(sample)
+dynamic_payload = borrowed_dynamic_payload_bytes(sample)
+
+encoder = Telemetry.Image.Encoder(user_header_bytes)
+Telemetry.Image.timestamp!(encoder, timestamp)
+frame = Telemetry.Image.values_external!(encoder, dynamic_payload)
+```
+
+On receipt, reconstruct the logical SBE message without concatenating:
+
+```julia
+frame = SBE.SbeFrame(user_header_bytes, dynamic_payload)
+decoder = Telemetry.Image.Decoder(frame)
+```
+
+This user-header mapping requires the encoded prefix size to be fixed by the
+service contract. If earlier groups or variable data make it variable, encode
+the complete SBE frame into the dynamic payload or use a transport capable of
+carrying all regions.
+
+The frame keeps its Julia region objects reachable, but it cannot prevent an
+external owner from explicitly releasing a native loan. Do not close, requeue,
+or otherwise invalidate borrowed buffers until synchronous submission finishes
+or the decoder is no longer in use. The region bytes must also remain unchanged
+for that period.
+
+After compilation and warm-up, SBE.jl introduces no heap allocations when:
+
+- encoding a terminal external byte or string tail;
+- retrieving `sbe_regions(frame)`; or
+- using generated raw accessors to decode a logical frame.
+
+The regression suite enforces this dynamically and with AllocCheck on Julia 1.10
+and current stable Julia for vectors, borrowed views, nested frames, strings, and
+a representative message containing fixed arrays, groups, and earlier variable
+data. This contract assumes that the supplied buffer's own indexing and view
+operations do not allocate. Input construction, conversions that necessarily
+produce owned values such as `String` or `collect`, compilation, and exceptional
+paths are outside the zero-allocation contract.
+
 ## Decoding
 
 Decoders read directly from the same buffer.
@@ -246,8 +343,16 @@ position pointer internally; groups share the parent message pointer when iterat
 pos = SBE.sbe_position(car)
 SBE.sbe_position!(car, pos)
 len = SBE.sbe_encoded_length(car)
+frame_offset = SBE.sbe_frame_offset(car)
+frame_len = SBE.sbe_frame_length(car)
 decoded_len = SBE.sbe_decoded_length(dec)
 ```
+
+`sbe_encoded_length` retains the SBE convention used by existing generated
+code: it measures from the message body offset and excludes the message header.
+`sbe_frame_length` measures from the complete frame offset and therefore
+includes a header written or consumed by the header-aware constructors. For an
+`SbeFrame`, `sbe_wire_length(frame)` is the total available logical byte length.
 
 ## Versioning
 

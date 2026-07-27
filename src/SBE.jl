@@ -115,6 +115,20 @@ Return the encoded length of this message in bytes.
 function sbe_encoded_length end
 
 """
+Return the byte offset at which this complete SBE frame starts.
+
+For header-aware message wrappers this is the message-header offset. For
+headerless wrappers it is the message-body offset.
+"""
+function sbe_frame_offset end
+
+"""
+Return the logical encoded frame length, including the SBE message header when
+the wrapper was created with one.
+"""
+function sbe_frame_length end
+
+"""
 Return the SBE template ID for this message type.
 """
 function sbe_template_id end
@@ -188,6 +202,9 @@ include("ir_generator.jl")
 # IR decoding from .sbeir
 include("ir_decoder.jl")
 import .IrDecoder: decode_ir
+
+# Transport-neutral logical frames backed by multiple byte regions
+include("frames.jl")
 
 # IR code generation utilities
 include("ir_codegen.jl")
@@ -430,12 +447,13 @@ export AbstractSbeEncodedType, AbstractSbeCompositeType
 export id, since_version, in_acting_version, encoding_offset, encoding_length
 export null_value, min_value, max_value, value, value!, meta_attribute
 export sbe_buffer, sbe_offset, sbe_acting_version, sbe_encoded_length
+export sbe_frame_offset, sbe_frame_length
 export sbe_template_id, sbe_schema_id, sbe_schema_version, sbe_block_length
 export sbe_acting_block_length, sbe_position_ptr, sbe_position, sbe_position!
 export sbe_rewind!, sbe_decoded_length, sbe_semantic_type, sbe_description
 
 # Export utility functions
-export to_string
+export SbeFrame, sbe_prefix, sbe_tail, sbe_regions, sbe_wire_length, to_string
 
 export decode_ir
 

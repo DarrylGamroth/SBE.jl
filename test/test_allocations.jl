@@ -13,6 +13,65 @@ function fuel_speed_sum(group)
     return total
 end
 
+function encode_external_frame!(encoder, prefix, payload)
+    Issue488Schema.Issue488.wrap_and_apply_header!(encoder, prefix)
+    return Issue488Schema.Issue488.varData_external!(encoder, payload)
+end
+
+frame_regions(frame) = SBE.sbe_regions(frame)
+
+function decode_external_frame!(decoder, frame)
+    Issue488Schema.Issue488.wrap!(decoder, frame)
+    return Issue488Schema.Issue488.varData(decoder)
+end
+
+function encode_external_text_frame!(encoder, prefix, payload)
+    BasicVariableLength.TestMessage1.wrap_and_apply_header!(encoder, prefix)
+    return BasicVariableLength.TestMessage1.encryptedNewPassword_external!(
+        encoder,
+        payload
+    )
+end
+
+function decode_external_text_frame!(decoder, frame)
+    BasicVariableLength.TestMessage1.wrap!(decoder, frame)
+    return BasicVariableLength.TestMessage1.encryptedNewPassword(decoder)
+end
+
+function decode_external_car_serial_number!(decoder, frame)
+    Baseline.Car.wrap!(decoder, frame)
+    return Baseline.Car.serialNumber(decoder)
+end
+
+function decode_external_car_some_numbers!(decoder, frame)
+    Baseline.Car.wrap!(decoder, frame)
+    return Baseline.Car.someNumbers(decoder)
+end
+
+function decode_external_car_vehicle_code!(decoder, frame)
+    Baseline.Car.wrap!(decoder, frame)
+    return Baseline.Car.vehicleCode(decoder)
+end
+
+function decode_external_car_manufacturer!(decoder, frame)
+    Baseline.Car.wrap!(decoder, frame)
+    Baseline.Car.fuelFigures(decoder)
+    Baseline.Car.performanceFigures(decoder)
+    return Baseline.Car.manufacturer(decoder)
+end
+
+function decode_external_car_activation_code!(decoder, frame)
+    Baseline.Car.wrap!(decoder, frame)
+    Baseline.Car.fuelFigures(decoder)
+    Baseline.Car.performanceFigures(decoder)
+    Baseline.Car.manufacturer(decoder)
+    Baseline.Car.model(decoder)
+    return Baseline.Car.activationCode(decoder)
+end
+
+frame_accessor_allocation_bytes(accessor, decoder, frame) =
+    @allocated accessor(decoder, frame)
+
 @testset "Allocation Tests" begin
     @testset "Zero-Allocation Decoding" begin
         # Create a properly encoded message first
@@ -284,6 +343,185 @@ end
             test_bytes = Vector{UInt8}(codeunits("MoreData"))
             alloc_bytes = @allocated Baseline.Car.activationCode!(encoder2, test_bytes)
             @test alloc_bytes == 0
+        end
+    end
+
+    @testset "Zero-Allocation Logical Frames" begin
+        # Contract: after warming these exact concrete calls, external encoding,
+        # region retrieval, and raw decoding must allocate zero heap bytes.
+        # Input construction, compilation, and exceptional paths are excluded.
+        @testset "Vector regions" begin
+            prefix = zeros(UInt8, 12)
+            payload = zeros(UInt8, 128)
+            encoder = Issue488Schema.Issue488.Encoder(typeof(prefix))
+
+            frame = encode_external_frame!(encoder, prefix, payload)
+            frame_regions(frame)
+            decoder = Issue488Schema.Issue488.Decoder(typeof(frame))
+            @test decode_external_frame!(decoder, frame) === payload
+
+            @test (@allocated encode_external_frame!(
+                encoder,
+                prefix,
+                payload
+            )) == 0
+            @test (@allocated frame_regions(frame)) == 0
+            @test (@allocated decode_external_frame!(decoder, frame)) == 0
+
+            @test isempty(check_allocs(
+                encode_external_frame!,
+                (typeof(encoder), typeof(prefix), typeof(payload))
+            ))
+            @test isempty(check_allocs(frame_regions, (typeof(frame),)))
+            @test isempty(check_allocs(
+                Issue488Schema.Issue488.varData,
+                (typeof(decoder),)
+            ))
+            @test isempty(check_allocs(
+                decode_external_frame!,
+                (typeof(decoder), typeof(frame))
+            ))
+        end
+
+        @testset "Borrowed views" begin
+            prefix_owner = zeros(UInt8, 20)
+            payload_owner = zeros(UInt8, 140)
+            prefix = @view prefix_owner[5:16]
+            payload = @view payload_owner[7:134]
+            encoder = Issue488Schema.Issue488.Encoder(typeof(prefix))
+
+            frame = encode_external_frame!(encoder, prefix, payload)
+            decoder = Issue488Schema.Issue488.Decoder(typeof(frame))
+            @test decode_external_frame!(decoder, frame) === payload
+
+            @test (@allocated encode_external_frame!(
+                encoder,
+                prefix,
+                payload
+            )) == 0
+            @test (@allocated decode_external_frame!(decoder, frame)) == 0
+            @test isempty(check_allocs(
+                encode_external_frame!,
+                (typeof(encoder), typeof(prefix), typeof(payload))
+            ))
+            @test isempty(check_allocs(
+                decode_external_frame!,
+                (typeof(decoder), typeof(frame))
+            ))
+        end
+
+        @testset "Nested tail" begin
+            prefix = zeros(UInt8, 12)
+            first = zeros(UInt8, 64)
+            second = zeros(UInt8, 64)
+            payload = SBE.SbeFrame(first, second)
+            encoder = Issue488Schema.Issue488.Encoder(typeof(prefix))
+
+            frame = encode_external_frame!(encoder, prefix, payload)
+            decoder = Issue488Schema.Issue488.Decoder(typeof(frame))
+            @test decode_external_frame!(decoder, frame) === payload
+
+            @test (@allocated encode_external_frame!(
+                encoder,
+                prefix,
+                payload
+            )) == 0
+            @test (@allocated frame_regions(frame)) == 0
+            @test (@allocated decode_external_frame!(decoder, frame)) == 0
+            @test isempty(check_allocs(
+                encode_external_frame!,
+                (typeof(encoder), typeof(prefix), typeof(payload))
+            ))
+            @test isempty(check_allocs(
+                decode_external_frame!,
+                (typeof(decoder), typeof(frame))
+            ))
+        end
+
+        @testset "String tail" begin
+            prefix = zeros(UInt8, 9)
+            payload = "secret"
+            encoder =
+                BasicVariableLength.TestMessage1.Encoder(typeof(prefix))
+
+            frame = encode_external_text_frame!(encoder, prefix, payload)
+            decoder =
+                BasicVariableLength.TestMessage1.Decoder(typeof(frame))
+            @test decode_external_text_frame!(decoder, frame) == payload
+
+            @test (@allocated encode_external_text_frame!(
+                encoder,
+                prefix,
+                payload
+            )) == 0
+            @test (@allocated decode_external_text_frame!(
+                decoder,
+                frame
+            )) == 0
+            @test isempty(check_allocs(
+                encode_external_text_frame!,
+                (typeof(encoder), typeof(prefix), typeof(payload))
+            ))
+            @test isempty(check_allocs(
+                decode_external_text_frame!,
+                (typeof(decoder), typeof(frame))
+            ))
+        end
+
+        @testset "Complete generated decoder" begin
+            prefix = zeros(UInt8, 2048)
+            payload = UInt8[0xde, 0xad, 0xbe, 0xef]
+            encoder = Baseline.Car.Encoder(prefix)
+            Baseline.Car.serialNumber!(encoder, 12345)
+            Baseline.Car.modelYear!(encoder, 2024)
+            Baseline.Car.available!(encoder, Baseline.BooleanType.T)
+            Baseline.Car.code!(encoder, Baseline.Model.A)
+            Baseline.Car.someNumbers!(encoder, (1, 2, 3, 4))
+            Baseline.Car.vehicleCode!(encoder, "ABCDEF")
+
+            engine = Baseline.Car.engine(encoder)
+            Baseline.Engine.capacity!(engine, 2000)
+            Baseline.Engine.numCylinders!(engine, 4)
+
+            Baseline.Car.fuelFigures!(encoder, 0)
+            Baseline.Car.performanceFigures!(encoder, 0)
+            Baseline.Car.manufacturer!(encoder, "Toyota")
+            Baseline.Car.model!(encoder, "Corolla")
+            frame =
+                Baseline.Car.activationCode_external!(encoder, payload)
+            decoder = Baseline.Car.Decoder(typeof(frame))
+
+            @test decode_external_car_serial_number!(decoder, frame) == 12345
+            @test collect(
+                decode_external_car_some_numbers!(decoder, frame)
+            ) == UInt32[1, 2, 3, 4]
+            @test decode_external_car_vehicle_code!(decoder, frame) == "ABCDEF"
+            @test collect(
+                decode_external_car_manufacturer!(decoder, frame)
+            ) == collect(codeunits("Toyota"))
+            @test decode_external_car_activation_code!(
+                decoder,
+                frame
+            ) === payload
+
+            accessors = (
+                decode_external_car_serial_number!,
+                decode_external_car_some_numbers!,
+                decode_external_car_vehicle_code!,
+                decode_external_car_manufacturer!,
+                decode_external_car_activation_code!
+            )
+            for accessor in accessors
+                @test frame_accessor_allocation_bytes(
+                    accessor,
+                    decoder,
+                    frame
+                ) == 0
+                @test isempty(check_allocs(
+                    accessor,
+                    (typeof(decoder), typeof(frame))
+                ))
+            end
         end
     end
 end
