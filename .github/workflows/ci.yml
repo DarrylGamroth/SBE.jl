@@ -112,7 +112,7 @@ jobs:
         with:
           path: ~/.cache/sbe
           key: sbe-jar-${{ runner.os }}-${{ env.SBE_VERSION }}
-      - uses: julia-actions/setup-julia@v2
+      - uses: julia-actions/setup-julia@v3
         with:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
