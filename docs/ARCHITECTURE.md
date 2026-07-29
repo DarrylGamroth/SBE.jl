@@ -48,6 +48,35 @@ Generated public modules, codec types, fields, groups, enums, and set choices ca
 schema-derived docstrings. Value setters return their receiver; no-value fixed-array
 setters return a writable zero-copy view.
 
+## Logical frames and transport boundaries
+
+[`SbeFrame`](../src/frames.jl) represents one logical SBE byte sequence backed by
+ordered `AbstractVector{UInt8}` regions. It is part of the codec runtime rather than
+an Aeron, Iceoryx2, or other transport integration. `sbe_regions` exposes those
+physical regions for scatter/gather submission, while generated decoders consume the
+logical frame through the ordinary buffer API.
+
+The generator emits `{field}_external!` only for the last top-level variable-data
+field. That method writes the field's length header into the encoder buffer, advances
+the logical cursor across the borrowed tail, and returns an `SbeFrame` retaining both
+regions. Limiting the operation to the terminal field avoids pretending that encoding
+can safely resume in the original physical prefix.
+
+Header-aware message wrappers track the complete frame offset separately from the
+message-body offset. `sbe_encoded_length` remains body-relative for compatibility;
+`sbe_frame_length` includes the SBE message header and an attached external tail.
+
+`view(::SbeFrame, range)` deliberately returns an `SbeFrame` for prefix-only,
+tail-only, and crossing ranges. Returning one concrete wrapper shape keeps generated
+array and earlier variable-data accessors type-stable; returning a physical view in
+some cases and a logical frame in others causes escaping accessors to box. Empty
+companion views preserve the logical range without copying bytes.
+
+Transport packages remain responsible for their own ownership and submission rules.
+A transport with vectored I/O can submit `sbe_regions(frame)`. A shared-memory
+transport can map a fixed user-header byte region to the frame prefix and a dynamic
+loan to its tail, provided that the SBE prefix size is fixed by the service contract.
+
 ## Loading and Julia world age
 
 `@load_schema` and `@load_sbeir` require literal paths and expand to ordinary top-level

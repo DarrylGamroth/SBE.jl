@@ -92,6 +92,7 @@ const TEST_FILES = [
     "test_load_schema_macro.jl",
     # Generated codec features
     "test_vardata.jl",
+    "test_sbe_frames.jl",
     "test_groups.jl",
     "test_constants.jl",
     "test_display.jl",

@@ -71,6 +71,8 @@ These provide the basic flyweight interface for accessing message properties.
 end
 
 @inline sbe_encoded_length(m::AbstractSbeMessage) = m.position_ptr[] - m.offset
+@inline sbe_frame_offset(m::AbstractSbeMessage) = m.frame_offset
+@inline sbe_frame_length(m::AbstractSbeMessage) = m.position_ptr[] - m.frame_offset
 
 # Acting version - different field names for messages vs composites
 @inline sbe_acting_version(m::AbstractSbeCompositeType) = m.acting_version
@@ -213,6 +215,133 @@ Uses big-endian byte order.
     indices = offset+1:offset+sizeof(T)
     @boundscheck checkbounds(buffer, indices)
     @inbounds return ntoh(reinterpret(T, view(buffer, indices))[])
+end
+
+# Scalar values normally live entirely within one physical frame region. Route
+# those accesses directly to that region instead of constructing and
+# reinterpreting a logical view. The bytewise helpers preserve correctness for
+# unusual frames whose split crosses a scalar.
+@inline _sbe_unsigned_type(::Val{1}) = UInt8
+@inline _sbe_unsigned_type(::Val{2}) = UInt16
+@inline _sbe_unsigned_type(::Val{4}) = UInt32
+@inline _sbe_unsigned_type(::Val{8}) = UInt64
+
+Base.@noinline function _decode_value_cross(
+    ::Type{T},
+    frame::SbeFrame,
+    offset
+) where {T}
+    unsigned_type = _sbe_unsigned_type(Val(sizeof(T)))
+    bits = zero(unsigned_type)
+    for index in 1:sizeof(T)
+        shift = ENDIAN_BOM == 0x04030201 ?
+            8 * (index - 1) :
+            8 * (sizeof(T) - index)
+        bits |= unsigned_type(@inbounds(frame[offset + index])) << shift
+    end
+    return reinterpret(T, bits)
+end
+
+Base.@noinline function _encode_value_cross!(
+    ::Type{T},
+    frame::SbeFrame,
+    offset,
+    value::T
+) where {T}
+    unsigned_type = _sbe_unsigned_type(Val(sizeof(T)))
+    bits = reinterpret(unsigned_type, value)
+    for index in 1:sizeof(T)
+        shift = ENDIAN_BOM == 0x04030201 ?
+            8 * (index - 1) :
+            8 * (sizeof(T) - index)
+        byte = (bits >> shift) & unsigned_type(0xff)
+        @inbounds frame[offset + index] = UInt8(byte)
+    end
+    return value
+end
+
+@inline function decode_value_le(
+    ::Type{T},
+    frame::SbeFrame,
+    offset
+) where {T}
+    indices = offset+1:offset+sizeof(T)
+    @boundscheck checkbounds(frame, indices)
+    prefix_length = length(frame.prefix)
+    if offset + sizeof(T) <= prefix_length
+        return @inbounds decode_value_le(T, frame.prefix, offset)
+    elseif offset >= prefix_length
+        return @inbounds decode_value_le(
+            T,
+            frame.tail,
+            offset - prefix_length
+        )
+    end
+    return ltoh(_decode_value_cross(T, frame, offset))
+end
+
+@inline function decode_value_be(
+    ::Type{T},
+    frame::SbeFrame,
+    offset
+) where {T}
+    indices = offset+1:offset+sizeof(T)
+    @boundscheck checkbounds(frame, indices)
+    prefix_length = length(frame.prefix)
+    if offset + sizeof(T) <= prefix_length
+        return @inbounds decode_value_be(T, frame.prefix, offset)
+    elseif offset >= prefix_length
+        return @inbounds decode_value_be(
+            T,
+            frame.tail,
+            offset - prefix_length
+        )
+    end
+    return ntoh(_decode_value_cross(T, frame, offset))
+end
+
+@inline function encode_value_le(
+    ::Type{T},
+    frame::SbeFrame,
+    offset,
+    value
+) where {T}
+    indices = offset+1:offset+sizeof(T)
+    @boundscheck checkbounds(frame, indices)
+    prefix_length = length(frame.prefix)
+    if offset + sizeof(T) <= prefix_length
+        return @inbounds encode_value_le(T, frame.prefix, offset, value)
+    elseif offset >= prefix_length
+        return @inbounds encode_value_le(
+            T,
+            frame.tail,
+            offset - prefix_length,
+            value
+        )
+    end
+    return _encode_value_cross!(T, frame, offset, htol(T(value)))
+end
+
+@inline function encode_value_be(
+    ::Type{T},
+    frame::SbeFrame,
+    offset,
+    value
+) where {T}
+    indices = offset+1:offset+sizeof(T)
+    @boundscheck checkbounds(frame, indices)
+    prefix_length = length(frame.prefix)
+    if offset + sizeof(T) <= prefix_length
+        return @inbounds encode_value_be(T, frame.prefix, offset, value)
+    elseif offset >= prefix_length
+        return @inbounds encode_value_be(
+            T,
+            frame.tail,
+            offset - prefix_length,
+            value
+        )
+    end
+    return _encode_value_cross!(T, frame, offset, hton(T(value)))
 end
 
 """
