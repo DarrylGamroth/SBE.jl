@@ -116,7 +116,7 @@ jobs:
         with:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
-      - uses: julia-actions/cache@v2
+      - uses: julia-actions/cache@v3
       - name: Generate Java fixtures (Linux)
         if: runner.os == 'Linux'
         run: julia --project=. scripts/generate_java_fixtures.jl
