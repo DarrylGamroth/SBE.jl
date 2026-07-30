@@ -21,6 +21,12 @@ const TEST_SCHEMAS = [
     (joinpath("resources", "java-json-printer-test-schema.xml"), "JsonPrinterBaseline.jl", "JsonPrinterBaseline"),
     (joinpath("resources", "java-code-generation-schema.xml"), "CodeGenerationTest.jl", "CodeGenerationTest"),
     (joinpath("resources", "field-order-check-schema.xml"), "OrderCheck.jl", "OrderCheck"),
+    (
+        joinpath("resources", "field-order-check-schema.xml"),
+        "OrderCheckChecked.jl",
+        "OrderCheckChecked",
+        true,
+    ),
     (joinpath("resources", "composite-elements-schema.xml"), "CompositeElements.jl", "CompositeElements"),
     (joinpath("resources", "issue505.xml"), "Issue505.jl", "Issue505"),
     (joinpath("resources", "issue560.xml"), "Issue560.jl", "Issue560"),
@@ -77,7 +83,9 @@ function generate_test_schemas(
     mkpath(output_dir)
     generated = Dict{Symbol, String}()
 
-    for (schema_file, output_file, fixture_name) in TEST_SCHEMAS
+    for fixture in TEST_SCHEMAS
+        schema_file, output_file, fixture_name = fixture[1:3]
+        precedence_checks = length(fixture) == 4 ? fixture[4] : false
         schema_path = joinpath(TEST_SCHEMA_DIR, schema_file)
         output_path = joinpath(output_dir, output_file)
 
@@ -89,6 +97,7 @@ function generate_test_schemas(
             output_path;
             module_name=test_fixture_module_name(Symbol(fixture_name)),
             suppress_warnings=true,
+            precedence_checks=precedence_checks,
         )
         result == output_path || error(
             "Unexpected output path for $fixture_name: expected $output_path, got $result",

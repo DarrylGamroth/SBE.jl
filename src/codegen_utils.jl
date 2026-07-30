@@ -442,7 +442,8 @@ end
 # ============================================================================
 
 """
-    generate(xml_path::String, output_path::String; module_name=nothing) -> String
+    generate(xml_path::String, output_path::String;
+        module_name=nothing, precedence_checks=false) -> String
 
 Generate Julia code from an SBE schema XML file and write it to `output_path`.
 """
@@ -452,7 +453,8 @@ function generate(
     module_name::Union{Nothing, Symbol, String}=nothing,
     validate::Bool=true,
     warnings_fatal::Bool=false,
-    suppress_warnings::Bool=false
+    suppress_warnings::Bool=false,
+    precedence_checks::Bool=false,
 )
     # Verify input file exists
     if !isfile(xml_path)
@@ -469,7 +471,11 @@ function generate(
     ir = generate_ir(schema)
 
     # Generate the module expression from IR
-    module_expr = generate_ir_module_expr(ir; module_name=module_name)
+    module_expr = generate_ir_module_expr(
+        ir;
+        module_name=module_name,
+        precedence_checks=precedence_checks,
+    )
 
     # Convert to code string
     module_code = expr_to_code_string(module_expr)
@@ -488,7 +494,8 @@ function generate(
 end
 
 """
-    generate(xml_path::String; module_name=nothing) -> String
+    generate(xml_path::String;
+        module_name=nothing, precedence_checks=false) -> String
 
 Generate Julia code from an SBE schema XML file and return it as a string.
 """
@@ -497,7 +504,8 @@ function generate(
     module_name::Union{Nothing, Symbol, String}=nothing,
     validate::Bool=true,
     warnings_fatal::Bool=false,
-    suppress_warnings::Bool=false
+    suppress_warnings::Bool=false,
+    precedence_checks::Bool=false,
 )
     # Verify input file exists
     if !isfile(xml_path)
@@ -514,15 +522,21 @@ function generate(
     ir = generate_ir(schema)
 
     # Generate the complete module expression from IR
-    module_expr = generate_ir_module_expr(ir; module_name=module_name)
+    module_expr = generate_ir_module_expr(
+        ir;
+        module_name=module_name,
+        precedence_checks=precedence_checks,
+    )
 
     # Convert to code string and return
     return expr_to_code_string(module_expr)
 end
 
 """
-    generate_from_ir(ir::IR.Ir; module_name=nothing) -> String
-    generate_from_ir(ir_path::AbstractString; module_name=nothing) -> String
+    generate_from_ir(ir::IR.Ir;
+        module_name=nothing, precedence_checks=false) -> String
+    generate_from_ir(ir_path::AbstractString;
+        module_name=nothing, precedence_checks=false) -> String
 
 Generate Julia source code from an in-memory SBE IR or a Java-compatible `.sbeir`
 file. The returned source defines the generated schema module but does not evaluate
@@ -531,17 +545,27 @@ file for normal `include`/precompilation workflows.
 """
 function generate_from_ir(
     ir::IR.Ir;
-    module_name::Union{Nothing, Symbol, String}=nothing
+    module_name::Union{Nothing, Symbol, String}=nothing,
+    precedence_checks::Bool=false,
 )
-    module_expr = generate_ir_module_expr(ir; module_name=module_name)
+    module_expr = generate_ir_module_expr(
+        ir;
+        module_name=module_name,
+        precedence_checks=precedence_checks,
+    )
     return expr_to_code_string(module_expr)
 end
 
 function generate_from_ir(
     ir_path::AbstractString;
-    module_name::Union{Nothing, Symbol, String}=nothing
+    module_name::Union{Nothing, Symbol, String}=nothing,
+    precedence_checks::Bool=false,
 )
-    return generate_from_ir(decode_ir(ir_path); module_name=module_name)
+    return generate_from_ir(
+        decode_ir(ir_path);
+        module_name=module_name,
+        precedence_checks=precedence_checks,
+    )
 end
 
 """
@@ -555,9 +579,14 @@ returned.
 function generate_from_ir(
     ir::IR.Ir,
     output_path::AbstractString;
-    module_name::Union{Nothing, Symbol, String}=nothing
+    module_name::Union{Nothing, Symbol, String}=nothing,
+    precedence_checks::Bool=false,
 )
-    code = generate_from_ir(ir; module_name=module_name)
+    code = generate_from_ir(
+        ir;
+        module_name=module_name,
+        precedence_checks=precedence_checks,
+    )
     output_dir = dirname(output_path)
     !isempty(output_dir) && !isdir(output_dir) && mkpath(output_dir)
     write(output_path, code)
@@ -567,11 +596,13 @@ end
 function generate_from_ir(
     ir_path::AbstractString,
     output_path::AbstractString;
-    module_name::Union{Nothing, Symbol, String}=nothing
+    module_name::Union{Nothing, Symbol, String}=nothing,
+    precedence_checks::Bool=false,
 )
     return generate_from_ir(
         decode_ir(ir_path),
         output_path;
-        module_name=module_name
+        module_name=module_name,
+        precedence_checks=precedence_checks,
     )
 end

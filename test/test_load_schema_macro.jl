@@ -53,6 +53,18 @@ end
 
 end
 
+module LoadSchemaCheckedHost
+using SBE
+
+const LOADED_NAME = SBE.@load_schema(
+    "resources/basic-variable-length-schema.xml";
+    module_name=:ExpansionTimeCheckedSchema,
+    suppress_warnings=true,
+    precedence_checks=true,
+)
+
+end
+
 
 @testset "@load_schema" begin
     @testset "Module naming and override" begin
@@ -81,12 +93,29 @@ end
         @test LoadSchemaWorldAgeHost.encode_then_decode_order_id(UInt64(42)) == UInt64(42)
     end
 
+    @testset "Checked generation" begin
+        @test LoadSchemaCheckedHost.LOADED_NAME ==
+              :ExpansionTimeCheckedSchema
+        codec = LoadSchemaCheckedHost.ExpansionTimeCheckedSchema.TestMessage1
+        buffer = zeros(UInt8, 64)
+        encoder = codec.Encoder(buffer)
+        codec.encryptedNewPassword!(encoder, "checked")
+        @test SBE.check_encoding_is_complete(encoder) === nothing
+    end
+
     @testset "Invalid usage" begin
         @test_throws SystemError macroexpand(
             Main,
             :(SBE.@load_schema "non_existent_file.xml"),
         )
         @test_throws ArgumentError macroexpand(Main, :(SBE.@load_schema schema_path))
+        @test_throws ArgumentError macroexpand(
+            Main,
+            :(SBE.@load_schema(
+                "resources/ir-basic-schema.xml";
+                precedence_checks=enabled,
+            )),
+        )
 
         literal_path = abspath(joinpath(@__DIR__, "resources", "ir-basic-schema.xml"))
         invalid_host = Module(gensym(:InvalidSchemaLoadHost))

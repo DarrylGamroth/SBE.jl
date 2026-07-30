@@ -323,6 +323,177 @@ function relative_using_expr(depth::Int, name::Symbol)
     return Meta.parse("using " * dots * string(name))
 end
 
+function precedence_helper_name(
+    mode::Symbol,
+    key::PrecedenceInteractionKey,
+)
+    kind, path = key
+    raw = string("_", mode, "_precedence_", kind, "_", path, "!")
+    return Symbol(sanitize_identifier(raw))
+end
+
+function precedence_helper_symbols(
+    model::FieldPrecedenceModel,
+    mode::Symbol,
+)
+    interaction_keys = filter(
+        key -> first(key) != :wrap,
+        collect(Base.keys(model.transitions)),
+    )
+    sort!(interaction_keys; by=key -> string(first(key), ":", last(key)))
+    return [precedence_helper_name(mode, key) for key in interaction_keys]
+end
+
+function precedence_relative_import_expr(
+    module_depth::Int,
+    message_name::Symbol,
+    names::Vector{Symbol},
+)
+    isempty(names) && return Expr(:block)
+    dots = repeat(".", module_depth)
+    return Meta.parse(
+        "using " *
+        dots *
+        string(message_name) *
+        ": " *
+        join(string.(names), ", "),
+    )
+end
+
+function precedence_state_condition(states::Vector{Int})
+    conditions = [:(state == UInt16($state)) for state in states]
+    isempty(conditions) && return false
+    result = first(conditions)
+    for condition in Iterators.drop(conditions, 1)
+        result = :($result || $condition)
+    end
+    return result
+end
+
+function precedence_error_expr(
+    model::FieldPrecedenceModel,
+    key::PrecedenceInteractionKey,
+    state_names_symbol::Symbol,
+    state_transitions_symbol::Symbol,
+)
+    return :(throw_precedence_error(
+        $(model.actions[key]),
+        $(last(key)),
+        state,
+        $state_names_symbol,
+        $state_transitions_symbol,
+        $(model.machine_name),
+    ))
+end
+
+function precedence_listener_expr(
+    model::FieldPrecedenceModel,
+    key::PrecedenceInteractionKey,
+    state_names_symbol::Symbol,
+    state_transitions_symbol::Symbol,
+)
+    error_expr = precedence_error_expr(
+        model,
+        key,
+        state_names_symbol,
+        state_transitions_symbol,
+    )
+
+    if first(key) == :field && last(key) in model.top_level_block_fields
+        return quote
+            state = codec_state.value
+            state == UInt16(0) && $error_expr
+            return nothing
+        end
+    end
+
+    fallback = error_expr
+    for transition in Iterators.reverse(model.transitions[key])
+        condition = precedence_state_condition(transition.from)
+        success = quote
+            codec_state.value = UInt16($(transition.to))
+            return nothing
+        end
+        fallback = Expr(:if, condition, success, fallback)
+    end
+
+    return quote
+        state = codec_state.value
+        $fallback
+    end
+end
+
+function generate_precedence_helpers(
+    model::FieldPrecedenceModel,
+    mode::Symbol,
+)
+    prefix = Symbol("_", mode, "_precedence")
+    state_names_symbol = Symbol(prefix, "_state_names")
+    state_transitions_symbol = Symbol(prefix, "_state_transitions")
+    state_names = Tuple(model.state_names)
+    state_transitions = Tuple(Tuple(expected) for expected in model.expected_by_state)
+    exprs = Expr[
+        :(const $state_names_symbol = $state_names),
+        :(const $state_transitions_symbol = $state_transitions),
+    ]
+
+    interaction_keys = filter(
+        key -> first(key) != :wrap,
+        collect(Base.keys(model.transitions)),
+    )
+    sort!(interaction_keys; by=key -> string(first(key), ":", last(key)))
+    for key in interaction_keys
+        helper_name = precedence_helper_name(mode, key)
+        listener = precedence_listener_expr(
+            model,
+            key,
+            state_names_symbol,
+            state_transitions_symbol,
+        )
+        push!(
+            exprs,
+            quote
+                @inline function $helper_name(codec_state::CodecStatePointer)
+                    $listener
+                end
+            end,
+        )
+    end
+
+    return exprs, state_names_symbol, state_transitions_symbol
+end
+
+@inline function precedence_access_expr(
+    model::FieldPrecedenceModel,
+    mode::Symbol,
+    key::PrecedenceInteractionKey,
+    object::Symbol=:m,
+)
+    helper_name = precedence_helper_name(mode, key)
+    return :($helper_name($object.codec_state))
+end
+
+function precedence_decoder_wrap_expr(
+    model::FieldPrecedenceModel,
+    object::Symbol,
+    acting_version,
+)
+    fallback = :(throw(ArgumentError(
+        "unsupported acting version for precedence checks: " *
+        string($acting_version),
+    )))
+    for version in sort!(collect(keys(model.wrapped_states)))
+        state = model.wrapped_states[version]
+        fallback = Expr(
+            :if,
+            :($acting_version >= $version),
+            :($object.codec_state.value = UInt16($state)),
+            fallback,
+        )
+    end
+    return fallback
+end
+
 function julia_type_from_symbol(sym::Symbol)
     if sym === :UInt8
         return UInt8
@@ -967,12 +1138,108 @@ function field_meta_attribute_expr(
     end
 end
 
+function generated_method_signature_call(signature)
+    signature isa Expr || return nothing
+    signature.head == :call && return signature
+    signature.head == :where || return nothing
+    return generated_method_signature_call(signature.args[1])
+end
+
+function generated_method_argument_type(argument)
+    argument isa Expr && argument.head == :(::) || return nothing
+    length(argument.args) == 2 || return nothing
+    argument.args[1] == :m || return nothing
+    return argument.args[2]
+end
+
+function instrument_generated_field_methods!(
+    expr,
+    method_names::Set{Symbol},
+    decoder_name::Symbol,
+    encoder_name::Symbol,
+    decoder_access,
+    encoder_access,
+    since_version::Int,
+    ir::IR.Ir,
+)
+    expr isa Expr || return expr
+    if expr.head == :function
+        call = generated_method_signature_call(expr.args[1])
+        call === nothing && return expr
+        call.args[1] in method_names || return expr
+        length(call.args) >= 2 || return expr
+        argument_type = generated_method_argument_type(call.args[2])
+        access = if argument_type == decoder_name
+            if decoder_access === nothing
+                nothing
+            elseif since_version > 0
+                quote
+                    if sbe_acting_version(m) >= $(version_expr(ir, since_version))
+                        $decoder_access
+                    end
+                end
+            else
+                decoder_access
+            end
+        elseif argument_type == encoder_name
+            encoder_access
+        else
+            nothing
+        end
+        access === nothing && return expr
+        body = expr.args[2]
+        expr.args[2] = Expr(:block, access, body)
+        return expr
+    end
+    for argument in expr.args
+        instrument_generated_field_methods!(
+            argument,
+            method_names,
+            decoder_name,
+            encoder_name,
+            decoder_access,
+            encoder_access,
+            since_version,
+            ir,
+        )
+    end
+    return expr
+end
+
+function instrument_generated_field_methods!(
+    exprs::Vector{Expr},
+    field_name::Symbol,
+    decoder_name::Symbol,
+    encoder_name::Symbol,
+    decoder_access,
+    encoder_access,
+    since_version::Int,
+    ir::IR.Ir,
+)
+    method_names = Set([field_name, Symbol(field_name, :!)])
+    for expr in exprs
+        instrument_generated_field_methods!(
+            expr,
+            method_names,
+            decoder_name,
+            encoder_name,
+            decoder_access,
+            encoder_access,
+            since_version,
+            ir,
+        )
+    end
+    return exprs
+end
+
 function generate_encoded_field_expr(
     field_tokens::Vector{IR.Token},
     abstract_type_name::Symbol,
     decoder_name::Symbol,
     encoder_name::Symbol,
-    ir::IR.Ir
+    ir::IR.Ir;
+    decoder_access=nothing,
+    encoder_access=nothing,
 )
     field_token = field_tokens[1]
     encoding_token = field_tokens[2]
@@ -1022,7 +1289,16 @@ function generate_encoded_field_expr(
                 export $field_name
             end)
         end
-        return exprs
+        return instrument_generated_field_methods!(
+            exprs,
+            field_name,
+            decoder_name,
+            encoder_name,
+            decoder_access,
+            encoder_access,
+            field_token.version,
+            ir,
+        )
     end
 
     if array_len == 1
@@ -1057,7 +1333,16 @@ function generate_encoded_field_expr(
                 export $field_name, $(Symbol(field_name, :!))
             end)
         end
-        return exprs
+        return instrument_generated_field_methods!(
+            exprs,
+            field_name,
+            decoder_name,
+            encoder_name,
+            decoder_access,
+            encoder_access,
+            field_token.version,
+            ir,
+        )
     end
 
     is_char_array = primitive_type == IR.PrimitiveType.CHAR
@@ -1151,7 +1436,16 @@ function generate_encoded_field_expr(
                 export $field_name, $(Symbol(field_name, :!))
             end)
         end
-        return exprs
+        return instrument_generated_field_methods!(
+            exprs,
+            field_name,
+            decoder_name,
+            encoder_name,
+            decoder_access,
+            encoder_access,
+            field_token.version,
+            ir,
+        )
     end
     if field_token.version > 0
         null_val = encoding_literal(encoding_token.encoding.null_value, primitive_type, IR.primitive_type_null)
@@ -1242,7 +1536,16 @@ function generate_encoded_field_expr(
         end)
     end
 
-    return exprs
+    return instrument_generated_field_methods!(
+        exprs,
+        field_name,
+        decoder_name,
+        encoder_name,
+        decoder_access,
+        encoder_access,
+        field_token.version,
+        ir,
+    )
 end
 
 function generate_enum_field_expr(
@@ -1250,7 +1553,9 @@ function generate_enum_field_expr(
     abstract_type_name::Symbol,
     decoder_name::Symbol,
     encoder_name::Symbol,
-    ir::IR.Ir
+    ir::IR.Ir;
+    decoder_access=nothing,
+    encoder_access=nothing,
 )
     field_token = field_tokens[1]
     enum_token = field_tokens[2]
@@ -1329,7 +1634,16 @@ function generate_enum_field_expr(
                 export $field_name
             end)
         end
-        return exprs
+        return instrument_generated_field_methods!(
+            exprs,
+            field_name,
+            decoder_name,
+            encoder_name,
+            decoder_access,
+            encoder_access,
+            field_token.version,
+            ir,
+        )
     end
 
     if field_token.version > 0
@@ -1357,7 +1671,16 @@ function generate_enum_field_expr(
 
             export $field_name, $(Symbol(field_name, :!))
         end)
-        return exprs
+        return instrument_generated_field_methods!(
+            exprs,
+            field_name,
+            decoder_name,
+            encoder_name,
+            decoder_access,
+            encoder_access,
+            field_token.version,
+            ir,
+        )
     end
 
     push!(exprs, quote
@@ -1378,7 +1701,16 @@ function generate_enum_field_expr(
         export $field_name, $(Symbol(field_name, :!))
     end)
 
-    return exprs
+    return instrument_generated_field_methods!(
+        exprs,
+        field_name,
+        decoder_name,
+        encoder_name,
+        decoder_access,
+        encoder_access,
+        field_token.version,
+        ir,
+    )
 end
 
 function generate_set_field_expr(
@@ -1386,7 +1718,9 @@ function generate_set_field_expr(
     abstract_type_name::Symbol,
     decoder_name::Symbol,
     encoder_name::Symbol,
-    ir::IR.Ir
+    ir::IR.Ir;
+    decoder_access=nothing,
+    encoder_access=nothing,
 )
     field_token = field_tokens[1]
     set_token = field_tokens[2]
@@ -1423,7 +1757,16 @@ function generate_set_field_expr(
         export $field_name
     end)
 
-    return exprs
+    return instrument_generated_field_methods!(
+        exprs,
+        field_name,
+        decoder_name,
+        encoder_name,
+        decoder_access,
+        encoder_access,
+        field_token.version,
+        ir,
+    )
 end
 
 function generate_composite_field_expr(
@@ -1431,7 +1774,9 @@ function generate_composite_field_expr(
     abstract_type_name::Symbol,
     decoder_name::Symbol,
     encoder_name::Symbol,
-    ir::IR.Ir
+    ir::IR.Ir;
+    decoder_access=nothing,
+    encoder_access=nothing,
 )
     field_token = field_tokens[1]
     composite_token = field_tokens[2]
@@ -1466,7 +1811,16 @@ function generate_composite_field_expr(
         export $field_name
     end)
 
-    return exprs
+    return instrument_generated_field_methods!(
+        exprs,
+        field_name,
+        decoder_name,
+        encoder_name,
+        decoder_access,
+        encoder_access,
+        field_token.version,
+        ir,
+    )
 end
 
 function generate_var_data_expr(
@@ -1475,7 +1829,10 @@ function generate_var_data_expr(
     decoder_name::Symbol,
     encoder_name::Symbol,
     ir::IR.Ir;
-    external_tail::Bool=false
+    external_tail::Bool=false,
+    decoder_model::Union{Nothing, FieldPrecedenceModel}=nothing,
+    encoder_model::Union{Nothing, FieldPrecedenceModel}=nothing,
+    qualified_path::String=var_data_tokens[1].name,
 )
     field_token = var_data_tokens[1]
     accessor_name = Symbol(format_property_name(field_token.name))
@@ -1500,6 +1857,26 @@ function generate_var_data_expr(
         var_data_token.encoding.character_encoding,
         :src
     )
+    decoder_access = decoder_model === nothing ? nothing :
+        precedence_access_expr(
+            decoder_model,
+            :decoder,
+            precedence_field_key(qualified_path),
+        )
+    encoder_access = encoder_model === nothing ? nothing :
+        precedence_access_expr(
+            encoder_model,
+            :encoder,
+            precedence_field_key(qualified_path),
+        )
+    decoder_length_access = decoder_model === nothing ? nothing :
+        precedence_access_expr(
+            decoder_model,
+            :decoder,
+            precedence_var_data_length_key(qualified_path),
+        )
+    decoded_length_name = decoder_model === nothing ?
+        length_name : Symbol("_", length_name)
 
     exprs = Expr[]
 
@@ -1519,7 +1896,35 @@ function generate_var_data_expr(
         $(Symbol(accessor_name, :_in_acting_version))(m::$abstract_type_name) = sbe_acting_version(m) >= $(version_expr(ir, since_version))
     end)
 
-    if since_version > 0
+    if decoder_model !== nothing && since_version > 0
+        push!(exprs, quote
+            @inline function $decoded_length_name(m::$decoder_name)
+                if sbe_acting_version(m) < $(version_expr(ir, since_version))
+                    return $length_type_symbol(0)
+                end
+                return decode_value($length_type, m.buffer, sbe_position(m))
+            end
+
+            @inline function $length_name(m::$decoder_name)
+                if sbe_acting_version(m) < $(version_expr(ir, since_version))
+                    return $length_type_symbol(0)
+                end
+                $decoder_length_access
+                return $decoded_length_name(m)
+            end
+        end)
+    elseif decoder_model !== nothing
+        push!(exprs, quote
+            @inline function $decoded_length_name(m::$decoder_name)
+                return decode_value($length_type, m.buffer, sbe_position(m))
+            end
+
+            @inline function $length_name(m::$decoder_name)
+                $decoder_length_access
+                return $decoded_length_name(m)
+            end
+        end)
+    elseif since_version > 0
         push!(exprs, quote
             @inline function $length_name(m::$abstract_type_name)
                 if sbe_acting_version(m) < $(version_expr(ir, since_version))
@@ -1557,7 +1962,8 @@ function generate_var_data_expr(
     push!(exprs, quote
         @inline function $skip_name(m::$decoder_name)
             $skip_missing_guard
-            len = $length_name(m)
+            $(decoder_access === nothing ? :(nothing) : decoder_access)
+            len = $decoded_length_name(m)
             pos = sbe_position(m) + $header_length
             sbe_position!(m, pos + len)
             return len
@@ -1591,7 +1997,8 @@ function generate_var_data_expr(
 
     external_decode_body = quote
         $external_decode_missing_guard
-        len = $length_name(m)
+        $(decoder_access === nothing ? :(nothing) : decoder_access)
+        len = $decoded_length_name(m)
         payload_pos = Base.Checked.checked_add(
             Int(sbe_position(m)),
             $header_length
@@ -1606,7 +2013,8 @@ function generate_var_data_expr(
         push!(exprs, quote
             @inline function $bytes_accessor(m::$decoder_name)
                 $empty_view_guard
-                len = $length_name(m)
+                $(decoder_access === nothing ? :(nothing) : decoder_access)
+                len = $decoded_length_name(m)
                 pos = sbe_position(m) + $header_length
                 sbe_position!(m, pos + len)
                 return view(m.buffer, pos+1:pos+len)
@@ -1630,7 +2038,8 @@ function generate_var_data_expr(
         push!(exprs, quote
             @inline function $accessor_name(m::$decoder_name)
                 $empty_view_guard
-                len = $length_name(m)
+                $(decoder_access === nothing ? :(nothing) : decoder_access)
+                len = $decoded_length_name(m)
                 pos = sbe_position(m) + $header_length
                 sbe_position!(m, pos + len)
                 return view(m.buffer, pos+1:pos+len)
@@ -1649,6 +2058,7 @@ function generate_var_data_expr(
 
     push!(exprs, quote
         @inline function $buffer_name(m::$encoder_name, len)
+            $(encoder_access === nothing ? :(nothing) : encoder_access)
             $length_name_setter(m, len)
             pos = sbe_position(m) + $header_length
             sbe_position!(m, pos + len)
@@ -1658,6 +2068,7 @@ function generate_var_data_expr(
 
     push!(exprs, quote
         @inline function $accessor_setter(m::$encoder_name, src::AbstractArray)
+            $(encoder_access === nothing ? :(nothing) : encoder_access)
             len = sizeof(eltype(src)) * Base.length(src)
             $length_name_setter(m, len)
             pos = sbe_position(m) + $header_length
@@ -1674,6 +2085,7 @@ function generate_var_data_expr(
                 m::$encoder_name,
                 src::AbstractVector{UInt8}
             )
+                $(encoder_access === nothing ? :(nothing) : encoder_access)
                 Base.require_one_based_indexing(src)
                 len = length(src)
                 (len > $max_literal) &&
@@ -1712,6 +2124,7 @@ function generate_var_data_expr(
 
     push!(exprs, quote
         @inline function $accessor_setter(m::$encoder_name, src::NTuple)
+            $(encoder_access === nothing ? :(nothing) : encoder_access)
             len = sizeof(src)
             $length_name_setter(m, len)
             pos = sbe_position(m) + $header_length
@@ -1724,13 +2137,16 @@ function generate_var_data_expr(
 
     push!(exprs, quote
         @inline function $accessor_setter(m::$encoder_name, src::AbstractString)
+            $(encoder_access === nothing ? :(nothing) : encoder_access)
             $string_guard
             len = sizeof(src)
             $length_name_setter(m, len)
             pos = sbe_position(m) + $header_length
             sbe_position!(m, pos + len)
-            dest = view(m.buffer, pos+1:pos+len)
-            copyto!(dest, codeunits(src))
+            bytes = codeunits(src)
+            @inbounds for index in eachindex(bytes)
+                m.buffer[pos + index] = bytes[index]
+            end
             return m
         end
     end)
@@ -1804,7 +2220,13 @@ function generate_group_expr(
     parent_abstract_type::Symbol,
     parent_encoder_name::Symbol,
     ir::IR.Ir,
-    module_depth::Int
+    module_depth::Int;
+    precedence_checks::Bool=false,
+    decoder_model::Union{Nothing, FieldPrecedenceModel}=nothing,
+    encoder_model::Union{Nothing, FieldPrecedenceModel}=nothing,
+    parent_path::String="",
+    root_message_name::Symbol=Symbol("Message"),
+    precedence_helper_names::Vector{Symbol}=Symbol[],
 )
     group_token = group_tokens[1]
     group_name = group_token.name
@@ -1812,6 +2234,7 @@ function generate_group_expr(
     abstract_type_name = Symbol(string("Abstract", group_module_name))
     decoder_name = :Decoder
     encoder_name = :Encoder
+    group_path = precedence_qualified_name(parent_path, group_name)
 
     dimension_tokens = group_tokens[2:1 + group_tokens[2].component_token_count]
     dimension_module_name = Symbol(format_struct_name(dimension_tokens[1].name))
@@ -1843,6 +2266,20 @@ function generate_group_expr(
 
     for field_tokens in fields
         inner = field_tokens[2]
+        field_path = precedence_qualified_name(
+            group_path,
+            field_tokens[1].name,
+        )
+        decoder_access = precedence_checks ? precedence_access_expr(
+            decoder_model,
+            :decoder,
+            precedence_field_key(field_path),
+        ) : nothing
+        encoder_access = precedence_checks ? precedence_access_expr(
+            encoder_model,
+            :encoder,
+            precedence_field_key(field_path),
+        ) : nothing
         documentation = field_accessor_doc(field_tokens)
         push!(
             field_doc_exprs,
@@ -1861,16 +2298,48 @@ function generate_group_expr(
             )
         end
         if inner.signal == IR.Signal.ENCODING
-            append!(field_exprs, generate_encoded_field_expr(field_tokens, abstract_type_name, decoder_name, encoder_name, ir))
+            append!(field_exprs, generate_encoded_field_expr(
+                field_tokens,
+                abstract_type_name,
+                decoder_name,
+                encoder_name,
+                ir;
+                decoder_access=decoder_access,
+                encoder_access=encoder_access,
+            ))
         elseif inner.signal == IR.Signal.BEGIN_ENUM
             push!(enum_imports, composite_member_module_name(inner))
-            append!(field_exprs, generate_enum_field_expr(field_tokens, abstract_type_name, decoder_name, encoder_name, ir))
+            append!(field_exprs, generate_enum_field_expr(
+                field_tokens,
+                abstract_type_name,
+                decoder_name,
+                encoder_name,
+                ir;
+                decoder_access=decoder_access,
+                encoder_access=encoder_access,
+            ))
         elseif inner.signal == IR.Signal.BEGIN_SET
             push!(enum_imports, composite_member_module_name(inner))
-            append!(field_exprs, generate_set_field_expr(field_tokens, abstract_type_name, decoder_name, encoder_name, ir))
+            append!(field_exprs, generate_set_field_expr(
+                field_tokens,
+                abstract_type_name,
+                decoder_name,
+                encoder_name,
+                ir;
+                decoder_access=decoder_access,
+                encoder_access=encoder_access,
+            ))
         elseif inner.signal == IR.Signal.BEGIN_COMPOSITE
             push!(composite_imports, composite_member_module_name(inner))
-            append!(field_exprs, generate_composite_field_expr(field_tokens, abstract_type_name, decoder_name, encoder_name, ir))
+            append!(field_exprs, generate_composite_field_expr(
+                field_tokens,
+                abstract_type_name,
+                decoder_name,
+                encoder_name,
+                ir;
+                decoder_access=decoder_access,
+                encoder_access=encoder_access,
+            ))
         end
     end
 
@@ -1880,7 +2349,13 @@ function generate_group_expr(
             abstract_type_name,
             encoder_name,
             ir,
-            module_depth + 1
+            module_depth + 1;
+            precedence_checks=precedence_checks,
+            decoder_model=decoder_model,
+            encoder_model=encoder_model,
+            parent_path=group_path,
+            root_message_name=root_message_name,
+            precedence_helper_names=precedence_helper_names,
         )
         append!(group_exprs, nested_group_exprs)
         append!(group_exprs, nested_accessors)
@@ -1896,10 +2371,31 @@ function generate_group_expr(
         name_symbol = Symbol(format_property_name(var_data_tokens[1].name))
         skip_name = Symbol(string("skip_", name_symbol, "!"))
         push!(skip_calls, :($skip_name(m)))
-        append!(var_data_exprs, generate_var_data_expr(var_data_tokens, abstract_type_name, decoder_name, encoder_name, ir))
+        append!(
+            var_data_exprs,
+            generate_var_data_expr(
+                var_data_tokens,
+                abstract_type_name,
+                decoder_name,
+                encoder_name,
+                ir;
+                decoder_model=decoder_model,
+                encoder_model=encoder_model,
+                qualified_path=precedence_qualified_name(
+                    group_path,
+                    var_data_tokens[1].name,
+                ),
+            ),
+        )
     end
 
     endian_imports = generate_encoded_types_expr(ir.byte_order)
+    precedence_group_import = precedence_checks ?
+        precedence_relative_import_expr(
+            module_depth,
+            root_message_name,
+            precedence_helper_names,
+        ) : Expr(:block)
 
     dimension_decoder = Expr(:., dimension_module_name, :Decoder)
     dimension_encoder = Expr(:., dimension_module_name, :Encoder)
@@ -1908,11 +2404,455 @@ function generate_group_expr(
     num_in_group_get = Expr(:., dimension_module_name, :numInGroup)
     num_in_group_set = Expr(:., dimension_module_name, :numInGroup!)
 
+    precedence_runtime_import = precedence_checks ?
+        :(using SBE: CodecStatePointer) : Expr(:block)
+
+    group_struct_exprs = if precedence_checks
+        Expr[
+            extract_expr_from_quote(quote
+                mutable struct $decoder_name{T<:AbstractArray{UInt8}} <: $abstract_type_name{T}
+                    buffer::T
+                    offset::Int64
+                    position_ptr::PositionPointer
+                    block_length::UInt16
+                    acting_version::$version_type_symbol
+                    count::$count_type_symbol
+                    index::$count_type_symbol
+                    codec_state::CodecStatePointer
+                    function $decoder_name(
+                        buffer::T,
+                        offset::Integer,
+                        position_ptr::PositionPointer,
+                        block_length::Integer,
+                        acting_version::Integer,
+                        count::Integer,
+                        index::Integer,
+                        codec_state::CodecStatePointer,
+                    ) where {T}
+                        new{T}(
+                            buffer,
+                            offset,
+                            position_ptr,
+                            block_length,
+                            acting_version,
+                            $count_type_symbol(count),
+                            $count_type_symbol(index),
+                            codec_state,
+                        )
+                    end
+                end
+            end, :struct),
+            extract_expr_from_quote(quote
+                mutable struct $encoder_name{T<:AbstractArray{UInt8}} <: $abstract_type_name{T}
+                    buffer::T
+                    offset::Int64
+                    position_ptr::PositionPointer
+                    initial_position::Int64
+                    count::$count_type_symbol
+                    index::$count_type_symbol
+                    codec_state::CodecStatePointer
+                    function $encoder_name(
+                        buffer::T,
+                        offset::Integer,
+                        position_ptr::PositionPointer,
+                        initial_position::Int64,
+                        count::Integer,
+                        index::Integer,
+                        codec_state::CodecStatePointer,
+                    ) where {T}
+                        new{T}(
+                            buffer,
+                            offset,
+                            position_ptr,
+                            initial_position,
+                            $count_type_symbol(count),
+                            $count_type_symbol(index),
+                            codec_state,
+                        )
+                    end
+                end
+            end, :struct),
+        ]
+    else
+        Expr[
+            extract_expr_from_quote(quote
+                mutable struct $decoder_name{T<:AbstractArray{UInt8}} <: $abstract_type_name{T}
+                    buffer::T
+                    offset::Int64
+                    position_ptr::PositionPointer
+                    block_length::UInt16
+                    acting_version::$version_type_symbol
+                    count::$count_type_symbol
+                    index::$count_type_symbol
+                    function $decoder_name(buffer::T, offset::Integer, position_ptr::PositionPointer,
+                        block_length::Integer, acting_version::Integer,
+                        count::Integer, index::Integer) where {T}
+                        new{T}(buffer, offset, position_ptr, block_length, acting_version,
+                            $count_type_symbol(count), $count_type_symbol(index))
+                    end
+                end
+            end, :struct),
+            extract_expr_from_quote(quote
+                mutable struct $encoder_name{T<:AbstractArray{UInt8}} <: $abstract_type_name{T}
+                    buffer::T
+                    offset::Int64
+                    position_ptr::PositionPointer
+                    initial_position::Int64
+                    count::$count_type_symbol
+                    index::$count_type_symbol
+                    function $encoder_name(buffer::T, offset::Integer, position_ptr::PositionPointer,
+                        initial_position::Int64, count::Integer, index::Integer) where {T}
+                        new{T}(buffer, offset, position_ptr, initial_position,
+                            $count_type_symbol(count), $count_type_symbol(index))
+                    end
+                end
+            end, :struct),
+        ]
+    end
+
+    group_wrap_exprs = if precedence_checks
+        Expr[
+            quote
+                @inline function $decoder_name(
+                    buffer,
+                    position_ptr::PositionPointer,
+                    acting_version,
+                    codec_state::CodecStatePointer,
+                )
+                    dimensions = $dimension_decoder(buffer, position_ptr[])
+                    position_ptr[] += $dimension_header_length
+                    return $decoder_name(
+                        buffer,
+                        0,
+                        position_ptr,
+                        $block_length_get(dimensions),
+                        acting_version,
+                        $num_in_group_get(dimensions),
+                        $count_zero_expr,
+                        codec_state,
+                    )
+                end
+            end,
+            quote
+                @inline function reset!(
+                    g::$decoder_name{T},
+                    buffer::T,
+                    position_ptr::PositionPointer,
+                    acting_version,
+                    codec_state::CodecStatePointer,
+                ) where {T}
+                    dimensions = $dimension_decoder(buffer, position_ptr[])
+                    position_ptr[] += $dimension_header_length
+                    g.buffer = buffer
+                    g.offset = 0
+                    g.position_ptr = position_ptr
+                    g.block_length = $block_length_get(dimensions)
+                    g.acting_version = acting_version
+                    g.count = $num_in_group_get(dimensions)
+                    g.index = $count_zero_expr
+                    g.codec_state = codec_state
+                    return g
+                end
+            end,
+            quote
+                @inline function reset_missing!(
+                    g::$decoder_name{T},
+                    buffer::T,
+                    position_ptr::PositionPointer,
+                    acting_version,
+                    codec_state::CodecStatePointer,
+                ) where {T}
+                    g.buffer = buffer
+                    g.offset = 0
+                    g.position_ptr = position_ptr
+                    g.block_length = $(version_expr(ir, 0))
+                    g.acting_version = acting_version
+                    g.count = $count_zero_expr
+                    g.index = $count_zero_expr
+                    g.codec_state = codec_state
+                    return g
+                end
+            end,
+            quote
+                @inline function wrap!(
+                    g::$decoder_name{T},
+                    buffer::T,
+                    position_ptr::PositionPointer,
+                    acting_version,
+                    codec_state::CodecStatePointer,
+                ) where {T}
+                    return reset!(
+                        g,
+                        buffer,
+                        position_ptr,
+                        acting_version,
+                        codec_state,
+                    )
+                end
+            end,
+            quote
+                @inline function $encoder_name(
+                    buffer,
+                    count,
+                    position_ptr::PositionPointer,
+                    codec_state::CodecStatePointer,
+                )
+                    if $(min_check === nothing ? :(count > $max_count) : :($min_check || count > $max_count))
+                        error("count outside of allowed range")
+                    end
+                    dimensions = $dimension_encoder(buffer, position_ptr[])
+                    $block_length_set(
+                        dimensions,
+                        $(block_length_expr(ir, block_length)),
+                    )
+                    $num_in_group_set(dimensions, count)
+                    initial_position = position_ptr[]
+                    position_ptr[] += $dimension_header_length
+                    return $encoder_name(
+                        buffer,
+                        0,
+                        position_ptr,
+                        initial_position,
+                        count,
+                        $count_zero_expr,
+                        codec_state,
+                    )
+                end
+            end,
+            quote
+                @inline function wrap!(
+                    g::$encoder_name{T},
+                    buffer::T,
+                    count,
+                    position_ptr::PositionPointer,
+                    codec_state::CodecStatePointer,
+                ) where {T}
+                    if $(min_check === nothing ? :(count > $max_count) : :($min_check || count > $max_count))
+                        error("count outside of allowed range")
+                    end
+                    dimensions = $dimension_encoder(buffer, position_ptr[])
+                    $block_length_set(
+                        dimensions,
+                        $(block_length_expr(ir, block_length)),
+                    )
+                    $num_in_group_set(dimensions, count)
+                    g.buffer = buffer
+                    g.offset = 0
+                    g.position_ptr = position_ptr
+                    g.initial_position = position_ptr[]
+                    g.count = $count_type_symbol(count)
+                    g.index = $count_zero_expr
+                    g.codec_state = codec_state
+                    position_ptr[] += $dimension_header_length
+                    return g
+                end
+            end,
+        ]
+    else
+        Expr[
+            quote
+                @inline function $decoder_name(buffer, position_ptr::PositionPointer, acting_version)
+                    dimensions = $dimension_decoder(buffer, position_ptr[])
+                    position_ptr[] += $dimension_header_length
+                    return $decoder_name(buffer, 0, position_ptr, $block_length_get(dimensions),
+                        acting_version, $num_in_group_get(dimensions), $count_zero_expr)
+                end
+            end,
+            quote
+                @inline function reset!(g::$decoder_name{T}, buffer::T, position_ptr::PositionPointer, acting_version) where {T}
+                    dimensions = $dimension_decoder(buffer, position_ptr[])
+                    position_ptr[] += $dimension_header_length
+                    g.buffer = buffer
+                    g.offset = 0
+                    g.position_ptr = position_ptr
+                    g.block_length = $block_length_get(dimensions)
+                    g.acting_version = acting_version
+                    g.count = $num_in_group_get(dimensions)
+                    g.index = $count_zero_expr
+                    return g
+                end
+            end,
+            quote
+                @inline function reset_missing!(g::$decoder_name{T}, buffer::T, position_ptr::PositionPointer, acting_version) where {T}
+                    g.buffer = buffer
+                    g.offset = 0
+                    g.position_ptr = position_ptr
+                    g.block_length = $(version_expr(ir, 0))
+                    g.acting_version = acting_version
+                    g.count = $count_zero_expr
+                    g.index = $count_zero_expr
+                    return g
+                end
+            end,
+            quote
+                @inline function wrap!(g::$decoder_name{T}, buffer::T, position_ptr::PositionPointer, acting_version) where {T}
+                    return reset!(g, buffer, position_ptr, acting_version)
+                end
+            end,
+            quote
+                @inline function $encoder_name(buffer, count, position_ptr::PositionPointer)
+                    if $(min_check === nothing ? :(count > $max_count) : :($min_check || count > $max_count))
+                        error("count outside of allowed range")
+                    end
+                    dimensions = $dimension_encoder(buffer, position_ptr[])
+                    $block_length_set(dimensions, $(block_length_expr(ir, block_length)))
+                    $num_in_group_set(dimensions, count)
+                    initial_position = position_ptr[]
+                    position_ptr[] += $dimension_header_length
+                    return $encoder_name(buffer, 0, position_ptr, initial_position, count, $count_zero_expr)
+                end
+            end,
+            quote
+                @inline function wrap!(g::$encoder_name{T}, buffer::T, count, position_ptr::PositionPointer) where {T}
+                    if $(min_check === nothing ? :(count > $max_count) : :($min_check || count > $max_count))
+                        error("count outside of allowed range")
+                    end
+                    dimensions = $dimension_encoder(buffer, position_ptr[])
+                    $block_length_set(dimensions, $(block_length_expr(ir, block_length)))
+                    $num_in_group_set(dimensions, count)
+                    g.buffer = buffer
+                    g.offset = 0
+                    g.position_ptr = position_ptr
+                    g.initial_position = position_ptr[]
+                    g.count = $count_type_symbol(count)
+                    g.index = $count_zero_expr
+                    position_ptr[] += $dimension_header_length
+                    return g
+                end
+            end,
+        ]
+    end
+
+    group_iteration_exprs = if precedence_checks
+        decoder_next = precedence_access_expr(
+            decoder_model,
+            :decoder,
+            precedence_group_next_key(group_path),
+            :g,
+        )
+        decoder_last = precedence_access_expr(
+            decoder_model,
+            :decoder,
+            precedence_group_last_key(group_path),
+            :g,
+        )
+        encoder_next = precedence_access_expr(
+            encoder_model,
+            :encoder,
+            precedence_group_next_key(group_path),
+            :g,
+        )
+        encoder_last = precedence_access_expr(
+            encoder_model,
+            :encoder,
+            precedence_group_last_key(group_path),
+            :g,
+        )
+        encoder_reset = precedence_access_expr(
+            encoder_model,
+            :encoder,
+            precedence_group_reset_key(group_path),
+            :g,
+        )
+        Expr[
+            quote
+                @inline function next!(g::$decoder_name)
+                    g.index < g.count || error("index >= count")
+                    remaining = Int(g.count) - Int(g.index)
+                    if remaining > 1
+                        $decoder_next
+                    else
+                        $decoder_last
+                    end
+                    g.offset = sbe_position(g)
+                    sbe_position!(g, g.offset + sbe_acting_block_length(g))
+                    g.index += one($count_type_symbol)
+                    return g
+                end
+            end,
+            quote
+                @inline function next!(g::$encoder_name)
+                    g.index < g.count || error("index >= count")
+                    remaining = Int(g.count) - Int(g.index)
+                    if remaining > 1
+                        $encoder_next
+                    else
+                        $encoder_last
+                    end
+                    g.offset = sbe_position(g)
+                    sbe_position!(g, g.offset + sbe_acting_block_length(g))
+                    g.index += one($count_type_symbol)
+                    return g
+                end
+            end,
+            quote
+                function Base.iterate(g::$decoder_name, state=nothing)
+                    g.index < g.count || return nothing
+                    return next!(g), state
+                end
+            end,
+            quote
+                function Base.iterate(g::$encoder_name, state=nothing)
+                    g.index < g.count || return nothing
+                    return next!(g), state
+                end
+            end,
+            quote
+                function reset_count_to_index!(g::$encoder_name)
+                    $encoder_reset
+                    g.count = g.index
+                    dimensions = $dimension_encoder(
+                        g.buffer,
+                        g.initial_position,
+                    )
+                    $num_in_group_set(dimensions, g.count)
+                    return g.count
+                end
+            end,
+        ]
+    else
+        Expr[
+            quote
+                @inline function next!(g::$abstract_type_name)
+                    if g.index >= g.count
+                        error("index >= count")
+                    end
+                    g.offset = sbe_position(g)
+                    sbe_position!(g, g.offset + sbe_acting_block_length(g))
+                    g.index += one($count_type_symbol)
+                    return g
+                end
+            end,
+            quote
+                function Base.iterate(g::$abstract_type_name, state=nothing)
+                    if g.index < g.count
+                        g.offset = sbe_position(g)
+                        sbe_position!(g, g.offset + sbe_acting_block_length(g))
+                        g.index += one($count_type_symbol)
+                        return g, state
+                    else
+                        return nothing
+                    end
+                end
+            end,
+            quote
+                function reset_count_to_index!(g::$encoder_name)
+                    g.count = g.index
+                    dimensions = $dimension_encoder(g.buffer, g.initial_position)
+                    $num_in_group_set(dimensions, g.count)
+                    return g.count
+                end
+            end,
+        ]
+    end
+
     group_quoted = quote
         module $group_module_name
         using SBE: AbstractSbeGroup, PositionPointer, to_string
         import SBE: sbe_header_size, sbe_block_length, sbe_acting_block_length, sbe_acting_version
         import SBE: sbe_position, sbe_position!, sbe_position_ptr, next!
+        $precedence_group_import
+        $precedence_runtime_import
         using StringViews: StringView
         $([relative_using_expr(module_depth, enum_name) for enum_name in enum_imports]...)
         $([relative_using_expr(module_depth, composite_name) for composite_name in composite_imports]...)
@@ -1927,35 +2867,7 @@ function generate_group_expr(
 
         abstract type $abstract_type_name{T} <: AbstractSbeGroup end
 
-        mutable struct $decoder_name{T<:AbstractArray{UInt8}} <: $abstract_type_name{T}
-            buffer::T
-            offset::Int64
-            position_ptr::PositionPointer
-            block_length::UInt16
-            acting_version::$version_type_symbol
-            count::$count_type_symbol
-            index::$count_type_symbol
-            function $decoder_name(buffer::T, offset::Integer, position_ptr::PositionPointer,
-                block_length::Integer, acting_version::Integer,
-                count::Integer, index::Integer) where {T}
-                new{T}(buffer, offset, position_ptr, block_length, acting_version,
-                    $count_type_symbol(count), $count_type_symbol(index))
-            end
-        end
-
-        mutable struct $encoder_name{T<:AbstractArray{UInt8}} <: $abstract_type_name{T}
-            buffer::T
-            offset::Int64
-            position_ptr::PositionPointer
-            initial_position::Int64
-            count::$count_type_symbol
-            index::$count_type_symbol
-            function $encoder_name(buffer::T, offset::Integer, position_ptr::PositionPointer,
-                initial_position::Int64, count::Integer, index::Integer) where {T}
-                new{T}(buffer, offset, position_ptr, initial_position,
-                    $count_type_symbol(count), $count_type_symbol(index))
-            end
-        end
+        $(group_struct_exprs...)
 
         $(generated_binding_doc_expr(
             "Abstract flyweight type for the generated `$(group_token.name)` repeating-group codec.",
@@ -1970,69 +2882,7 @@ function generate_group_expr(
             encoder_name
         ))
 
-        @inline function $decoder_name(buffer, position_ptr::PositionPointer, acting_version)
-            dimensions = $dimension_decoder(buffer, position_ptr[])
-            position_ptr[] += $dimension_header_length
-            return $decoder_name(buffer, 0, position_ptr, $block_length_get(dimensions),
-                acting_version, $num_in_group_get(dimensions), $count_zero_expr)
-        end
-
-        @inline function reset!(g::$decoder_name{T}, buffer::T, position_ptr::PositionPointer, acting_version) where {T}
-            dimensions = $dimension_decoder(buffer, position_ptr[])
-            position_ptr[] += $dimension_header_length
-            g.buffer = buffer
-            g.offset = 0
-            g.position_ptr = position_ptr
-            g.block_length = $block_length_get(dimensions)
-            g.acting_version = acting_version
-            g.count = $num_in_group_get(dimensions)
-            g.index = $count_zero_expr
-            return g
-        end
-
-        @inline function reset_missing!(g::$decoder_name{T}, buffer::T, position_ptr::PositionPointer, acting_version) where {T}
-            g.buffer = buffer
-            g.offset = 0
-            g.position_ptr = position_ptr
-            g.block_length = $(version_expr(ir, 0))
-            g.acting_version = acting_version
-            g.count = $count_zero_expr
-            g.index = $count_zero_expr
-            return g
-        end
-
-        @inline function wrap!(g::$decoder_name{T}, buffer::T, position_ptr::PositionPointer, acting_version) where {T}
-            return reset!(g, buffer, position_ptr, acting_version)
-        end
-
-        @inline function $encoder_name(buffer, count, position_ptr::PositionPointer)
-            if $(min_check === nothing ? :(count > $max_count) : :($min_check || count > $max_count))
-                error("count outside of allowed range")
-            end
-            dimensions = $dimension_encoder(buffer, position_ptr[])
-            $block_length_set(dimensions, $(block_length_expr(ir, block_length)))
-            $num_in_group_set(dimensions, count)
-            initial_position = position_ptr[]
-            position_ptr[] += $dimension_header_length
-            return $encoder_name(buffer, 0, position_ptr, initial_position, count, $count_zero_expr)
-        end
-
-        @inline function wrap!(g::$encoder_name{T}, buffer::T, count, position_ptr::PositionPointer) where {T}
-            if $(min_check === nothing ? :(count > $max_count) : :($min_check || count > $max_count))
-                error("count outside of allowed range")
-            end
-            dimensions = $dimension_encoder(buffer, position_ptr[])
-            $block_length_set(dimensions, $(block_length_expr(ir, block_length)))
-            $num_in_group_set(dimensions, count)
-            g.buffer = buffer
-            g.offset = 0
-            g.position_ptr = position_ptr
-            g.initial_position = position_ptr[]
-            g.count = $count_type_symbol(count)
-            g.index = $count_zero_expr
-            position_ptr[] += $dimension_header_length
-            return g
-        end
+        $(group_wrap_exprs...)
 
         sbe_header_size(::$abstract_type_name) = $dimension_header_length
         sbe_header_size(::Type{<:$abstract_type_name}) = $dimension_header_length
@@ -2046,36 +2896,11 @@ function generate_group_expr(
         sbe_position(g::$abstract_type_name) = g.position_ptr[]
         @inline sbe_position!(g::$abstract_type_name, position) = g.position_ptr[] = position
         sbe_position_ptr(g::$abstract_type_name) = g.position_ptr
-        @inline function next!(g::$abstract_type_name)
-            if g.index >= g.count
-                error("index >= count")
-            end
-            g.offset = sbe_position(g)
-            sbe_position!(g, g.offset + sbe_acting_block_length(g))
-            g.index += one($count_type_symbol)
-            return g
-        end
-        function Base.iterate(g::$abstract_type_name, state=nothing)
-            if g.index < g.count
-                g.offset = sbe_position(g)
-                sbe_position!(g, g.offset + sbe_acting_block_length(g))
-                g.index += one($count_type_symbol)
-                return g, state
-            else
-                return nothing
-            end
-        end
+        $(group_iteration_exprs...)
         Base.eltype(::Type{<:$decoder_name}) = $decoder_name
         Base.eltype(::Type{<:$encoder_name}) = $encoder_name
         Base.isdone(g::$abstract_type_name, state=nothing) = g.index >= g.count
         Base.length(g::$abstract_type_name) = Int(g.count)
-
-        function reset_count_to_index!(g::$encoder_name)
-            g.count = g.index
-            dimensions = $dimension_encoder(g.buffer, g.initial_position)
-            $num_in_group_set(dimensions, g.count)
-            return g.count
-        end
 
         $(generated_binding_doc_expr(
             "Set the encoded group count to the number of entries written and return the resulting count.",
@@ -2107,8 +2932,159 @@ function generate_group_expr(
     accessor_name_encoder = Symbol(string(accessor_name, "!"))
     accessor_group_count = Symbol(string(accessor_name, "_group_count!"))
 
-    if since_version > 0
-        push!(parent_accessors, quote
+    parent_accessor_methods = if precedence_checks
+        decoder_empty = precedence_access_expr(
+            decoder_model,
+            :decoder,
+            precedence_group_empty_key(group_path),
+        )
+        decoder_nonempty = precedence_access_expr(
+            decoder_model,
+            :decoder,
+            precedence_group_nonempty_key(group_path),
+        )
+        encoder_empty = precedence_access_expr(
+            encoder_model,
+            :encoder,
+            precedence_group_empty_key(group_path),
+        )
+        encoder_nonempty = precedence_access_expr(
+            encoder_model,
+            :encoder,
+            precedence_group_nonempty_key(group_path),
+        )
+        if since_version > 0
+            quote
+                @inline function $accessor_name(m::Decoder)
+                    if sbe_acting_version(m) <
+                       $(version_expr(ir, since_version))
+                        return $group_module_name.Decoder(
+                            m.buffer,
+                            0,
+                            sbe_position_ptr(m),
+                            $(version_expr(ir, 0)),
+                            sbe_acting_version(m),
+                            $count_zero_expr,
+                            $count_zero_expr,
+                            m.codec_state,
+                        )
+                    end
+                    group = $group_module_name.Decoder(
+                        m.buffer,
+                        sbe_position_ptr(m),
+                        sbe_acting_version(m),
+                        m.codec_state,
+                    )
+                    if group.count == 0
+                        $decoder_empty
+                    else
+                        $decoder_nonempty
+                    end
+                    return group
+                end
+
+                @inline function $(Symbol(accessor_name, "!"))(
+                    m::Decoder,
+                    group::$group_module_name.Decoder,
+                )
+                    if sbe_acting_version(m) <
+                       $(version_expr(ir, since_version))
+                        return $group_module_name.reset_missing!(
+                            group,
+                            m.buffer,
+                            sbe_position_ptr(m),
+                            sbe_acting_version(m),
+                            m.codec_state,
+                        )
+                    end
+                    $group_module_name.reset!(
+                        group,
+                        m.buffer,
+                        sbe_position_ptr(m),
+                        sbe_acting_version(m),
+                        m.codec_state,
+                    )
+                    if group.count == 0
+                        $decoder_empty
+                    else
+                        $decoder_nonempty
+                    end
+                    return group
+                end
+
+                @inline function $accessor_name_encoder(
+                    m::$parent_encoder_name,
+                    count,
+                )
+                    if count == 0
+                        $encoder_empty
+                    else
+                        $encoder_nonempty
+                    end
+                    return $group_module_name.Encoder(
+                        m.buffer,
+                        count,
+                        sbe_position_ptr(m),
+                        m.codec_state,
+                    )
+                end
+            end
+        else
+            quote
+                @inline function $accessor_name(m::Decoder)
+                    group = $group_module_name.Decoder(
+                        m.buffer,
+                        sbe_position_ptr(m),
+                        sbe_acting_version(m),
+                        m.codec_state,
+                    )
+                    if group.count == 0
+                        $decoder_empty
+                    else
+                        $decoder_nonempty
+                    end
+                    return group
+                end
+
+                @inline function $(Symbol(accessor_name, "!"))(
+                    m::Decoder,
+                    group::$group_module_name.Decoder,
+                )
+                    $group_module_name.reset!(
+                        group,
+                        m.buffer,
+                        sbe_position_ptr(m),
+                        sbe_acting_version(m),
+                        m.codec_state,
+                    )
+                    if group.count == 0
+                        $decoder_empty
+                    else
+                        $decoder_nonempty
+                    end
+                    return group
+                end
+
+                @inline function $accessor_name_encoder(
+                    m::$parent_encoder_name,
+                    count,
+                )
+                    if count == 0
+                        $encoder_empty
+                    else
+                        $encoder_nonempty
+                    end
+                    return $group_module_name.Encoder(
+                        m.buffer,
+                        count,
+                        sbe_position_ptr(m),
+                        m.codec_state,
+                    )
+                end
+            end
+        end
+    elseif since_version > 0
+        quote
             @inline function $accessor_name(m::$parent_abstract_type)
                 if sbe_acting_version(m) < $(version_expr(ir, since_version))
                     return $group_module_name.Decoder(m.buffer, 0, sbe_position_ptr(m), $(version_expr(ir, 0)),
@@ -2125,23 +3101,9 @@ function generate_group_expr(
             @inline function $accessor_name_encoder(m::$parent_abstract_type, count)
                 return $group_module_name.Encoder(m.buffer, count, sbe_position_ptr(m))
             end
-            $accessor_group_count(m::$parent_encoder_name, count) = $accessor_name_encoder(m, count)
-            $(Symbol(accessor_name, :_id))(::$parent_abstract_type) = $(template_id_expr(ir, group_id))
-            $(Symbol(accessor_name, :_since_version))(::$parent_abstract_type) = $(version_expr(ir, since_version))
-            $(Symbol(accessor_name, :_in_acting_version))(m::$parent_abstract_type) = sbe_acting_version(m) >= $(version_expr(ir, since_version))
-            $(generated_binding_doc_expr(group_accessor_doc(group_token), accessor_name))
-            $(generated_binding_doc_expr(
-                group_accessor_doc(group_token),
-                Symbol(accessor_name, "!")
-            ))
-            $(generated_binding_doc_expr(
-                "Create the `$(group_token.name)` group encoder with `count` entries.",
-                accessor_group_count
-            ))
-            export $accessor_name, $(Symbol(accessor_name, "!")), $accessor_group_count, $group_module_name
-        end)
+        end
     else
-        push!(parent_accessors, quote
+        quote
             @inline function $accessor_name(m::$parent_abstract_type)
                 return $group_module_name.Decoder(m.buffer, sbe_position_ptr(m), sbe_acting_version(m))
             end
@@ -2151,27 +3113,40 @@ function generate_group_expr(
             @inline function $accessor_name_encoder(m::$parent_abstract_type, count)
                 return $group_module_name.Encoder(m.buffer, count, sbe_position_ptr(m))
             end
-            $accessor_group_count(m::$parent_encoder_name, count) = $accessor_name_encoder(m, count)
-            $(Symbol(accessor_name, :_id))(::$parent_abstract_type) = $(template_id_expr(ir, group_id))
-            $(Symbol(accessor_name, :_since_version))(::$parent_abstract_type) = $(version_expr(ir, since_version))
-            $(Symbol(accessor_name, :_in_acting_version))(m::$parent_abstract_type) = sbe_acting_version(m) >= $(version_expr(ir, since_version))
-            $(generated_binding_doc_expr(group_accessor_doc(group_token), accessor_name))
-            $(generated_binding_doc_expr(
-                group_accessor_doc(group_token),
-                Symbol(accessor_name, "!")
-            ))
-            $(generated_binding_doc_expr(
-                "Create the `$(group_token.name)` group encoder with `count` entries.",
-                accessor_group_count
-            ))
-            export $accessor_name, $(Symbol(accessor_name, "!")), $accessor_group_count, $group_module_name
-        end)
+        end
     end
+
+    push!(parent_accessors, quote
+        $parent_accessor_methods
+        $accessor_group_count(m::$parent_encoder_name, count) =
+            $accessor_name_encoder(m, count)
+        $(Symbol(accessor_name, :_id))(::$parent_abstract_type) =
+            $(template_id_expr(ir, group_id))
+        $(Symbol(accessor_name, :_since_version))(::$parent_abstract_type) =
+            $(version_expr(ir, since_version))
+        $(Symbol(accessor_name, :_in_acting_version))(m::$parent_abstract_type) =
+            sbe_acting_version(m) >= $(version_expr(ir, since_version))
+        $(generated_binding_doc_expr(group_accessor_doc(group_token), accessor_name))
+        $(generated_binding_doc_expr(
+            group_accessor_doc(group_token),
+            Symbol(accessor_name, "!")
+        ))
+        $(generated_binding_doc_expr(
+            "Create the `$(group_token.name)` group encoder with `count` entries.",
+            accessor_group_count
+        ))
+        export $accessor_name, $(Symbol(accessor_name, "!")),
+            $accessor_group_count, $group_module_name
+    end)
 
     return [group_body], parent_accessors, accessor_name, group_module_name
 end
 
-function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
+function generate_message_expr(
+    message_tokens::Vector{IR.Token},
+    ir::IR.Ir;
+    precedence_checks::Bool=false,
+)
     msg_token = message_tokens[1]
     message_name = Symbol(format_struct_name(msg_token.name))
     abstract_type_name = Symbol(string("Abstract", message_name))
@@ -2180,6 +3155,32 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
     header_module = Symbol(format_struct_name(ir.header_structure.tokens[1].name))
     version_type_symbol = header_field_type(ir, "version")
     header_mismatch_prefix = "SBE header mismatch: expected template/schema $(msg_token.id)/$(ir.id), got "
+    encoder_model = precedence_checks ? build_field_precedence_model(
+        message_tokens,
+        string(message_name, ".Encoder");
+        latest_version_only=true,
+    ) : nothing
+    decoder_model = precedence_checks ? build_field_precedence_model(
+        message_tokens,
+        string(message_name, ".Decoder");
+        latest_version_only=false,
+    ) : nothing
+
+    precedence_helper_exprs = Expr[]
+    encoder_state_names_symbol = nothing
+    encoder_state_transitions_symbol = nothing
+    if precedence_checks
+        encoder_helpers, encoder_state_names_symbol, encoder_state_transitions_symbol =
+            generate_precedence_helpers(encoder_model, :encoder)
+        decoder_helpers, _, _ =
+            generate_precedence_helpers(decoder_model, :decoder)
+        append!(precedence_helper_exprs, encoder_helpers)
+        append!(precedence_helper_exprs, decoder_helpers)
+    end
+    precedence_helper_names = precedence_checks ? vcat(
+        precedence_helper_symbols(encoder_model, :encoder),
+        precedence_helper_symbols(decoder_model, :decoder),
+    ) : Symbol[]
 
     body = IR.get_message_body(message_tokens)
     fields, idx = split_components(collect(body), IR.Signal.BEGIN_FIELD, 1)
@@ -2199,6 +3200,17 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
 
     for field_tokens in fields
         inner = field_tokens[2]
+        field_path = field_tokens[1].name
+        decoder_access = precedence_checks ? precedence_access_expr(
+            decoder_model,
+            :decoder,
+            precedence_field_key(field_path),
+        ) : nothing
+        encoder_access = precedence_checks ? precedence_access_expr(
+            encoder_model,
+            :encoder,
+            precedence_field_key(field_path),
+        ) : nothing
         documentation = field_accessor_doc(field_tokens)
         push!(
             field_doc_exprs,
@@ -2217,16 +3229,48 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
             )
         end
         if inner.signal == IR.Signal.ENCODING
-            append!(field_exprs, generate_encoded_field_expr(field_tokens, abstract_type_name, decoder_name, encoder_name, ir))
+            append!(field_exprs, generate_encoded_field_expr(
+                field_tokens,
+                abstract_type_name,
+                decoder_name,
+                encoder_name,
+                ir;
+                decoder_access=decoder_access,
+                encoder_access=encoder_access,
+            ))
         elseif inner.signal == IR.Signal.BEGIN_ENUM
             push!(enum_imports, composite_member_module_name(inner))
-            append!(field_exprs, generate_enum_field_expr(field_tokens, abstract_type_name, decoder_name, encoder_name, ir))
+            append!(field_exprs, generate_enum_field_expr(
+                field_tokens,
+                abstract_type_name,
+                decoder_name,
+                encoder_name,
+                ir;
+                decoder_access=decoder_access,
+                encoder_access=encoder_access,
+            ))
         elseif inner.signal == IR.Signal.BEGIN_SET
             push!(enum_imports, composite_member_module_name(inner))
-            append!(field_exprs, generate_set_field_expr(field_tokens, abstract_type_name, decoder_name, encoder_name, ir))
+            append!(field_exprs, generate_set_field_expr(
+                field_tokens,
+                abstract_type_name,
+                decoder_name,
+                encoder_name,
+                ir;
+                decoder_access=decoder_access,
+                encoder_access=encoder_access,
+            ))
         elseif inner.signal == IR.Signal.BEGIN_COMPOSITE
             push!(composite_imports, composite_member_module_name(inner))
-            append!(field_exprs, generate_composite_field_expr(field_tokens, abstract_type_name, decoder_name, encoder_name, ir))
+            append!(field_exprs, generate_composite_field_expr(
+                field_tokens,
+                abstract_type_name,
+                decoder_name,
+                encoder_name,
+                ir;
+                decoder_access=decoder_access,
+                encoder_access=encoder_access,
+            ))
         end
     end
 
@@ -2236,7 +3280,13 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
             abstract_type_name,
             encoder_name,
             ir,
-            2
+            2;
+            precedence_checks=precedence_checks,
+            decoder_model=decoder_model,
+            encoder_model=encoder_model,
+            parent_path="",
+            root_message_name=message_name,
+            precedence_helper_names=precedence_helper_names,
         )
         append!(group_exprs, group_defs)
         append!(group_accessors, parent_accessors)
@@ -2259,8 +3309,90 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
                 decoder_name,
                 encoder_name,
                 ir;
-                external_tail=index == length(var_data)
+                external_tail=index == length(var_data),
+                decoder_model=decoder_model,
+                encoder_model=encoder_model,
+                qualified_path=var_data_tokens[1].name,
             )
+        )
+    end
+
+    message_state_fields = precedence_checks ?
+        [:(codec_state::CodecStatePointer)] : Expr[]
+    decoder_state_initializers = precedence_checks ?
+        [:(obj.codec_state = CodecStatePointer())] : Expr[]
+    encoder_state_initializers = precedence_checks ?
+        [:(obj.codec_state = CodecStatePointer())] : Expr[]
+    decoder_wrap_state_updates = precedence_checks ?
+        [precedence_decoder_wrap_expr(decoder_model, :m, :acting_version)] : Expr[]
+    encoder_wrap_state_updates = precedence_checks ?
+        [:(m.codec_state.value = UInt16($(encoder_model.latest_wrapped_state)))] :
+        Expr[]
+    precedence_imports = precedence_checks ? quote
+        using SBE: CodecStatePointer, throw_precedence_error
+        import SBE: check_encoding_is_complete
+    end : Expr(:block)
+
+    rewind_exprs = if precedence_checks
+        decoder_rewind_state = precedence_decoder_wrap_expr(
+            decoder_model,
+            :m,
+            :(sbe_acting_version(m)),
+        )
+        Expr[
+            quote
+                @inline function sbe_rewind!(m::$decoder_name)
+                    sbe_position!(m, m.offset + sbe_acting_block_length(m))
+                    $decoder_rewind_state
+                    return m
+                end
+            end,
+            quote
+                @inline function sbe_rewind!(m::$encoder_name)
+                    sbe_position!(m, m.offset + sbe_acting_block_length(m))
+                    m.codec_state.value =
+                        UInt16($(encoder_model.latest_wrapped_state))
+                    return m
+                end
+            end,
+        ]
+    else
+        Expr[
+            :(sbe_rewind!(m::$abstract_type_name) =
+                sbe_position!(m, m.offset + sbe_acting_block_length(m))),
+        ]
+    end
+
+    completion_exprs = Expr[]
+    if precedence_checks
+        terminal_condition = precedence_state_condition(
+            encoder_model.terminal_states,
+        )
+        push!(
+            completion_exprs,
+            quote
+                """
+                    check_encoding_is_complete(encoder)
+
+                Validate that every required repeating group and variable-data
+                transition has been completed. This check is explicit; querying
+                the encoded length does not imply completeness.
+                """
+                @inline function check_encoding_is_complete(m::$encoder_name)
+                    state = m.codec_state.value
+                    $terminal_condition && return nothing
+                    throw_precedence_error(
+                        "complete encoding",
+                        "check_encoding_is_complete",
+                        state,
+                        $encoder_state_names_symbol,
+                        $encoder_state_transitions_symbol,
+                        $(encoder_model.machine_name),
+                    )
+                end
+
+                export check_encoding_is_complete
+            end,
         )
     end
 
@@ -2274,6 +3406,7 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
         import SBE: sbe_block_length, sbe_template_id, sbe_schema_id, sbe_schema_version
         import SBE: sbe_acting_block_length, sbe_acting_version, sbe_rewind!
         import SBE: sbe_encoded_length, sbe_decoded_length, sbe_semantic_type, sbe_description
+        $precedence_imports
         abstract type $abstract_type_name{T} <: AbstractSbeMessage{T} end
 
         using ..$header_module
@@ -2289,6 +3422,8 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
             return view(a, 1:len)
         end
 
+        $(precedence_helper_exprs...)
+
         mutable struct $decoder_name{T<:AbstractArray{UInt8}} <: $abstract_type_name{T}
             buffer::T
             frame_offset::Int64
@@ -2296,6 +3431,7 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
             position_ptr::PositionPointer
             acting_block_length::UInt16
             acting_version::$version_type_symbol
+            $(message_state_fields...)
             function $decoder_name{T}() where {T<:AbstractArray{UInt8}}
                 obj = new{T}()
                 obj.frame_offset = Int64(0)
@@ -2303,6 +3439,7 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
                 obj.position_ptr = PositionPointer()
                 obj.acting_block_length = UInt16(0)
                 obj.acting_version = $version_type_symbol(0)
+                $(decoder_state_initializers...)
                 return obj
             end
         end
@@ -2312,11 +3449,13 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
             frame_offset::Int64
             offset::Int64
             position_ptr::PositionPointer
+            $(message_state_fields...)
             function $encoder_name{T}() where {T<:AbstractArray{UInt8}}
                 obj = new{T}()
                 obj.frame_offset = Int64(0)
                 obj.offset = Int64(0)
                 obj.position_ptr = PositionPointer()
+                $(encoder_state_initializers...)
                 return obj
             end
         end
@@ -2360,6 +3499,7 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
             m.acting_block_length = UInt16(acting_block_length)
             m.acting_version = $version_type_symbol(acting_version)
             m.position_ptr[] = m.offset + m.acting_block_length
+            $(decoder_wrap_state_updates...)
             return m
         end
 
@@ -2385,6 +3525,7 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
             m.frame_offset = Int64(offset)
             m.offset = Int64(offset)
             m.position_ptr[] = m.offset + $(block_length_expr(ir, msg_token.encoded_length))
+            $(encoder_wrap_state_updates...)
             return m
         end
 
@@ -2438,7 +3579,7 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
         sbe_acting_block_length(::$encoder_name) = $(block_length_expr(ir, msg_token.encoded_length))
         sbe_acting_version(m::$decoder_name) = m.acting_version
         sbe_acting_version(::$encoder_name) = $(version_expr(ir, ir.version))
-        sbe_rewind!(m::$abstract_type_name) = sbe_position!(m, m.offset + sbe_acting_block_length(m))
+        $(rewind_exprs...)
         sbe_encoded_length(m::$abstract_type_name) = sbe_position(m) - m.offset
 
         Base.sizeof(m::$abstract_type_name) = sbe_encoded_length(m)
@@ -2469,6 +3610,7 @@ function generate_message_expr(message_tokens::Vector{IR.Token}, ir::IR.Ir)
         $(group_exprs...)
         $(group_accessors...)
         $(var_data_exprs...)
+        $(completion_exprs...)
 
         @inline function sbe_decoded_length(m::$abstract_type_name)
             skipper = $decoder_name(typeof(sbe_buffer(m)))
@@ -2815,7 +3957,11 @@ function module_name_from_package(package_name::String)
     return Symbol(sanitize_identifier(raw))
 end
 
-function generate_ir_module_expr(ir::IR.Ir; module_name::Union{Nothing, Symbol, String}=nothing)
+function generate_ir_module_expr(
+    ir::IR.Ir;
+    module_name::Union{Nothing, Symbol, String}=nothing,
+    precedence_checks::Bool=false,
+)
     module_name = module_name === nothing ? module_name_from_package(ir.package_name) :
         Symbol(sanitize_identifier(String(module_name)))
     alias_raw = replace(ir.package_name, r"[^A-Za-z0-9_]" => "_")
@@ -2876,7 +4022,14 @@ function generate_ir_module_expr(ir::IR.Ir; module_name::Union{Nothing, Symbol, 
     end
 
     for tokens in values(ir.messages_by_id)
-        push!(message_exprs, generate_message_expr(tokens, ir))
+        push!(
+            message_exprs,
+            generate_message_expr(
+                tokens,
+                ir;
+                precedence_checks=precedence_checks,
+            ),
+        )
     end
 
     module_quoted = quote

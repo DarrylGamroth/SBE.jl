@@ -23,6 +23,7 @@ such as `String` can allocate.
 - **Endianness**: Little-endian (default) and big-endian byte order
 - **Character Encodings**: ASCII and UTF-8 with zero-copy StringView
 - **Split Frames**: Zero-copy terminal variable data across transport-owned regions
+- **Checked Codecs**: Opt-in generated field-order diagnostics with no unchecked hot-path overhead
 
 ## Usage
 
@@ -167,6 +168,35 @@ and variable-length data share a stateful cursor: access them in schema order an
 do not retain group entries as independent objects. Generated modules, codec
 types, fields, groups, enums, and set choices include schema-derived docstrings,
 so Julia's `?` help and editor hover documentation describe these contracts.
+
+### Checked Field Order
+
+For development and testing, generate a checked codec that diagnoses invalid
+group and variable-data traversal:
+
+```julia
+schema_name = SBE.@load_schema(
+    "example-schema.xml";
+    precedence_checks=true,
+)
+CheckedBaseline = getfield(@__MODULE__, schema_name)
+
+car = CheckedBaseline.Car.Encoder(buffer)
+# Encode groups and variable-data fields in schema order.
+SBE.check_encoding_is_complete(car)
+```
+
+The same keyword is supported by `generate`, `generate_from_ir`, and
+`@load_sbeir`. It is `false` by default. Selection happens during code
+generation: ordinary codecs contain no precedence state, listener calls, or
+runtime mode branches. Checked messages and their nested groups share a compact
+state value, and correctly ordered warmed operations remain allocation-free.
+Invalid access throws `SBE.PrecedenceError` with the attempted operation,
+current state, and valid next operations.
+
+`check_encoding_is_complete` is generated only for checked encoders and must be
+called explicitly. `sbe_encoded_length` reports cursor position; it does not
+prove that required groups and variable-data fields were encoded.
 
 For allocation-sensitive reuse, construct an unwrapped flyweight from the buffer
 type and wrap it repeatedly:

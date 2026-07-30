@@ -17,6 +17,12 @@ default, and creates the token model defined in [`src/IR.jl`](../src/IR.jl). The
 [`src/ir_codegen.jl`](../src/ir_codegen.jl), so equivalent XML- and IR-derived schemas
 produce the same generated Julia API.
 
+When `precedence_checks=true`, the generator also derives encoder and decoder
+field-precedence state machines from the IR before emitting source. The encoder
+model selects the newest schema version; the decoder model represents each
+relevant `acting_version`. This is a generation-time branch: the default
+unchecked source does not contain precedence state or runtime listener calls.
+
 | Input | IR entry point | Codec-generation entry point |
 |---|---|---|
 | XML file | `generate_ir_file` | `generate` or `@load_schema` |
@@ -47,6 +53,13 @@ caller-owned `AbstractArray{UInt8}`.
 Generated public modules, codec types, fields, groups, enums, and set choices carry
 schema-derived docstrings. Value setters return their receiver; no-value fixed-array
 setters return a writable zero-copy view.
+
+Checked messages add one compact mutable state value. Every top-level and nested
+group flyweight shares that value with its parent message. Generated inline
+listeners transition integer states for group counts, `next!`, group fields,
+nested groups, and variable data. Invalid transitions call a cold error path.
+Checked encoders also extend `check_encoding_is_complete`; encoded-length queries
+remain independent of completeness.
 
 ## Logical frames and transport boundaries
 
@@ -117,6 +130,9 @@ loading, and owned result materialization such as `String` are outside that scop
 
 [`test/test_allocations.jl`](../test/test_allocations.jl) checks representative fixed
 fields, composites, metadata, variable data, and a warmed repeating-group loop.
+[`test/test_precedence_checks.jl`](../test/test_precedence_checks.jl) separately
+enforces zero allocations for a complete warmed checked encode/decode path and
+verifies that the default generated source contains no checking artifacts.
 [`benchmark/benchmarks.jl`](../benchmark/benchmarks.jl) separates setup-inclusive paths
 from retained-codec reuse. These are maintained evidence for specific paths, not a
 blanket allocation guarantee for every schema, buffer type, Julia version, or caller.

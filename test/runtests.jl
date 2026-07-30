@@ -36,6 +36,7 @@ const Optional = load_generated_schema(:Optional)
 const Versioned = load_generated_schema(:Versioned)
 const CodeGenerationTest = load_generated_schema(:CodeGenerationTest)
 const OrderCheck = load_generated_schema(:OrderCheck)
+const OrderCheckChecked = load_generated_schema(:OrderCheckChecked)
 const CompositeElements = load_generated_schema(:CompositeElements)
 const Issue505 = load_generated_schema(:Issue505)
 const Issue889 = load_generated_schema(:Issue889)
@@ -110,6 +111,7 @@ const TEST_FILES = [
     "test_ir_utils.jl",
     # Integration and upstream parity
     "test_complex_patterns.jl",
+    "test_precedence_checks.jl",
     "test_allocations.jl",
     "test_java_fixtures.jl",
     "test_java_mirror.jl",
