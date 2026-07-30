@@ -188,6 +188,15 @@ Return the description of this message type.
 """
 function sbe_description end
 
+"""
+Validate that a checked SBE encoder has completed every required repeating
+group and variable-length data transition.
+
+This method is generated only when code generation uses
+`precedence_checks=true`.
+"""
+function check_encoding_is_complete end
+
 # ============================================================================
 # Include Source Files
 # ============================================================================
@@ -195,6 +204,9 @@ function sbe_description end
 # Intermediate Representation (IR)
 include("IR.jl")
 import .IR
+
+# Generated field-precedence state models and checked-codec runtime support
+include("precedence.jl")
 
 # IR generation from XML
 include("ir_generator.jl")
@@ -217,7 +229,7 @@ include("codegen_utils.jl")
 # ============================================================================
 
 """
-    @load_schema xml_path; module_name=nothing
+    @load_schema xml_path; module_name=nothing, precedence_checks=false
 
 Generate an SBE schema during macro expansion and emit its codec module as
 ordinary top-level Julia syntax.
@@ -235,6 +247,7 @@ normally without `Base.invokelatest`.
 # Arguments
 - `xml_path`: Literal path to the SBE XML schema file
 - `module_name`: Optional literal override for the generated module name
+- `precedence_checks`: Generate field-order checks when literal `true`
 
 # Returns
 The generated module name as a `Symbol`.
@@ -334,6 +347,7 @@ macro load_schema(args...)
     validate_expr = true
     warnings_fatal_expr = false
     suppress_warnings_expr = false
+    precedence_checks_expr = false
 
     for arg in args
         if arg isa Expr && arg.head == :parameters
@@ -349,6 +363,8 @@ macro load_schema(args...)
                     warnings_fatal_expr = value
                 elseif name == :suppress_warnings
                     suppress_warnings_expr = value
+                elseif name == :precedence_checks
+                    precedence_checks_expr = value
                 else
                     error("Unsupported @load_schema keyword argument: $name")
                 end
@@ -374,6 +390,11 @@ macro load_schema(args...)
         "@load_schema",
         :suppress_warnings
     )
+    precedence_checks = _macro_literal_bool(
+        precedence_checks_expr,
+        "@load_schema",
+        :precedence_checks,
+    )
 
     schema = parse_xml_schema_file(
         xml_path;
@@ -383,12 +404,16 @@ macro load_schema(args...)
     )
     module_name = _macro_module_name(schema.package_name, module_name_override)
     ir = generate_ir(schema)
-    code = generate_from_ir(ir; module_name=module_name)
+    code = generate_from_ir(
+        ir;
+        module_name=module_name,
+        precedence_checks=precedence_checks,
+    )
     return esc(_generated_module_expansion(__module__, module_name, code, xml_path))
 end
 
 """
-    @load_sbeir ir_path; module_name=nothing
+    @load_sbeir ir_path; module_name=nothing, precedence_checks=false
 
 Decode a Java-compatible `.sbeir` file and generate Julia codecs during macro
 expansion. The macro emits the codec module as top-level syntax. The path and
@@ -399,6 +424,7 @@ top-level use, idempotence, and world-age behavior are the same as for
 macro load_sbeir(args...)
     ir_path_expr = nothing
     module_name_expr = :nothing
+    precedence_checks_expr = false
 
     for arg in args
         if arg isa Expr && arg.head == :parameters
@@ -408,6 +434,8 @@ macro load_sbeir(args...)
                 name, value = kw.args
                 if name == :module_name || name == :module
                     module_name_expr = value
+                elseif name == :precedence_checks
+                    precedence_checks_expr = value
                 else
                     error("Unsupported @load_sbeir keyword argument: $name")
                 end
@@ -422,9 +450,18 @@ macro load_sbeir(args...)
     ir_path_expr === nothing && error("@load_sbeir requires an IR path")
     ir_path = _macro_literal_path(ir_path_expr, __source__, "@load_sbeir")
     module_name_override = _macro_literal_module_name(module_name_expr, "@load_sbeir")
+    precedence_checks = _macro_literal_bool(
+        precedence_checks_expr,
+        "@load_sbeir",
+        :precedence_checks,
+    )
     ir = decode_ir(ir_path)
     module_name = _macro_module_name(ir.package_name, module_name_override)
-    code = generate_from_ir(ir; module_name=module_name)
+    code = generate_from_ir(
+        ir;
+        module_name=module_name,
+        precedence_checks=precedence_checks,
+    )
     return esc(_generated_module_expansion(__module__, module_name, code, ir_path))
 end
 
@@ -451,6 +488,7 @@ export sbe_frame_offset, sbe_frame_length
 export sbe_template_id, sbe_schema_id, sbe_schema_version, sbe_block_length
 export sbe_acting_block_length, sbe_position_ptr, sbe_position, sbe_position!
 export sbe_rewind!, sbe_decoded_length, sbe_semantic_type, sbe_description
+export check_encoding_is_complete, PrecedenceError
 
 # Export utility functions
 export SbeFrame, sbe_prefix, sbe_tail, sbe_regions, sbe_wire_length, to_string

@@ -39,6 +39,7 @@ normalization.
 | SBE-COMPAT-XINCLUDE-001 | Resolve the relative XML include exercised by SbeTool's parser suite. | Path-aware `parse_xml_schema_file` and `generate_ir_file`. | `sub/basic-schema.xml` differential with SbeTool XInclude enabled. | Verified for the upstream relative XML case |
 | SBE-COMPAT-WIRE-001 | Decode SbeTool output and produce the same bytes. | Generated Julia codecs. | Java-produced baseline, extension, and keyword fixtures in `test/test_java_fixtures.jl`; Julia output is byte-compared with each fixture. | Verified for the three maintained fixtures |
 | SBE-COMPAT-WIRE-002 | Have a generated Java codec decode Julia output. | Baseline Julia encoder plus `VerifyCarFixture.java`. | Linux CI regenerates Java codecs and runs the Julia-to-Java baseline verifier. | Verified for the baseline fixture |
+| SBE-COMPAT-PRECEDENCE-001 | Diagnose unsafe group and variable-data traversal using SbeTool's field-precedence semantics. | Opt-in IR-derived encoder/decoder state models selected with `precedence_checks=true`. | Focused valid, invalid, nested, versioned, completion, external-tail, byte-parity, and allocation cases use upstream `field-order-check-schema.xml`. | Verified for the maintained focused cases |
 | SBE-COMPAT-XSD-001 | Match SbeTool's optional external-XSD validation mode. | No external-XSD processor is exposed. Semantic schema validation is covered by SBE-COMPAT-SCHEMA-001. | None. | Not supported |
 
 ## Scope of the claim

@@ -22,6 +22,17 @@ end
 
 end
 
+module CheckedSbeIrMacroHost
+using SBE
+
+const LOADED_NAME = SBE.@load_sbeir(
+    "resources/ir-basic-schema.sbeir";
+    module_name=:CheckedFromSbeIr,
+    precedence_checks=true,
+)
+
+end
+
 @testset "IR Code Generation" begin
     ir_path = joinpath(@__DIR__, "resources", "ir-basic-schema.sbeir")
     ir = SBE.decode_ir(ir_path)
@@ -59,6 +70,13 @@ end
         @test SbeIrMacroWorldAgeHost.LOADED_NAME == :GeneratedFromSbeIr
         @test isdefined(SbeIrMacroWorldAgeHost, :GeneratedFromSbeIr)
         @test SbeIrMacroWorldAgeHost.encode_then_decode_order_id(UInt64(1234)) == UInt64(1234)
+        @test CheckedSbeIrMacroHost.LOADED_NAME == :CheckedFromSbeIr
+        buffer = zeros(UInt8, 64)
+        codec = CheckedSbeIrMacroHost.CheckedFromSbeIr.Order
+        encoder = codec.Encoder(buffer)
+        codec.orderId!(encoder, UInt64(9))
+        codec.note!(encoder, UInt8[])
+        @test SBE.check_encoding_is_complete(encoder) === nothing
     end
 
     @testset "Invalid usage" begin
@@ -66,6 +84,13 @@ end
         @test_throws SystemError macroexpand(
             Main,
             :(SBE.@load_sbeir "resources/missing.sbeir"),
+        )
+        @test_throws ArgumentError macroexpand(
+            Main,
+            :(SBE.@load_sbeir(
+                "resources/ir-basic-schema.sbeir";
+                precedence_checks=enabled,
+            )),
         )
     end
 end

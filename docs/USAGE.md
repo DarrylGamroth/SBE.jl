@@ -281,6 +281,57 @@ operations do not allocate. Input construction, conversions that necessarily
 produce owned values such as `String` or `collect`, compilation, and exceptional
 paths are outside the zero-allocation contract.
 
+### Checked Field Precedence
+
+Groups and variable-length data use one shared cursor. During development, opt
+into generated precedence checks to turn an incorrect traversal into an
+actionable `SBE.PrecedenceError`:
+
+```julia
+checked_name = SBE.@load_schema(
+    "path/to/schema.xml";
+    module_name=:CheckedBaseline,
+    precedence_checks=true,
+)
+CheckedBaseline = getfield(@__MODULE__, checked_name)
+
+encoder = CheckedBaseline.Car.Encoder(buffer)
+# Encode fixed fields, groups, and variable data in schema order.
+SBE.check_encoding_is_complete(encoder)
+```
+
+All generation forms accept the same keyword:
+
+```julia
+SBE.generate(
+    "schema.xml",
+    "generated/CheckedSchema.jl";
+    precedence_checks=true,
+)
+SBE.generate_from_ir(
+    "schema.sbeir";
+    precedence_checks=true,
+)
+SBE.@load_sbeir "schema.sbeir" precedence_checks=true
+```
+
+The option is generation-time specialization, not a mutable runtime setting.
+With the default `precedence_checks=false`, generated messages and groups do not
+contain a state field, listener call, completion method, or mode branch. Checked
+codecs use an encoder model for the newest schema version and decoder models for
+the relevant `acting_version` values. Nested groups share their parent message's
+state, so sibling and nested ordering is validated as one traversal.
+
+Checked accessors validate group counts, `next!`, fixed fields inside group
+elements, nested groups, variable-data length/read/skip/write operations, and
+the terminal `{field}_external!` setter. Successful warmed operations are
+allocation-free; constructing and formatting an exception may allocate.
+
+Call `check_encoding_is_complete(encoder)` after encoding. It detects required
+groups or variable-data fields that were omitted or left incomplete.
+`sbe_encoded_length` deliberately remains a position query and does not perform
+that validation.
+
 ## Decoding
 
 Decoders read directly from the same buffer.
