@@ -10,7 +10,7 @@
   <packaging>pom</packaging>
 
   <properties>
-    <sbe.version>1.39.0</sbe.version>
+    <sbe.version>1.40.1</sbe.version>
   </properties>
 
   <dependencies>
